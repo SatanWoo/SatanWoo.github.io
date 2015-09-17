@@ -83,8 +83,7 @@
     
     <div class="article-entry" itemprop="articleBody">
       
-        <p>###背景介绍</p>
-<p>现在的移动App基本上免不了和网络传输打交道，我们经常需要和服务器进行数据的传输，常用的数据格式无外乎XML或者JSON。这也就引出了一个新的话题，如何将获得的数据实际应用到我们的App中？答案很简单，建立Model。我们拿到的网络传输数据，无非就是一种以JSON格式标准划分的字符串罢了，我们需要将字符串解析到相应的字段中来，否则如果每次我们都需要直接和网络字符串打交道，那也太复杂了。在刚学习iOS开发的时候，那个时候看了Stanford老爷爷讲的开发教程，里面在涉及<b>Core Data</b>的章节曾经写过这样的一段代码：</p>
+        <h3 id="背景介绍">背景介绍</h3><p>现在的移动App基本上免不了和网络传输打交道，我们经常需要和服务器进行数据的传输，常用的数据格式无外乎XML或者JSON。这也就引出了一个新的话题，如何将获得的数据实际应用到我们的App中？答案很简单，建立Model。我们拿到的网络传输数据，无非就是一种以JSON格式标准划分的字符串罢了，我们需要将字符串解析到相应的字段中来，否则如果每次我们都需要直接和网络字符串打交道，那也太复杂了。在刚学习iOS开发的时候，那个时候看了Stanford老爷爷讲的开发教程，里面在涉及<b>Core Data</b>的章节曾经写过这样的一段代码：</p>
 <pre><code>+ (XXXModel *)insertModelWithDictionary:(<span class="built_in">NSDictionary</span> *)dict inContext:(<span class="built_in">NSManagedObjectContext</span> *)context
 {
     <span class="keyword">if</span> (dict == <span class="literal">nil</span> || ![dict isKindOf[<span class="built_in">NSDictionary</span> class]]) <span class="keyword">return</span> <span class="literal">nil</span>;
@@ -743,7 +742,7 @@ CountryModel<span class="keyword">*</span> country = [[CountryModel alloc] initW
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/09/17/code-of-JSONModel/" data-id="cieo804rg0003pxi1q2kijajs" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/09/17/code-of-JSONModel/" data-id="cieo82emq0003s5i1m7ti3ymk" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
@@ -791,7 +790,7 @@ CountryModel<span class="keyword">*</span> country = [[CountryModel alloc] initW
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/09/11/A-New-Start/" data-id="cieo804qh0000pxi1izwchvcj" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/09/11/A-New-Start/" data-id="cieo82elc0000s5i1qt9wv901" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
