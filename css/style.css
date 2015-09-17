@@ -947,6 +947,10 @@ a.article-title:hover {
   max-width: 100%;
   margin: 0 auto;
 }
+table th {
+  border-bottom: 2px solid;
+  min-width: 100px;
+}
 #comments {
   background: #fff;
   -webkit-box-shadow: 1px 2px 3px #ddd;

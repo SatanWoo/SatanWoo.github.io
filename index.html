@@ -202,34 +202,13 @@ CountryModel<span class="keyword">*</span> country = [[CountryModel alloc] initW
 }
 </code></pre><p>我们分七步来解析这个函数：</p>
 <ul>
-<li><ol>
 <li>检查参数dict是不是空，是空直接解析失败</li>
-</ol>
-</li>
-<li><ol>
 <li>检查参数dict是不是NSDictionary或其子类的实例，是空直接解析失败</li>
-</ol>
-</li>
-<li><ol>
 <li><b>关键步骤</b>：创建JSONModel，创建失败直接滚粗，千万别小看这一步哦，具体我们下文说</li>
-</ol>
-</li>
-<li><ol>
 <li><b>关键步骤</b>：这是一个通过检查是不是有没被映射到的property的过程，如果有存在疏漏的property，那么会导致解析失败，触发Crash</li>
-</ol>
-</li>
-<li><ol>
 <li><b>关键步骤</b>：这是真正将解析的值对应的赋予Model的property的阶段</li>
-</ol>
-</li>
-<li><ol>
 <li>进行自定义的检查工作，比如避免直接触发Crash之类的</li>
-</ol>
-</li>
-<li><ol>
 <li>得到了正确的model，返回给程序使用。</li>
-</ol>
-</li>
 </ul>
 <p>下面我们来着重分析最重要的三个步骤</p>
 <h5 id="重点1:_第三步_[self_init]">重点1: 第三步 [self init]</h5><p>[self init]的代码调用了init初始化函数，实现如下，我们主要关注的是其中<em>[self <strong>setup</strong>]</em></p>
@@ -742,7 +721,7 @@ CountryModel<span class="keyword">*</span> country = [[CountryModel alloc] initW
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/09/17/code-of-JSONModel/" data-id="cieo82emq0003s5i1m7ti3ymk" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/09/17/code-of-JSONModel/" data-id="cieo8osb70003z7i15mf0ytud" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
@@ -790,7 +769,7 @@ CountryModel<span class="keyword">*</span> country = [[CountryModel alloc] initW
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/09/11/A-New-Start/" data-id="cieo82elc0000s5i1qt9wv901" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/09/11/A-New-Start/" data-id="cieo8osa80000z7i1axe5285u" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
