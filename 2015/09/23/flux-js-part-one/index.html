@@ -1,0 +1,472 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  
+  <title>flux-js-part-one | Hexo</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+  <meta name="description" content="Flux源码解析 第一章Flux是Facebook推出的一个新的Web架构，用来构建新一代的客户端的Web程序，今天我们来解析下其中的源码：Dispatcher.js和Invariant.js
+准备工作建议大家先了解一下什么是Flux架构，Facebook的官网上有非常详细的解释:链接点我
+Invariant.js首先让我们来看下Invariant.js的代码内容，非常短：
+&quot;use strict">
+<meta property="og:type" content="article">
+<meta property="og:title" content="flux-js-part-one">
+<meta property="og:url" content="http://satanwoo.github.io/2015/09/23/flux-js-part-one/index.html">
+<meta property="og:site_name" content="Hexo">
+<meta property="og:description" content="Flux源码解析 第一章Flux是Facebook推出的一个新的Web架构，用来构建新一代的客户端的Web程序，今天我们来解析下其中的源码：Dispatcher.js和Invariant.js
+准备工作建议大家先了解一下什么是Flux架构，Facebook的官网上有非常详细的解释:链接点我
+Invariant.js首先让我们来看下Invariant.js的代码内容，非常短：
+&quot;use strict">
+<meta property="og:updated_time" content="2015-09-23T16:18:31.000Z">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="flux-js-part-one">
+<meta name="twitter:description" content="Flux源码解析 第一章Flux是Facebook推出的一个新的Web架构，用来构建新一代的客户端的Web程序，今天我们来解析下其中的源码：Dispatcher.js和Invariant.js
+准备工作建议大家先了解一下什么是Flux架构，Facebook的官网上有非常详细的解释:链接点我
+Invariant.js首先让我们来看下Invariant.js的代码内容，非常短：
+&quot;use strict">
+  
+    <link rel="alternative" href="/atom.xml" title="Hexo" type="application/atom+xml">
+  
+  
+    <link rel="icon" href="/favicon.png">
+  
+  <link href="//fonts.googleapis.com/css?family=Source+Code+Pro" rel="stylesheet" type="text/css">
+  <link rel="stylesheet" href="/css/style.css" type="text/css">
+  
+
+</head>
+<body>
+  <div id="container">
+    <div id="wrap">
+      <header id="header">
+  <div id="banner"></div>
+  <div id="header-outer" class="outer">
+    <div id="header-title" class="inner">
+      <h1 id="logo-wrap">
+        <a href="/" id="logo">Hexo</a>
+      </h1>
+      
+    </div>
+    <div id="header-inner" class="inner">
+      <nav id="main-nav">
+        <a id="main-nav-toggle" class="nav-icon"></a>
+        
+          <a class="main-nav-link" href="/">Home</a>
+        
+          <a class="main-nav-link" href="/archives">Archives</a>
+        
+      </nav>
+      <nav id="sub-nav">
+        
+          <a id="nav-rss-link" class="nav-icon" href="/atom.xml" title="RSS Feed"></a>
+        
+        <a id="nav-search-btn" class="nav-icon" title="Search"></a>
+      </nav>
+      <div id="search-form-wrap">
+        <form action="//google.com/search" method="get" accept-charset="UTF-8" class="search-form"><input type="search" name="q" results="0" class="search-form-input" placeholder="Search"><button type="submit" class="search-form-submit">&#xF002;</button><input type="hidden" name="sitesearch" value="http://satanwoo.github.io"></form>
+      </div>
+    </div>
+  </div>
+</header>
+      <div class="outer">
+        <section id="main"><article id="post-flux-js-part-one" class="article article-type-post" itemscope itemprop="blogPost">
+  <div class="article-meta">
+    <a href="/2015/09/23/flux-js-part-one/" class="article-date">
+  <time datetime="2015-09-23T10:37:36.000Z" itemprop="datePublished">2015-09-23</time>
+</a>
+    
+  </div>
+  <div class="article-inner">
+    
+    
+      <header class="article-header">
+        
+  
+    <h1 class="article-title" itemprop="name">
+      flux-js-part-one
+    </h1>
+  
+
+      </header>
+    
+    <div class="article-entry" itemprop="articleBody">
+      
+        <h3 id="Flux源码解析_第一章">Flux源码解析 第一章</h3><p>Flux是Facebook推出的一个新的Web架构，用来构建新一代的客户端的Web程序，今天我们来解析下其中的源码：Dispatcher.js和Invariant.js</p>
+<h4 id="准备工作">准备工作</h4><p>建议大家先了解一下什么是Flux架构，Facebook的官网上有非常详细的解释:<a href="http://facebook.github.io/flux/docs/overview.html#content" target="_blank" rel="external">链接点我</a></p>
+<h4 id="Invariant-js">Invariant.js</h4><p>首先让我们来看下Invariant.js的代码内容，非常短：</p>
+<pre><code><span class="pi">"use strict"</span>;
+
+<span class="keyword">var</span> invariant = <span class="function"><span class="keyword">function</span>(<span class="params">condition, format, a, b, c, d, e, f</span>) </span>{
+  <span class="number">1.</span> 
+  <span class="keyword">if</span> (__DEV__) {
+    <span class="keyword">if</span> (format === <span class="literal">undefined</span>) {
+      <span class="keyword">throw</span> <span class="keyword">new</span> <span class="built_in">Error</span>(<span class="string">'invariant requires an error message argument'</span>);
+    }
+  }
+
+  <span class="number">2.</span> 
+  <span class="keyword">if</span> (!condition) {
+    <span class="keyword">var</span> error;
+    <span class="keyword">if</span> (format === <span class="literal">undefined</span>) {
+      error = <span class="keyword">new</span> <span class="built_in">Error</span>(
+        <span class="string">'Minified exception occurred; use the non-minified dev environment '</span> +
+        <span class="string">'for the full error message and additional helpful warnings.'</span>
+      );
+    } <span class="keyword">else</span> {
+      <span class="keyword">var</span> args = [a, b, c, d, e, f];
+      <span class="keyword">var</span> argIndex = <span class="number">0</span>;
+      error = <span class="keyword">new</span> <span class="built_in">Error</span>(
+        <span class="string">'Invariant Violation: '</span> +
+        format.replace(<span class="regexp">/%s/g</span>, <span class="function"><span class="keyword">function</span>(<span class="params"></span>) </span>{ <span class="keyword">return</span> args[argIndex++]; })
+      );
+    }
+
+    error.framesToPop = <span class="number">1</span>; <span class="comment">// we don't care about invariant's own frame</span>
+    <span class="keyword">throw</span> error;
+  }
+};
+
+<span class="built_in">module</span>.exports = invariant;
+</code></pre><p>‘use strict’ 不必多说，就是构建了一个严格的JS的执行环境。<br>整个Invariant.js其实就是定义了一个函数, 名字叫Invariant， 他的参数包含一个condition（判断条件），一个自定义的报错格式，以及一系列的自定义参数。</p>
+<p><b>第一次读Flux.js源码的时候，这里采用的还是arguments可变参数的定义方式，今天写这篇文章的时候竟然就改写了，晕！</b></p>
+<p>然后我们来分两个段落查看下其中的代码含义。</p>
+<p>第一部分，定义了一个<strong>dev</strong>变量，这个变量就是一种类似于配置的环境变量。玩过JavaScript或者ruby的人可能都有所了解，比如非常著名的’development’, ‘product’, ‘test’就是与之类似的。<br>如果没有format是个未定义的变量（在这里就是没有传入第二个参数），那么就保个错。</p>
+<p>第二部分也很简单，如果condition为假值，说明这个条件没被满足，那么执行报错的功能，报错的时候使用的提示格式就是传入的format, 参数则为自定义的a-f。</p>
+<p>总之，这个Invariant.js的作用就是构建了一个类似<b>iOS中NSAssert</b>的东西。</p>
+<p>哦，这里要指出一下 <b>/%s/g</b>这个正则表达式，这玩意啥意思呢。其实就类似于我们常常用的printf函数，可以简单理解为，把format中所有的%s, 替换成自定义的参数，g表示为global。</p>
+<h4 id="重点:Dispatcher-js">重点:Dispatcher.js</h4><p>再让我们来看一看Dispatcher.js，闲话不多话，上代码。</p>
+<pre><code><span class="pi">'use strict'</span>;
+
+<span class="keyword">var</span> invariant = <span class="built_in">require</span>(<span class="string">'./invariant'</span>);
+
+<span class="keyword">export</span> <span class="keyword">type</span> DispatchToken = <span class="built_in">string</span>;
+
+<span class="keyword">var</span> _prefix = <span class="string">'ID_'</span>;
+
+<span class="keyword">class</span> Dispatcher&lt;TPayload&gt; {
+  _callbacks: {[key: DispatchToken]: (payload: TPayload) =&gt; <span class="built_in">void</span>};
+  _isDispatching: <span class="built_in">boolean</span>;
+  _isHandled: {[key: DispatchToken]: <span class="built_in">boolean</span>};
+  _isPending: {[key: DispatchToken]: <span class="built_in">boolean</span>};
+  _lastID: <span class="built_in">number</span>;
+  _pendingPayload: TPayload;
+
+  <span class="constructor"><span class="keyword">constructor</span>() </span>{
+    <span class="keyword">this</span>._callbacks = {};
+    <span class="keyword">this</span>._isDispatching = <span class="literal">false</span>;
+    <span class="keyword">this</span>._isHandled = {};
+    <span class="keyword">this</span>._isPending = {};
+    <span class="keyword">this</span>._lastID = <span class="number">1</span>;
+  }
+
+
+  unregister(id: DispatchToken): <span class="built_in">void</span> {
+    invariant(
+      <span class="keyword">this</span>._callbacks[id],
+      <span class="string">'Dispatcher.unregister(...): `%s` does not map to a registered callback.'</span>,
+      id
+    );
+    <span class="keyword">delete</span> <span class="keyword">this</span>._callbacks[id];
+  }
+
+  waitFor(ids: <span class="built_in">Array</span>&lt;DispatchToken&gt;): <span class="built_in">void</span> {
+    invariant(
+      <span class="keyword">this</span>._isDispatching,
+      <span class="string">'Dispatcher.waitFor(...): Must be invoked while dispatching.'</span>
+    );
+    <span class="keyword">for</span> (<span class="keyword">var</span> ii = <span class="number">0</span>; ii &lt; ids.length; ii++) {
+      <span class="keyword">var</span> id = ids[ii];
+      <span class="keyword">if</span> (<span class="keyword">this</span>._isPending[id]) {
+        invariant(
+          <span class="keyword">this</span>._isHandled[id],
+          <span class="string">'Dispatcher.waitFor(...): Circular dependency detected while '</span> +
+          <span class="string">'waiting for `%s`.'</span>,
+          id
+        );
+        <span class="keyword">continue</span>;
+      }
+      invariant(
+        <span class="keyword">this</span>._callbacks[id],
+        <span class="string">'Dispatcher.waitFor(...): `%s` does not map to a registered callback.'</span>,
+        id
+      );
+      <span class="keyword">this</span>._invokeCallback(id);
+    }
+  }
+
+  dispatch(payload: TPayload): <span class="built_in">void</span> {
+    invariant(
+      !<span class="keyword">this</span>._isDispatching,
+      <span class="string">'Dispatch.dispatch(...): Cannot dispatch in the middle of a dispatch.'</span>
+    );
+    <span class="keyword">this</span>._startDispatching(payload);
+    <span class="keyword">try</span> {
+      <span class="keyword">for</span> (<span class="keyword">var</span> id <span class="keyword">in</span> <span class="keyword">this</span>._callbacks) {
+        <span class="keyword">if</span> (<span class="keyword">this</span>._isPending[id]) {
+          <span class="keyword">continue</span>;
+        }
+        <span class="keyword">this</span>._invokeCallback(id);
+      }
+    } <span class="keyword">finally</span> {
+      <span class="keyword">this</span>._stopDispatching();
+    }
+  }
+
+  isDispatching(): <span class="built_in">boolean</span> {
+    <span class="keyword">return</span> <span class="keyword">this</span>._isDispatching;
+  }
+
+  _invokeCallback(id: DispatchToken): <span class="built_in">void</span> {
+    <span class="keyword">this</span>._isPending[id] = <span class="literal">true</span>;
+    <span class="keyword">this</span>._callbacks[id](<span class="keyword">this</span>._pendingPayload);
+    <span class="keyword">this</span>._isHandled[id] = <span class="literal">true</span>;
+  }
+
+  _startDispatching(payload: TPayload): <span class="built_in">void</span> {
+    <span class="keyword">for</span> (<span class="keyword">var</span> id <span class="keyword">in</span> <span class="keyword">this</span>._callbacks) {
+      <span class="keyword">this</span>._isPending[id] = <span class="literal">false</span>;
+      <span class="keyword">this</span>._isHandled[id] = <span class="literal">false</span>;
+    }
+    <span class="keyword">this</span>._pendingPayload = payload;
+    <span class="keyword">this</span>._isDispatching = <span class="literal">true</span>;
+  }
+
+  _stopDispatching(): <span class="built_in">void</span> {
+    <span class="keyword">delete</span> <span class="keyword">this</span>._pendingPayload;
+    <span class="keyword">this</span>._isDispatching = <span class="literal">false</span>;
+  }
+}
+
+<span class="module"><span class="keyword">module</span>.exports = Dispatcher;</span>
+</code></pre><p>首先我们来看一下这句话：</p>
+<pre><code><span class="keyword">export</span> <span class="keyword">type</span> DispatchToken = <span class="built_in">string</span>;
+</code></pre><p>这其实就是一个typedef，那么DispatchToken是什么意思呢？如果你本文最上方的Flux解答的话，你就可以了解到，其实一个Flux的回调代码块有唯一的一个token，这个token就是用来让别人Invokoe你代码的。</p>
+<p>那么这个DispatchToken怎么确保唯一呢？看下面这句话：</p>
+<pre><code><span class="keyword">var</span> id = _prefix + <span class="keyword">this</span>._lastID++;
+</code></pre><p>第一感觉是不是想，我了个擦，怎么那么简单。后来想想，JavaScript在浏览器中执行就是单线程，这种自增ID的做法又快又安全呐。</p>
+<p>下面我们来解释一下Dispatcher这个类，这个类的目的很简单，六个字归纳一下：唯一，中控，分配。<br>可以把他看成一个单例对象，所有的任务分发都必须由这个类统一控制。</p>
+<p>那么，这个类中包含了哪些玩意呢？让我们赶快来一探究竟！</p>
+<pre><code><span class="rule"><span class="attribute">_callbacks</span>:<span class="value"> {[key: DispatchToken]: (payload: TPayload) =&gt; void}</span></span>;
+<span class="rule"><span class="attribute">_isDispatching</span>:<span class="value"> boolean</span></span>;
+<span class="rule"><span class="attribute">_isHandled</span>:<span class="value"> {[key: DispatchToken]: boolean}</span></span>;
+<span class="rule"><span class="attribute">_isPending</span>:<span class="value"> {[key: DispatchToken]: boolean}</span></span>;
+<span class="rule"><span class="attribute">_lastID</span>:<span class="value"> number</span></span>;
+<span class="rule"><span class="attribute">_pendingPayload</span>:<span class="value"> TPayload</span></span>;
+</code></pre><ul>
+<li>callbacks，就是DispatchToken和函数回调的一个Dictionary。</li>
+<li>isDispatching，体现当前Dispatcher是否处于dispatch状态。</li>
+<li>isHandled，通过token去检测一个函数是否被处理过了。</li>
+<li>isPending，通过token去检测一个函数是否被提交Dispatcher了。</li>
+<li>lastID，最近一次被加入Dispatcher的函数体的UniqueID，即DispatchToken。</li>
+<li>pendingPayload，需要传递给调用函数的参数，iOS开发者可以理解为<b>userInfo</b>。</li>
+</ul>
+<p>下面我们一个个函数来看看。</p>
+<pre><code><span class="keyword">register</span>(callback: (payload: TPayload) =&gt; <span class="keyword">void</span>): DispatchToken {
+    var <span class="keyword">id</span> = _prefix + <span class="keyword">this</span><span class="variable">._lastID</span>++;
+    <span class="keyword">this</span><span class="variable">._callbacks</span>[<span class="keyword">id</span>] = callback;
+    <span class="keyword">return</span> <span class="keyword">id</span>;
+}
+</code></pre><p>这函数就是注册一个callback进入dispatcher，同时为这个callback生成DispatchToken，加入字典。</p>
+<pre><code>unregister(<span class="property">id</span>: DispatchToken): void {
+    invariant(
+      this._callbacks[<span class="property">id</span>],
+      'Dispatcher.unregister(...): `%s` <span class="keyword">does</span> <span class="keyword">not</span> map <span class="keyword">to</span> a registered callback.',
+      <span class="property">id</span>
+    );
+    delete this._callbacks[<span class="property">id</span>];
+}
+</code></pre><p>有注册就有取消注册，unregister就是通过DispatchToken将注册的callback从字典中删除。当然了，这里使用了我们在上文中提过的Invariant来进行一个判断：即字典中必须包含对应这个DispatchToken的函数。</p>
+<p>dispatch函数是Dispatcher用来分发payload的函数。</p>
+<pre><code>dispatch(payload: TPayload): <span class="keyword">void</span> {
+    invariant(
+      !<span class="keyword">this</span>._isDispatching,
+      <span class="string">'Dispatch.dispatch(...): Cannot dispatch in the middle of a dispatch.'</span>
+    );
+    <span class="keyword">this</span>._startDispatching(payload);
+    <span class="keyword">try</span> {
+      <span class="keyword">for</span> (<span class="keyword">var</span> id <span class="keyword">in</span> <span class="keyword">this</span>._callbacks) {
+        <span class="keyword">if</span> (<span class="keyword">this</span>._isPending[id]) {
+          <span class="keyword">continue</span>;
+        }
+        <span class="keyword">this</span>._invokeCallback(id);
+      }
+    } <span class="keyword">finally</span> {
+      <span class="keyword">this</span>._stopDispatching();
+    }
+  }
+</code></pre><p>整个函数的含义就是，首先是判断当前Dispatcher是否已经处于Dispatching状态中了，如果是，不能打断。然后通过_startDispatching更新状态。更新状态结束以后，将非pending状态的callback进通过_invokeCallback执行<b>（pending在这里的含义可以简单理解为，还没准备好或者被卡住了）</b>。所有执行完了以后，通过_stopDispatching恢复状态。</p>
+<p>接下来便让我一一来看看其中涉及的几个函数，首先是_startDispatching函数。</p>
+<pre><code>_startDispatching(payload: TPayload): <span class="keyword">void</span> {
+    <span class="keyword">for</span> (var <span class="keyword">id</span> <span class="keyword">in</span> <span class="keyword">this</span><span class="variable">._callbacks</span>) {
+      <span class="keyword">this</span><span class="variable">._isPending</span>[<span class="keyword">id</span>] = <span class="literal">false</span>;
+      <span class="keyword">this</span><span class="variable">._isHandled</span>[<span class="keyword">id</span>] = <span class="literal">false</span>;
+    }
+    <span class="keyword">this</span><span class="variable">._pendingPayload</span> = payload;
+    <span class="keyword">this</span><span class="variable">._isDispatching</span> = <span class="literal">true</span>;
+  }
+</code></pre><p>首先该函数将所有注册的callback的状态都清空，并标记Dispatcher的状态进入dispatching。</p>
+<p>同样，与之对应的有的_stopDispatching，函数很简单，不具体解释了。</p>
+<pre><code>_stopDispatching(): <span class="keyword">void</span> {
+    <span class="keyword">delete</span> <span class="keyword">this</span>._pendingPayload;
+    <span class="keyword">this</span>._isDispatching = <span class="literal">false</span>;
+}
+</code></pre><p>而_invokeCallback函数也很简单，当真正调用callback之前将其状态设置为pending，执行完成之后设置为handled。<br>    _invokeCallback(id: DispatchToken): void {<br>        this._isPending[id] = true;<br>        this._callbacks<a href="this._pendingPayload">id</a>;<br>        this._isHandled[id] = true;<br>      }</p>
+<p>读到这里，有些人可能有些疑问，这个pending到底是用来做什么的呢？别着急，看了下面这个最重要的函数waitFor，你就会了解。</p>
+<pre><code>waitFor(ids: Array&lt;DispatchToken&gt;): void {
+     <span class="number">1.</span> 
+    invariant(
+      this._isDispatching,
+      'Dispatcher.waitFor(...): Must be invoked <span class="keyword">while</span> dispatching.'
+    );
+
+     <span class="number">2.</span>
+    <span class="keyword">for</span> (var ii = <span class="number">0</span>; ii &lt; ids.<span class="property">length</span>; ii++) {
+      var <span class="property">id</span> = ids[ii];
+      <span class="keyword">if</span> (this._isPending[<span class="property">id</span>]) {
+        <span class="number">3.</span> 
+        invariant(
+          this._isHandled[<span class="property">id</span>],
+          'Dispatcher.waitFor(...): Circular dependency detected <span class="keyword">while</span> ' +
+          'waiting <span class="keyword">for</span> `%s`.',
+          <span class="property">id</span>
+        );
+        <span class="keyword">continue</span>;
+      }
+       <span class="number">4.</span>
+      invariant(
+        this._callbacks[<span class="property">id</span>],
+        'Dispatcher.waitFor(...): `%s` <span class="keyword">does</span> <span class="keyword">not</span> map <span class="keyword">to</span> a registered callback.',
+        <span class="property">id</span>
+      );
+
+      <span class="number">5.</span>
+      this._invokeCallback(<span class="property">id</span>);
+    }
+  }
+</code></pre><p>这个waitFor啥意思呢？我们首先看下他的参数，一个数组，里面全是DispatchToken。再看下实现。</p>
+<ul>
+<li>首先是一个Invariant判断当前必须处于Dispatching状态。一开始比较难理解，简单来说就是，如果不处于Dispatching状态中，那么说明压根没有函数在执行，那你等谁呢？</li>
+<li>然后该函数从DispatchToken的数组中进行遍历，如果遍历到的DispatchToken处于pending状态，就暂时跳过他。</li>
+<li>但是，在这有个必要的循环以来的检查，试想如下情况，如果A函数以来B的Token, B函数依赖A的Token，就会造成“死锁”。<b>所以，当一个函数依赖的对象处于pending，说明这个函数已经被开始执行了，但是如果同时该函数没有进入handled状态，说明该函数也被卡死了。</b></li>
+<li>检查token对应的callback是否存在</li>
+<li>调用这个token对应的函数。</li>
+</ul>
+<p>从上诉步骤中，我们可以看到，waitFor就是一个等待函数，当B执行，执行到某些条件不满足的时候（我们称之为依赖没解决），就是等待依赖去完成，简单来说，就是如下函数代表的意思：</p>
+<pre><code><span class="keyword">while</span> (!satisfied) ; <span class="keyword">do</span>Something
+</code></pre><p>到这里，差不多Dispatcher.js就解释完了，下次继续。</p>
+
+      
+    </div>
+    <footer class="article-footer">
+      <a data-url="http://satanwoo.github.io/2015/09/23/flux-js-part-one/" data-id="ciewzwiud00030xi157iepeu0" class="article-share-link">Share</a>
+      
+      
+  <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/JavaScript/">JavaScript</a></li></ul>
+
+    </footer>
+  </div>
+  
+    
+<nav id="article-nav">
+  
+  
+    <a href="/2015/09/17/code-of-JSONModel/" id="article-nav-older" class="article-nav-link-wrap">
+      <strong class="article-nav-caption">Older</strong>
+      <div class="article-nav-title">JSONModel源码解析</div>
+    </a>
+  
+</nav>
+
+  
+</article>
+
+</section>
+        
+          <aside id="sidebar">
+  
+    
+  
+    
+  <div class="widget-wrap">
+    <h3 class="widget-title">Tags</h3>
+    <div class="widget">
+      <ul class="tag-list"><li class="tag-list-item"><a class="tag-list-link" href="/tags/JavaScript/">JavaScript</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/iOS/">iOS</a><span class="tag-list-count">2</span></li></ul>
+    </div>
+  </div>
+
+  
+    
+  <div class="widget-wrap">
+    <h3 class="widget-title">Tag Cloud</h3>
+    <div class="widget tagcloud">
+      <a href="/tags/JavaScript/" style="font-size: 10px;">JavaScript</a> <a href="/tags/iOS/" style="font-size: 20px;">iOS</a>
+    </div>
+  </div>
+
+  
+    
+  <div class="widget-wrap">
+    <h3 class="widget-title">Archives</h3>
+    <div class="widget">
+      <ul class="archive-list"><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/09/">September 2015</a><span class="archive-list-count">3</span></li></ul>
+    </div>
+  </div>
+
+  
+    
+  <div class="widget-wrap">
+    <h3 class="widget-title">Recents</h3>
+    <div class="widget">
+      <ul>
+        
+          <li>
+            <a href="/2015/09/23/flux-js-part-one/">flux-js-part-one</a>
+          </li>
+        
+          <li>
+            <a href="/2015/09/17/code-of-JSONModel/">JSONModel源码解析</a>
+          </li>
+        
+          <li>
+            <a href="/2015/09/11/A-New-Start/">iOS下载模块的实现</a>
+          </li>
+        
+      </ul>
+    </div>
+  </div>
+
+  
+</aside>
+        
+      </div>
+      <footer id="footer">
+  
+  <div class="outer">
+    <div id="footer-info" class="inner">
+      &copy; 2015 John Doe<br>
+      Powered by <a href="http://hexo.io/" target="_blank">Hexo</a>
+    </div>
+  </div>
+</footer>
+    </div>
+    <nav id="mobile-nav">
+  
+    <a href="/" class="mobile-nav-link">Home</a>
+  
+    <a href="/archives" class="mobile-nav-link">Archives</a>
+  
+</nav>
+    
+
+<script src="//ajax.googleapis.com/ajax/libs/jquery/2.0.3/jquery.min.js"></script>
+
+
+  <link rel="stylesheet" href="/fancybox/jquery.fancybox.css" type="text/css">
+  <script src="/fancybox/jquery.fancybox.pack.js" type="text/javascript"></script>
+
+
+<script src="/js/script.js" type="text/javascript"></script>
+
+  </div>
+</body>
+</html>
