@@ -1,0 +1,407 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  
+  <title>GLCaledarView 源码解读 &amp; Glow面经 | Hexo</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+  <meta name="description" content="今天选择了GLCalendarView来进行源码解读，一方面是因为它的实现效果简单清晰，第二方面，是我同学让我把Glow的面经给写了。
+Glow面经可能对于大多数来说，Glow相对来说还算一个比较神秘的公司，它主要致力于基于大数据分析女性健康的app的研发。
+好吧，其实我也不是很懂，但是我觉得懂一点也挺好，毕竟我是有女朋友的人。
+先说说我为什么会投Glow，两点原因：
+
+主要原因我是想去参加他们的">
+<meta property="og:type" content="article">
+<meta property="og:title" content="GLCaledarView 源码解读 & Glow面经">
+<meta property="og:url" content="http://satanwoo.github.io/2015/10/14/GLCalendarView/index.html">
+<meta property="og:site_name" content="Hexo">
+<meta property="og:description" content="今天选择了GLCalendarView来进行源码解读，一方面是因为它的实现效果简单清晰，第二方面，是我同学让我把Glow的面经给写了。
+Glow面经可能对于大多数来说，Glow相对来说还算一个比较神秘的公司，它主要致力于基于大数据分析女性健康的app的研发。
+好吧，其实我也不是很懂，但是我觉得懂一点也挺好，毕竟我是有女朋友的人。
+先说说我为什么会投Glow，两点原因：
+
+主要原因我是想去参加他们的">
+<meta property="og:updated_time" content="2015-10-16T07:47:52.000Z">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="GLCaledarView 源码解读 & Glow面经">
+<meta name="twitter:description" content="今天选择了GLCalendarView来进行源码解读，一方面是因为它的实现效果简单清晰，第二方面，是我同学让我把Glow的面经给写了。
+Glow面经可能对于大多数来说，Glow相对来说还算一个比较神秘的公司，它主要致力于基于大数据分析女性健康的app的研发。
+好吧，其实我也不是很懂，但是我觉得懂一点也挺好，毕竟我是有女朋友的人。
+先说说我为什么会投Glow，两点原因：
+
+主要原因我是想去参加他们的">
+  
+    <link rel="alternative" href="/atom.xml" title="Hexo" type="application/atom+xml">
+  
+  
+    <link rel="icon" href="/favicon.png">
+  
+  <link href="//fonts.googleapis.com/css?family=Source+Code+Pro" rel="stylesheet" type="text/css">
+  <link rel="stylesheet" href="/css/style.css" type="text/css">
+  
+
+</head>
+<body>
+  <div id="container">
+    <div id="wrap">
+      <header id="header">
+  <div id="banner"></div>
+  <div id="header-outer" class="outer">
+    <div id="header-title" class="inner">
+      <h1 id="logo-wrap">
+        <a href="/" id="logo">Hexo</a>
+      </h1>
+      
+    </div>
+    <div id="header-inner" class="inner">
+      <nav id="main-nav">
+        <a id="main-nav-toggle" class="nav-icon"></a>
+        
+          <a class="main-nav-link" href="/">Home</a>
+        
+          <a class="main-nav-link" href="/archives">Archives</a>
+        
+      </nav>
+      <nav id="sub-nav">
+        
+          <a id="nav-rss-link" class="nav-icon" href="/atom.xml" title="RSS Feed"></a>
+        
+        <a id="nav-search-btn" class="nav-icon" title="Search"></a>
+      </nav>
+      <div id="search-form-wrap">
+        <form action="//google.com/search" method="get" accept-charset="UTF-8" class="search-form"><input type="search" name="q" results="0" class="search-form-input" placeholder="Search"><button type="submit" class="search-form-submit">&#xF002;</button><input type="hidden" name="sitesearch" value="http://satanwoo.github.io"></form>
+      </div>
+    </div>
+  </div>
+</header>
+      <div class="outer">
+        <section id="main"><article id="post-GLCalendarView" class="article article-type-post" itemscope itemprop="blogPost">
+  <div class="article-meta">
+    <a href="/2015/10/14/GLCalendarView/" class="article-date">
+  <time datetime="2015-10-14T01:15:52.000Z" itemprop="datePublished">2015-10-14</time>
+</a>
+    
+  </div>
+  <div class="article-inner">
+    
+    
+      <header class="article-header">
+        
+  
+    <h1 class="article-title" itemprop="name">
+      GLCaledarView 源码解读 &amp; Glow面经
+    </h1>
+  
+
+      </header>
+    
+    <div class="article-entry" itemprop="articleBody">
+      
+        <p>今天选择了GLCalendarView来进行源码解读，一方面是因为它的实现效果简单清晰，第二方面，是我同学让我把Glow的面经给写了。</p>
+<h2 id="Glow面经">Glow面经</h2><p>可能对于大多数来说，Glow相对来说还算一个比较神秘的公司，它主要致力于基于大数据分析女性健康的app的研发。</p>
+<p><em>好吧，其实我也不是很懂，但是我觉得懂一点也挺好，毕竟我是有女朋友的人。</em></p>
+<p>先说说我为什么会投Glow，两点原因：</p>
+<ul>
+<li>主要原因我是想去参加他们的开放日吃东西，然后他们的登记页面有个投简历的选项，我就投了，但是后来开放日那天我被导师拉出去开项目会议了结果就没去成。</li>
+<li>他们的团队很厉害，学历上都是清华、复旦、交大、同济（其中交大和复旦排名不分先后，你们别喷我）。 初创团队都是Google出身，董事还是Paypal的创始人之一。</li>
+</ul>
+<p>后来9月中下旬，Glow给我安排了一次电面，商量了一个时间，电话如约而至。</p>
+<h4 id="电面">电面</h4><p>电面的内容我不记得了，有一个问题是围绕Core Data展开的，问我多线程之间的Core Data搞过没，我说我搞过。后来说到在多个Context之间传输object的问题，一般情况下都是直接<b>mergeChangeFromNotification就可以了，然后你就可以在private context进行数据获取</b>，当时面试官问的一个问题是你是直接merge完了就使用了，还是[context save]提交到persistentStoreCoordinator以后通过objectID去取呢。当时我说了一个我的做法，后来我再打开我自己代码的时候，发现是因为我的app支持删后保存数据，造成了objectID不一致，所以我当时提出了刚启动的时候一定要拉去objectID，现在想想好像应该是答错了。</p>
+<h4 id="现场面试">现场面试</h4><p>地狱般的6小时连续面试，累晕了。</p>
+<h5 id="第一轮_iOS面试">第一轮 iOS面试</h5><p>第一轮是iOS面试，同时来了两位iOS面试官, 先上来让自我介绍下。我每次自我介绍都比较喜欢节约时间，把自己做过的所有app都装在手机上带到现场演示。于是第一轮的很多问题都是穿插着我的项目提问，具体问题我就不说了，因人而异的，所以我就说下我没答上来的知识面：</p>
+<ol>
+<li>UITransition</li>
+<li>UIView的仿射变换对于界面层级显示的一个效果</li>
+<li>他们自家app中一个动画效果制作方式，我应该是答错了</li>
+</ol>
+<p>这一轮给自己打个70分吧。</p>
+<h5 id="第二轮_数学">第二轮 数学</h5><p>第二轮一上来我以为是产品面，结果是服务器端的一位面试官，先聊了聊自己对于做app有没有什么促进app增长的方式。然后，就开始做一道很奇怪的算法题，为什么说奇怪，是因为这题没有正确答案。然后说完思路以后就在白纸上写下来，我用C++写了。面试官问我为啥不用Objective-C写，我说Objective-C手写代码太长了，顺便我还想证明下我还会别的技术。</p>
+<p>这一轮给自己打个80分。</p>
+<h5 id="第三轮_英语面试">第三轮 英语面试</h5><p>第三轮是他们的产品的创始人来面我，他一上来问说他中文不好，我选择英语面试还是中文面试，我说的英语没问题，于是我们就开始了至少50分钟了全英语面试。</p>
+<p>这一轮可以打个95分。</p>
+<h5 id="第四轮_CTO面">第四轮 CTO面</h5><p>面试的时候我不知道他就是CTO，他还带我去外出吃了顿中饭，吃完回来就开始了面试。<br>这轮一开始先问了我怎么修一些关于多线程的Bug。然后问了我道算法题，就是求矩形相交。当时太诚实了，直接说了我做过这题，然后给出了我自己非投影的解法，于是，悲剧就从这里开始了。</p>
+<p>然后CTO就给我出了一道在我看来比较奇特的题目，具体题目保密我不说了，反正就是一开始他出难的，我没答上来，他说你先简化下，做简单版本的。我做出来了，然后又切换成了复杂的，在他的提示下我还是没做出来。</p>
+<p>这轮只能打30分。</p>
+<h5 id="第五轮_CEO面">第五轮 CEO面</h5><p>CEO进来的时候我还在想上一轮的题目，于是悲剧又来了。我在一边想题目一边和CEO进行了握手，然后就被xx了。然后CEO提了一个让我至今非常难忘的面试题：前面面你的所有面试官他们叫什么？这下是真傻眼了。<br>可能最后比较好的是我用纯英文跟CEO聊了一段时间，估计挽回了一点分数。</p>
+<p>这轮打个50分。</p>
+<p>反正面试感觉有点晕，尤其是下午，战线拖的太长了，自己表现的不是很理想。具体技术题目不说了，说出来我认为是对以后面试者的一种不尊重，所以就略过了。总体面试的体验是硅谷风格，英语 ＋ 技术 ＋ 智力。</p>
+<h2 id="GLCalendarView_源码解析">GLCalendarView 源码解析</h2><p>先来张效果图</p>
+<!--img src="https://raw.githubusercontent.com/Glow-Inc/GLCalendarView/master/demo.gif" alt="GLCalendarView" style="max-width:100%;"-->
+<p>效果还挺酷炫的，这里是它的<a href="https://github.com/Glow-Inc/GLCalendarView" target="_blank" rel="external">Github地址</a></p>
+<p>从Github上的介绍来说，这款Calendar和别的同类库之间有个比较大的区别就是可以选择Date Range。从上面的效果我们也可以看出，用户可以通过手势选择一段连续日期。</p>
+<h2 id="源码解析">源码解析</h2><h3 id="图层分解">图层分解</h3><p>既然是个UI的开源库，抛开内部逻辑实现来看，我们首先需要剖析它的图层结构，这样才有助于我们理解整个设计思路。</p>
+<p>在看真正的源代码之前，我们首先来猜测下这玩意怎么实现的。从我个人角度出发，我一开始是这么猜测的：</p>
+<ul>
+<li>整体的结构应该是个UICollectionView，每个日期都是一个UICollectionViewCell。</li>
+<li>每个Cell包含一个圆的背景色（如果是今天），包含一个方形的背景色(连续)，左右尽头是两个半圆的，基于这个，猜测在每个日期Cell里面包含一个背景View，填充颜色，设置圆角。</li>
+<li>最上面有个悬浮的sunday - saturday的表示星期几的UIView，应该是个独立图层，添加了阴影。<b>国外人为什么喜欢把星期日当成一周的开始呢，真蛋疼。</b></li>
+<li>滚动整个过程中，会出现一个显示对应月份的View，可能是个独立的UIView。</li>
+<li><b>拖动过程中出现的放大镜效果，没猜出来。这个放大镜怎么做的？</b></li>
+</ul>
+<p>带着这些疑问我们下面进入图层分解，来一个个验证我们的猜测正确不正确。</p>
+<p>当然，首先我们先大致浏览下结构，整个项目的文件结构大致如下：</p>
+<pre><code>-<span class="ruby">- <span class="constant">GLCalendarDateRange</span>.h/.m
+</span>-<span class="ruby">- <span class="constant">GLCalendarDayCell</span>
+</span>   -<span class="ruby">- <span class="constant">GLCalendarDayCell</span>.h/.m/.xib
+</span>   -<span class="ruby">- <span class="constant">GLCalendarDayCellBackgroundCover</span>.h/.m
+</span>-<span class="ruby">- <span class="constant">GLCalendarMonthCoverView</span>.h/.m
+</span>-<span class="ruby">- <span class="constant">GLCalendarView</span>.h/.m/.xib
+</span>-<span class="ruby">- <span class="constant">GLDateUtils</span>.h/.m</span>
+</code></pre><h4 id="GLCalendarDayCell">GLCalendarDayCell</h4><p>全局搜索下CollectionViewCell关键字，我们发现，果然在GLCalendarDayCell这个类里面，包含了一个UICollectionView成员。</p>
+<p><b> GLCalendarDayCell采用xib式的图形化开发，只要找到对应的xib文件，对于一个界面的布局很轻松得就了然于胸了.</b></p>
+<p>然后我们打开这个对应的xib文件，发现这个cell的布局包括了：</p>
+<ul>
+<li>底层的Cell</li>
+<li>backgroundCover 的UIView</li>
+<li>显示日期的UILabel</li>
+<li>显示月份的UILabel</li>
+</ul>
+<p>这个类很简单，具体就是做了一大堆细节配置的东西，我们来说一个有意思的地方，在GLCalendarDayCell.h里面，有这个一段定义：</p>
+<pre><code><span class="keyword">@property</span> (<span class="keyword">nonatomic</span>, <span class="keyword">strong</span>) <span class="built_in">UIColor</span> *evenMonthBackgroundColor <span class="built_in">UI_APPEARANCE_SELECTOR</span>;
+<span class="keyword">@property</span> (<span class="keyword">nonatomic</span>, <span class="keyword">strong</span>) <span class="built_in">UIColor</span> *oddMonthBackgroundColor <span class="built_in">UI_APPEARANCE_SELECTOR</span>;
+<span class="keyword">@property</span> (<span class="keyword">nonatomic</span>, <span class="keyword">strong</span>) <span class="built_in">NSDictionary</span> *dayLabelAttributes <span class="built_in">UI_APPEARANCE_SELECTOR</span>;
+<span class="keyword">@property</span> (<span class="keyword">nonatomic</span>, <span class="keyword">strong</span>) <span class="built_in">NSDictionary</span> *futureDayLabelAttributes <span class="built_in">UI_APPEARANCE_SELECTOR</span>;
+<span class="keyword">@property</span> (<span class="keyword">nonatomic</span>, <span class="keyword">strong</span>) <span class="built_in">NSDictionary</span> *todayLabelAttributes <span class="built_in">UI_APPEARANCE_SELECTOR</span>;
+<span class="keyword">@property</span> (<span class="keyword">nonatomic</span>, <span class="keyword">strong</span>) <span class="built_in">NSDictionary</span> *monthLabelAttributes <span class="built_in">UI_APPEARANCE_SELECTOR</span>;
+<span class="keyword">@property</span> (<span class="keyword">nonatomic</span>, <span class="keyword">strong</span>) <span class="built_in">UIColor</span> *todayBackgroundColor <span class="built_in">UI_APPEARANCE_SELECTOR</span>;
+</code></pre><p>其中<b>UIAPPEARANCESELECTOR</b>可能对于很多人不熟悉，我们来看看的定义，</p>
+<pre><code><span class="hexcolor">#def</span>ine UI_APPEARANCE_SELECTOR __attribute__((<span class="function"><span class="title">annotate</span><span class="params">(<span class="string">"ui_appearance_selector"</span>)</span></span>))
+</code></pre><p>这个其实是一个宏，那么这个东西的作用是什么呢？<b>是为了全局配置样式！</b></p>
+<p>不知道大家是否还记得我们经常会写[UINavigationBar appearance].tintColor来修改导航栏的颜色，那么这个宏的作用简单来理解就是让你的类拥有可以全局修改样式的能力，如：</p>
+<pre><code><span class="string">[GLCalendarDayCell appearance]</span>.todayBackgroundColor = <span class="string">[UIColol redColor]</span>;
+</code></pre><p>这个类代码虽然简单，却在实现上有个很好的地方，他把这个Cell的样式（简单来说的就是颜色，边界）交由了下面我们要提到的GLCalendarDayCellBackgroundCover类去做，也就是说，这个Cell仅仅维护状态变更的逻辑，样式有单独的样式类完成绘制。</p>
+<h4 id="GLCalendarDayCellBackgroundCover">GLCalendarDayCellBackgroundCover</h4><p>这个类的作用，无它，就是画。看下他的头文件定义，大家就能瞬间明白：</p>
+<pre><code><span class="class"><span class="keyword">@interface</span> <span class="title">GLCalendarDayCellBackgroundCover</span> : <span class="title">UIView</span></span>
+<span class="keyword">@property</span> (<span class="keyword">nonatomic</span>) RANGE_POSITION rangePosition;
+<span class="keyword">@property</span> (<span class="keyword">nonatomic</span>) <span class="built_in">CGFloat</span> paddingLeft;
+<span class="keyword">@property</span> (<span class="keyword">nonatomic</span>) <span class="built_in">CGFloat</span> paddingRight;
+<span class="keyword">@property</span> (<span class="keyword">nonatomic</span>) <span class="built_in">CGFloat</span> paddingTop;
+<span class="keyword">@property</span> (<span class="keyword">nonatomic</span>, <span class="keyword">strong</span>) <span class="built_in">UIColor</span> *fillColor;
+<span class="keyword">@property</span> (<span class="keyword">nonatomic</span>, <span class="keyword">strong</span>) <span class="built_in">UIColor</span> *strokeColor;
+<span class="keyword">@property</span> (<span class="keyword">nonatomic</span>, <span class="keyword">strong</span>) <span class="built_in">UIImage</span> *backgroundImage;
+<span class="keyword">@property</span> (<span class="keyword">nonatomic</span>) <span class="built_in">CGFloat</span> borderWidth;
+<span class="keyword">@property</span> (<span class="keyword">nonatomic</span>) <span class="built_in">BOOL</span> inEdit;
+<span class="keyword">@property</span> (<span class="keyword">nonatomic</span>) <span class="built_in">BOOL</span> isToday;
+<span class="keyword">@property</span> (<span class="keyword">nonatomic</span>) <span class="built_in">BOOL</span> continuousRangeDisplay;
+<span class="keyword">@property</span> (<span class="keyword">nonatomic</span>) <span class="built_in">CGFloat</span> pointSize;
+<span class="keyword">@property</span> (<span class="keyword">nonatomic</span>) <span class="built_in">CGFloat</span> pointScale;
+- (<span class="keyword">void</span>)enlargeBeginPoint:(<span class="built_in">BOOL</span>)enlarge;
+- (<span class="keyword">void</span>)enlargeEndPoint:(<span class="built_in">BOOL</span>)enlarge;
+<span class="keyword">@end</span>
+</code></pre><p>当然，这里要提一点，画圆的几种方法：</p>
+<ul>
+<li>cornerRadius -&gt; GPU offscreen rendering 低性能</li>
+<li>CAShaperLayer 当成mask -&gt; GPU offscreen rendering 低性能</li>
+<li>drawRect + UIBeizerPath -&gt; CPU offerscreen rendering，快，但是内存开销大</li>
+</ul>
+<p>这里在实现圆角的时候，就用了第三种：</p>
+<pre><code><span class="setting">path = <span class="value">[UIBezierPath bezierPathWithOvalInRect:rect];</span></span>
+<span class="title">[path closePath]</span><span class="comment">;</span>
+<span class="title">[self.fillColor setFill]</span><span class="comment">;</span>
+<span class="title">[path fill]</span><span class="comment">;</span>
+</code></pre><p>别的也没什么，都是具体的数学求画的位置。以如下代码为例子说明下</p>
+<pre><code><span class="tag">if</span> (self.rangePosition == RANGE_POSITION_BEGIN) {
+    <span class="attr_selector">[path moveToPoint:CGPointMake(radius + borderWidth + paddingLeft, paddingTop + borderWidth)]</span>;
+    <span class="attr_selector">[path addArcWithCenter:CGPointMake(radius + borderWidth + paddingLeft, midY) radius:radius startAngle: - M_PI / 2 endAngle: M_PI / 2 clockwise:NO]</span>;
+
+    <span class="attr_selector">[path addLineToPoint:CGPointMake(width, height - borderWidth - paddingTop)]</span>;
+    <span class="attr_selector">[path addLineToPoint:CGPointMake(width, borderWidth + paddingTop)]</span>;
+
+    <span class="attr_selector">[path closePath]</span>;
+}
+</code></pre><p><b>RANGEPOSITIONBEGIN</b>表示为左侧开头的cell，所以有个左弧度。画法过程如下：</p>
+<ul>
+<li>左弧度的上部顶点作为贝塞尔曲线的初始点</li>
+<li>画左弧度</li>
+<li>画左弧度下方的一条水平横线</li>
+<li>画水平横线右端顶点向上的竖直线</li>
+<li>封闭，自动会在竖直线和上部初始顶点间添加一条水平横线。</li>
+</ul>
+<h4 id="GLCalendarView">GLCalendarView</h4><p>最后来说下对外暴露的类，GLCalendarView。<br>这个类的实现就是一对控制逻辑，主要说下我特别感兴趣的拖动range的过程中放大镜的实现。</p>
+<ul>
+<li>首先这个放大镜，是个中心区域透明的图片。我一开始是纯代码编程的，真蛋疼。</li>
+<li>这个放大镜底下偷偷埋了个UIImageView，每次拖动的更新的时候，都自动去截图，把截图放到这个UIImageView里面，就完成了放大镜的效果。</li>
+</ul>
+<p>具体的实现如下：</p>
+<pre><code>- (<span class="keyword">void</span>)showMagnifierAboveDate:(<span class="built_in">NSDate</span> *)date
+{
+    <span class="keyword">if</span> (!<span class="keyword">self</span><span class="variable">.showMagnifier</span>) {
+        <span class="keyword">return</span>;
+    }
+    GLCalendarDayCell *cell = (GLCalendarDayCell *)[<span class="keyword">self</span> collectionView:<span class="keyword">self</span><span class="variable">.collectionView</span> cellForItemAtIndexPath:[<span class="keyword">self</span> indexPathForDate:date]];
+    <span class="built_in">CGFloat</span> delta = <span class="keyword">self</span><span class="variable">.cellWidth</span> / <span class="number">2</span>;
+    <span class="keyword">if</span> (<span class="keyword">self</span><span class="variable">.draggingBeginDate</span>) {
+        delta = delta;
+    } <span class="keyword">else</span> {
+        delta = -delta;
+    }
+    <span class="built_in">UIGraphicsBeginImageContextWithOptions</span>(<span class="keyword">self</span><span class="variable">.maginifierContentView</span><span class="variable">.frame</span><span class="variable">.size</span>, <span class="literal">YES</span>, <span class="number">0.0</span>);
+    <span class="built_in">CGContextRef</span> context = <span class="built_in">UIGraphicsGetCurrentContext</span>();
+    <span class="built_in">CGContextFillRect</span>(context, <span class="keyword">self</span><span class="variable">.maginifierContentView</span><span class="variable">.bounds</span>);
+    <span class="built_in">CGContextTranslateCTM</span>(context, -cell<span class="variable">.center</span><span class="variable">.x</span> + delta, -cell<span class="variable">.center</span><span class="variable">.y</span>);
+    <span class="built_in">CGContextTranslateCTM</span>(context, <span class="keyword">self</span><span class="variable">.maginifierContentView</span><span class="variable">.frame</span><span class="variable">.size</span><span class="variable">.width</span> / <span class="number">2</span>, <span class="keyword">self</span><span class="variable">.maginifierContentView</span><span class="variable">.frame</span><span class="variable">.size</span><span class="variable">.height</span> / <span class="number">2</span>);
+    [<span class="keyword">self</span><span class="variable">.collectionView</span><span class="variable">.layer</span> renderInContext:context];
+    <span class="built_in">UIImage</span> *image = <span class="built_in">UIGraphicsGetImageFromCurrentImageContext</span>();
+    <span class="built_in">UIGraphicsEndImageContext</span>();
+
+    <span class="keyword">self</span><span class="variable">.maginifierContentView</span><span class="variable">.image</span> = image;
+    <span class="keyword">self</span><span class="variable">.magnifierContainer</span><span class="variable">.center</span> = [<span class="keyword">self</span> convertPoint:<span class="built_in">CGPointMake</span>(cell<span class="variable">.center</span><span class="variable">.x</span> - delta - <span class="number">58</span>, cell<span class="variable">.center</span><span class="variable">.y</span> - <span class="number">90</span>) fromView:<span class="keyword">self</span><span class="variable">.collectionView</span>];
+    <span class="keyword">self</span><span class="variable">.magnifierContainer</span><span class="variable">.hidden</span> = <span class="literal">NO</span>;
+}
+</code></pre><p>主要说下CGContext那块，因为发现好多人还不是特别能理解。</p>
+<p><b>首先，坐标系和UIKit是反过来的！</b><br>然后这段代码做了啥呢？</p>
+<ul>
+<li><p>获取当前拖拽日期的对应的Cell。</p>
+</li>
+<li><p>创建一个画布，画布大小就是放大镜的大小。</p>
+<pre><code><span class="tag">UIGraphicsBeginImageContextWithOptions</span>(<span class="tag">self</span><span class="class">.maginifierContentView</span><span class="class">.frame</span><span class="class">.size</span>, <span class="tag">YES</span>, 0<span class="class">.0</span>);
+</code></pre></li>
+<li><p>位移到cell的位置处进行截图，因为是CGContext画图，所以向上是正的，向下负的。</p>
+<pre><code><span class="tag">CGContextTranslateCTM</span>(<span class="tag">context</span>, <span class="tag">-cell</span><span class="class">.center</span><span class="class">.x</span> + <span class="tag">delta</span>, <span class="tag">-cell</span><span class="class">.center</span><span class="class">.y</span>);
+</code></pre></li>
+<li><p>向上移到放大镜的中心截图，否则因为放大镜的大小是cell的高度，会包含上cell的下半部分，和下cell的上半部分。</p>
+<pre><code>CGContextTranslateCTM(context, self.maginifierContentView.frame.<span class="built_in">size</span>.<span class="variable">width</span> / <span class="number">2</span>, self.maginifierContentView.frame.<span class="built_in">size</span>.<span class="variable">height</span> / <span class="number">2</span>);
+</code></pre></li>
+</ul>
+<h4 id="Thread_Local_变量">Thread Local 变量</h4><p>在GLCalendarView里面，有一个比较有亮点的实现：</p>
+<pre><code>+ (<span class="built_in">NSCalendar</span> *)calendar {
+    <span class="built_in">NSMutableDictionary</span> *threadDictionary = [[<span class="built_in">NSThread</span> currentThread] threadDictionary];
+
+    <span class="built_in">NSCalendar</span> *cal = [threadDictionary objectForKey:<span class="string">@"GLCalendar"</span>];
+    <span class="keyword">if</span> (!cal) {
+        cal = [[<span class="built_in">NSCalendar</span> alloc] initWithCalendarIdentifier:<span class="built_in">NSCalendarIdentifierGregorian</span>];
+        cal<span class="variable">.locale</span> = [<span class="built_in">NSLocale</span> currentLocale];
+        [threadDictionary setObject:cal forKey:<span class="string">@"GLCalendar"</span>];
+    }
+    <span class="keyword">return</span> cal;
+}
+</code></pre><p>我们都知道，NSCalendar的初始化是比较耗时的，所以经验上来说一般会构建一个单例子使用。但是在这里可以看到，这里用了threadDictionary去获取thread local variable。相当于在每个使用到这个函数的线程里都构建一个thread local的单例子，那么thread local的好处有啥呢？</p>
+<ul>
+<li>线程安全</li>
+<li>thread local cache，访问快，避免flush cache line。</li>
+</ul>
+<p>但是其实我个人不是很理解这么做的优势究竟有多大，请大家指点一下。</p>
+
+      
+    </div>
+    <footer class="article-footer">
+      <a data-url="http://satanwoo.github.io/2015/10/14/GLCalendarView/" data-id="ciftcsgr70008iqi1s2p3vv73" class="article-share-link">Share</a>
+      
+      
+  <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
+
+    </footer>
+  </div>
+  
+    
+<nav id="article-nav">
+  
+  
+    <a href="/2015/09/30/Debounce-and-Throttle-in-iOS/" id="article-nav-older" class="article-nav-link-wrap">
+      <strong class="article-nav-caption">Older</strong>
+      <div class="article-nav-title">实现iOS中的函数节流和函数防抖</div>
+    </a>
+  
+</nav>
+
+  
+</article>
+
+</section>
+        
+          <aside id="sidebar">
+  
+    
+  
+    
+  <div class="widget-wrap">
+    <h3 class="widget-title">Tags</h3>
+    <div class="widget">
+      <ul class="tag-list"><li class="tag-list-item"><a class="tag-list-link" href="/tags/JavaScript/">JavaScript</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/iOS/">iOS</a><span class="tag-list-count">4</span></li></ul>
+    </div>
+  </div>
+
+  
+    
+  <div class="widget-wrap">
+    <h3 class="widget-title">Tag Cloud</h3>
+    <div class="widget tagcloud">
+      <a href="/tags/JavaScript/" style="font-size: 10px;">JavaScript</a> <a href="/tags/iOS/" style="font-size: 20px;">iOS</a>
+    </div>
+  </div>
+
+  
+    
+  <div class="widget-wrap">
+    <h3 class="widget-title">Archives</h3>
+    <div class="widget">
+      <ul class="archive-list"><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/10/">October 2015</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/09/">September 2015</a><span class="archive-list-count">4</span></li></ul>
+    </div>
+  </div>
+
+  
+    
+  <div class="widget-wrap">
+    <h3 class="widget-title">Recents</h3>
+    <div class="widget">
+      <ul>
+        
+          <li>
+            <a href="/2015/10/14/GLCalendarView/">GLCaledarView 源码解读 &amp; Glow面经</a>
+          </li>
+        
+          <li>
+            <a href="/2015/09/30/Debounce-and-Throttle-in-iOS/">实现iOS中的函数节流和函数防抖</a>
+          </li>
+        
+          <li>
+            <a href="/2015/09/23/flux-js-part-one/">Flux源码解析（一）</a>
+          </li>
+        
+          <li>
+            <a href="/2015/09/17/code-of-JSONModel/">JSONModel源码解析</a>
+          </li>
+        
+          <li>
+            <a href="/2015/09/11/A-New-Start/">iOS下载模块的实现</a>
+          </li>
+        
+      </ul>
+    </div>
+  </div>
+
+  
+</aside>
+        
+      </div>
+      <footer id="footer">
+  
+  <div class="outer">
+    <div id="footer-info" class="inner">
+      &copy; 2015 John Doe<br>
+      Powered by <a href="http://hexo.io/" target="_blank">Hexo</a>
+    </div>
+  </div>
+</footer>
+    </div>
+    <nav id="mobile-nav">
+  
+    <a href="/" class="mobile-nav-link">Home</a>
+  
+    <a href="/archives" class="mobile-nav-link">Archives</a>
+  
+</nav>
+    
+
+<script src="//ajax.googleapis.com/ajax/libs/jquery/2.0.3/jquery.min.js"></script>
+
+
+  <link rel="stylesheet" href="/fancybox/jquery.fancybox.css" type="text/css">
+  <script src="/fancybox/jquery.fancybox.pack.js" type="text/javascript"></script>
+
+
+<script src="/js/script.js" type="text/javascript"></script>
+
+  </div>
+</body>
+</html>
