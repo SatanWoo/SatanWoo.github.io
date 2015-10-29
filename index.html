@@ -195,7 +195,7 @@
 }
 </code></pre><p>就是计算当前的progress进度，更新相应的值而已，没有难度。</p>
 <h3 id="Swift_重写">Swift 重写</h3><p>先来效果:</p>
-<p><img href="http://7lrzqz.com1.z0.glb.clouddn.com/CountDownLabel.gif"></p>
+<p><img src="http://7lrzqz.com1.z0.glb.clouddn.com/CountDownLabel.gif"></p>
 <h4 id="CADisplayLink_vs_NSTimer">CADisplayLink vs NSTimer</h4><p>首先我们来回忆下Objective-C版本中的一些逻辑，使用NSTimer动态根据进度更新时间。但是我们知道，NSTimer有一个很大的问题就是他的“刷新率”不够准确。如果NSTimer设置了每两秒更新一次，那么如果RunLoop中有个耗时的任务，就会讲这个更新任务推迟，用时间轴来理解：</p>
 <pre><code><span class="number">0</span><span class="function"> -&gt;</span> <span class="number">2s</span> <span class="function"><span class="params">(NSTimer回调)</span> -&gt;</span> <span class="number">3s</span> （耗时的任务）<span class="function"> -&gt;</span> <span class="number">2s</span> (NSTimer回调)。
 </code></pre><p>那么这个会导致什么问题呢？NSTimer的回调和屏幕刷新不是同步的。因此，在Swift版本的重写中，我采用了CADisplayLink来改写，它的好处我们同样用时间轴来理解：</p>
@@ -263,7 +263,7 @@
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/10/29/Swift-Count-Down-Label/" data-id="cigc4s9z70008o4i1nk8x116x" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/10/29/Swift-Count-Down-Label/" data-id="cigc4v6hg0008qbi1odiq3sv8" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Swift/">Swift</a></li></ul>
@@ -394,7 +394,7 @@ func computeAngle(p1:<span class="type">CGPoint</span> , p2:<span class="type">C
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/10/27/Swift-Circle-Slider/" data-id="cigc4s9z9000bo4i1pwrefam7" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/10/27/Swift-Circle-Slider/" data-id="cigc4v6hj000bqbi1dqwm79fi" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Swift/">Swift</a></li></ul>
@@ -616,7 +616,7 @@ func computeAngle(p1:<span class="type">CGPoint</span> , p2:<span class="type">C
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/10/14/GLCalendarView/" data-id="cigc4s9zc000do4i11mhmkfri" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/10/14/GLCalendarView/" data-id="cigc4v6hk000dqbi1gtiw5706" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
@@ -837,7 +837,7 @@ func computeAngle(p1:<span class="type">CGPoint</span> , p2:<span class="type">C
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/09/30/Debounce-and-Throttle-in-iOS/" data-id="cigc4s9ze000fo4i1qhxx838r" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/09/30/Debounce-and-Throttle-in-iOS/" data-id="cigc4v6hm000fqbi1z4g26qxf" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
@@ -1138,7 +1138,7 @@ func computeAngle(p1:<span class="type">CGPoint</span> , p2:<span class="type">C
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/09/23/flux-js-part-one/" data-id="cigc4s9z10003o4i1s90cq0ty" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/09/23/flux-js-part-one/" data-id="cigc4v6h40003qbi1o21ceght" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/JavaScript/">JavaScript</a></li></ul>
@@ -1810,7 +1810,7 @@ CountryModel<span class="keyword">*</span> country = [[CountryModel alloc] initW
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/09/17/code-of-JSONModel/" data-id="cigc4s9z50006o4i1jctsi4a6" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/09/17/code-of-JSONModel/" data-id="cigc4v6he0006qbi1e6vqjb6j" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
@@ -1858,7 +1858,7 @@ CountryModel<span class="keyword">*</span> country = [[CountryModel alloc] initW
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/09/11/A-New-Start/" data-id="cigc4s9xy0000o4i1lfoql86c" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/09/11/A-New-Start/" data-id="cigc4v6g20000qbi1d17rrqfc" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>

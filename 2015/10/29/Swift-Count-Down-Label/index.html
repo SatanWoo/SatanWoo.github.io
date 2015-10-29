@@ -19,7 +19,8 @@ UICountingLabel源码解析整个uICountingLabel的本质就是基于一个NSTim
 - (CGFloat)currentValue {
 
     if (self.progress &amp;gt;= self.totalTi">
-<meta property="og:updated_time" content="2015-10-29T10:38:13.000Z">
+<meta property="og:image" content="http://7lrzqz.com1.z0.glb.clouddn.com/CountDownLabel.gif">
+<meta property="og:updated_time" content="2015-10-29T11:13:50.000Z">
 <meta name="twitter:card" content="summary">
 <meta name="twitter:title" content="Swift每日一练：重写UICountingLabel">
 <meta name="twitter:description" content="今天Swift练习的是准备尝试把UICountingLabel这个Github Star数超过500的库用Swift重写一遍。
@@ -206,7 +207,7 @@ UICountingLabel源码解析整个uICountingLabel的本质就是基于一个NSTim
 }
 </code></pre><p>就是计算当前的progress进度，更新相应的值而已，没有难度。</p>
 <h3 id="Swift_重写">Swift 重写</h3><p>先来效果:</p>
-<p><img href="http://7lrzqz.com1.z0.glb.clouddn.com/CountDownLabel.gif"></p>
+<p><img src="http://7lrzqz.com1.z0.glb.clouddn.com/CountDownLabel.gif"></p>
 <h4 id="CADisplayLink_vs_NSTimer">CADisplayLink vs NSTimer</h4><p>首先我们来回忆下Objective-C版本中的一些逻辑，使用NSTimer动态根据进度更新时间。但是我们知道，NSTimer有一个很大的问题就是他的“刷新率”不够准确。如果NSTimer设置了每两秒更新一次，那么如果RunLoop中有个耗时的任务，就会讲这个更新任务推迟，用时间轴来理解：</p>
 <pre><code><span class="number">0</span><span class="function"> -&gt;</span> <span class="number">2s</span> <span class="function"><span class="params">(NSTimer回调)</span> -&gt;</span> <span class="number">3s</span> （耗时的任务）<span class="function"> -&gt;</span> <span class="number">2s</span> (NSTimer回调)。
 </code></pre><p>那么这个会导致什么问题呢？NSTimer的回调和屏幕刷新不是同步的。因此，在Swift版本的重写中，我采用了CADisplayLink来改写，它的好处我们同样用时间轴来理解：</p>
@@ -274,7 +275,7 @@ UICountingLabel源码解析整个uICountingLabel的本质就是基于一个NSTim
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/10/29/Swift-Count-Down-Label/" data-id="cigc4s9z70008o4i1nk8x116x" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/10/29/Swift-Count-Down-Label/" data-id="cigc4v6hg0008qbi1odiq3sv8" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Swift/">Swift</a></li></ul>
