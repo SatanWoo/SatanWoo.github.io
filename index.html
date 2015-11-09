@@ -211,7 +211,7 @@
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/11/05/Understand-Viper/" data-id="cigl5p0i40008gei19oq2jxae" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/11/05/Understand-Viper/" data-id="cigs90tmv0008cbi1cmy758iy" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
@@ -245,11 +245,200 @@
     
     <div class="article-entry" itemprop="articleBody">
       
-        
+        <h3 id="Object-Path">Object-Path</h3><p>今天看到了一个非常有意思的JavaScript库，乍一看有点iOS keypath chain的意思，名字叫Object-Path，<a href="https://github.com/mariocasciaro/object-path" target="_blank" rel="external">地址点我</a>，主要的功能包含了：</p>
+<ul>
+<li>Set</li>
+<li>Get</li>
+<li>Del</li>
+<li>Empty </li>
+<li>Insert </li>
+<li>EnsureExist</li>
+<li>Push</li>
+</ul>
+<p>从它的Example中我们可以先一览它的功能：</p>
+<pre><code><span class="keyword">var</span> obj = {
+  a: {
+    b: <span class="string">"d"</span>,
+    c: [<span class="string">"e"</span>, <span class="string">"f"</span>],
+    <span class="string">'\u1200'</span>: <span class="string">'unicode key'</span>,
+    <span class="string">'dot.dot'</span>: <span class="string">'key'</span>
+  }
+};
+
+<span class="keyword">var</span> objectPath = require(<span class="string">"object-path"</span>);
+
+<span class="comment">//get deep property</span>
+objectPath.<span class="keyword">get</span>(obj, <span class="string">"a.b"</span>);  <span class="comment">//returns "d"</span>
+objectPath.<span class="keyword">get</span>(obj, [<span class="string">"a"</span>, <span class="string">"dot.dot"</span>]);  <span class="comment">//returns "key"</span>
+objectPath.<span class="keyword">get</span>(obj, <span class="string">'a.\u1200'</span>);  <span class="comment">//returns "unicode key"</span>
+</code></pre><p>从这个例子中，我们可以发现对于一个Object <strong>obc</strong>，除了默认的直接通过点 <strong>.</strong>方式访问一个属性外， 如obj.a。我们还可以通过点 <strong>.</strong> 来进行<strong>“链式”</strong>访问其属性的属性（如果存在的话），如obj.a.b。这看起来真的和iOS中的keypath coding非常相似，所以，今天就让我们来分析下其实现吧！</p>
+<h3 id="源码解析">源码解析</h3><h4 id="Set方法">Set方法</h4><pre><code>例子：objectPath.<span class="keyword">set</span>(obj, <span class="string">"a.h"</span>, <span class="string">"m"</span>); 
+</code></pre><p>Set方法是用来给obj的某个<strong>“链式”</strong>属性进行赋值的，源码如下：</p>
+<pre><code><span class="function">function <span class="title">set</span><span class="params">(obj, path, value, doNotReplace)</span></span>{
+     <span class="comment">// 1. </span>
+    <span class="keyword">if</span> (isNumber(path)) {
+      path = [path];
+    }
+
+    <span class="comment">// 2.</span>
+    <span class="keyword">if</span> (isEmpty(path)) {
+      <span class="keyword">return</span> obj;
+    }
+
+    <span class="comment">// 3.</span>
+    <span class="keyword">if</span> (isString(path)) {
+      <span class="keyword">return</span> <span class="built_in">set</span>(obj, path.split(<span class="string">'.'</span>).<span class="built_in">map</span>(getKey), value, doNotReplace);
+    }
+
+    <span class="comment">// 4.</span>
+    var currentPath = path[<span class="number">0</span>];
+
+    <span class="keyword">if</span> (path.length === <span class="number">1</span>) {
+      var oldVal = obj[currentPath];
+      <span class="keyword">if</span> (oldVal === <span class="keyword">void</span> <span class="number">0</span> || !doNotReplace) {
+        obj[currentPath] = value;
+      }
+      <span class="keyword">return</span> oldVal;
+    }
+
+     <span class="comment">// 5.</span>
+    <span class="keyword">if</span> (obj[currentPath] === <span class="keyword">void</span> <span class="number">0</span>) {
+      <span class="comment">//check if we assume an array</span>
+      <span class="keyword">if</span>(isNumber(path[<span class="number">1</span>])) {
+        obj[currentPath] = [];
+      } <span class="keyword">else</span> {
+        obj[currentPath] = {};
+      }
+    }
+
+    <span class="keyword">return</span> <span class="built_in">set</span>(obj[currentPath], path.slice(<span class="number">1</span>), value, doNotReplace);
+  }
+</code></pre><ul>
+<li><ol>
+<li>判断传入的path是否是Number类型，如果不是的话，构建一个包含这个pathde数组，这里为什么要这样处理，在下文解释。<strong>注：JavaScript中不存在浮点数、整数等等不同数值类型，统一为Number</strong></li>
+</ol>
+</li>
+<li><ol>
+<li>判断传入的path是不是“空”，空的情况包含：undefined，空数组，没有任何自身属性的对象。下文我们会详细查看<strong>isEmpty</strong>的实现。</li>
+</ol>
+</li>
+<li><ol>
+<li>判断是否是字符串，如果是字符串，就通过<strong>“.”</strong>进行分割，分割完成构建数组，然后进行set方法的重新调用。</li>
+</ol>
+</li>
+<li><ol>
+<li>判断是否当前path深度只为一层，<em>var currentPath = path[0]</em>，如果是一层的话，根据是否要doNotReplace进行值的替换。</li>
+</ol>
+</li>
+</ul>
+<p>这里有个很有意思的实现 <strong>oldVal === void 0</strong>，void 0是什么鬼，我们经常会看见<strong>JavaScript::void(0)代表网页的死链接</strong>，那么oldVal == void 0又是什么意思呢？</p>
+<p><strong>其实，void 0就是undefined！</strong>在现代的浏览器中，它们两已经完全的等同了。而写成void 0的形式，是为了兼容。在过去的浏览器中，undefined不是一个关键字，它是个全局变量。因此，你完全可以徒手改变它的含义，</p>
+<pre><code><span class="keyword">var</span> <span class="literal">undefined</span> = <span class="number">1</span>;
+<span class="built_in">console</span>.log(<span class="literal">undefined</span>);
+</code></pre><p>这样的改变，就会undefined原本的含义错乱。而<strong>由于void是一个操作符，你无法改写它的含义，因此void 0是一种更安全的写法！</strong></p>
+<p>在这里的含义就是，判断<strong>oldVal === void 0</strong>是不是未定义罢了。</p>
+<ul>
+<li><ol>
+<li>如果不是一层深度的path，并且当前的obj[currentPath]是未定义的。那么就需要判断path[1]，也就是path数组中的第二个属性是什么了。<strong>如果是数字，就将obj[currentPath]构建为数组［］，否则构建一个对象｛｝。</strong></li>
+</ol>
+</li>
+</ul>
+<p>为什么要分开处理呢？这里就需要提及JavaScript访问属性的一个特别的地方。对于如下这样一个对象，</p>
+<pre><code><span class="keyword">var</span> obj = <span class="comment">{a:5}</span>
+</code></pre><p>来说，我们实现<strong>obj.a 或者 obj[“a”]</strong>都可以获得正确的结果5，但是对于另一个对象，</p>
+<pre><code>var obj = {<span class="number">1</span>: <span class="number">5</span>}
+</code></pre><p>我们只能使用obj[“1”]的方式来访问结果5，而不能使用obj.1。如果使用obj.1，就能报错误：<div style="color:red">Uncaught SyntaxError: Unexpected number(…)</div></p>
+<p>究其原因，就在于JavaScript在处理对象的key的时候，都是将key当成字符串处理的。</p>
+<p>所以，在这里构建完相对应的下一层级obj[currrentPath]，递归调用set方法即可。</p>
+<h4 id="Del方法">Del方法</h4><pre><code><span class="function">function <span class="title">del</span><span class="params">(obj, path)</span> </span>{
+    <span class="keyword">if</span> (isNumber(path)) {
+     path = [path];
+    }
+
+    <span class="keyword">if</span> (isEmpty(obj)) {
+     <span class="keyword">return</span> <span class="keyword">void</span> <span class="number">0</span>;
+    }
+
+    <span class="keyword">if</span> (isEmpty(path)) {
+     <span class="keyword">return</span> obj;
+    }
+
+    <span class="keyword">if</span>(isString(path)) {
+     <span class="keyword">return</span> del(obj, path.split(<span class="string">'.'</span>));
+    }
+
+    <span class="comment">// 重点</span>
+    var currentPath = getKey(path[<span class="number">0</span>]);
+    var oldVal = obj[currentPath];
+
+    <span class="keyword">if</span>(path.length === <span class="number">1</span>) {
+     <span class="keyword">if</span> (oldVal !== <span class="keyword">void</span> <span class="number">0</span>) {
+       <span class="keyword">if</span> (isArray(obj)) {
+         obj.splice(currentPath, <span class="number">1</span>);
+       } <span class="keyword">else</span> {
+         <span class="keyword">delete</span> obj[currentPath];
+       }
+     }
+    } <span class="keyword">else</span> {
+     <span class="keyword">if</span> (obj[currentPath] !== <span class="keyword">void</span> <span class="number">0</span>) {
+       <span class="keyword">return</span> del(obj[currentPath], path.slice(<span class="number">1</span>));
+     }
+    }
+
+    <span class="keyword">return</span> obj;
+}
+</code></pre><p>让我们再来看看Del方法，这个方法用于“链式”删除一些属性对应的值。由于之前的逻辑和Set类似，我们直接从重点开始看起。</p>
+<ul>
+<li>首先先从path[0]中获取key，然后取出对应的oldVal。</li>
+<li><p>如果path深度为1，并且oldVal不是未定义的话，究进行删除，删除分为两种：</p>
+<p>（1）如果是数组的话,通过splice删除数组中currentPath位置上的属性值<br>（2）如果是object，直接进行删除即可</p>
+</li>
+<li><p>如果深度不为1，并且oldValue不是未定义，递归调用del函数即可。</p>
+</li>
+</ul>
+<p>这里有一点需要注意，我们看到在获取currentPath的过程中，调用了getKey这个函数，让我们赶紧去看看这个getKey的实现。</p>
+<pre><code><span class="function"><span class="keyword">function</span> <span class="title">getKey</span>(<span class="params">key</span>)</span>{
+    <span class="keyword">var</span> intKey = <span class="built_in">parseInt</span>(key);
+    <span class="keyword">if</span> (intKey.toString() === key) {
+      <span class="keyword">return</span> intKey;
+    }
+    <span class="keyword">return</span> key;
+} 
+</code></pre><p>这里的逻辑不难理解，通过parseInt将key转成整型，如果转换后的结果通过toString函数和原有的key一致，就直接返回整形，否则返回原有的key。<strong>通过===(强等于号)不难理解，这里if的满足条件当且仅当key本身是string类型，同时其值是个整数才可以满足，如”5”等，像类似”a.2”, “5.5”就不会满足。</strong></p>
+<h3 id="补充知识：JavaScript类型判断">补充知识：JavaScript类型判断</h3><pre><code><span class="function"><span class="keyword">function</span> <span class="title">isNumber</span><span class="params">(value)</span></span>{
+  <span class="keyword">return</span> <span class="keyword">typeof</span> value === <span class="string">'number'</span> || toString(value) === <span class="string">"[object Number]"</span>;
+}
+
+<span class="function"><span class="keyword">function</span> <span class="title">isString</span><span class="params">(obj)</span></span>{
+  <span class="keyword">return</span> <span class="keyword">typeof</span> obj === <span class="string">'string'</span> || toString(obj) === <span class="string">"[object String]"</span>;
+}
+
+<span class="function"><span class="keyword">function</span> <span class="title">isObject</span><span class="params">(obj)</span></span>{
+  <span class="keyword">return</span> <span class="keyword">typeof</span> obj === <span class="string">'object'</span> &amp;&amp; toString(obj) === <span class="string">"[object Object]"</span>;
+}
+
+<span class="function"><span class="keyword">function</span> <span class="title">isArray</span><span class="params">(obj)</span></span>{
+  <span class="keyword">return</span> <span class="keyword">typeof</span> obj === <span class="string">'object'</span> &amp;&amp; <span class="keyword">typeof</span> obj.length === <span class="string">'number'</span> &amp;&amp; toString(obj) === <span class="string">'[object Array]'</span>;
+}
+
+<span class="function"><span class="keyword">function</span> <span class="title">isBoolean</span><span class="params">(obj)</span></span>{
+  <span class="keyword">return</span> <span class="keyword">typeof</span> obj === <span class="string">'boolean'</span> || toString(obj) === <span class="string">'[object Boolean]'</span>;
+}
+</code></pre><p>在Object-Path的实现中，大量的类型判断工作都是通过如上一些函数来搞定的。有人会问了，判断一个类型为啥要这么麻烦，直接用instanceOf或者typeof不可以吗？</p>
+<ul>
+<li>用instanceOf是肯定错误的，如果被判断的对象不处于同一个页面，那么instanceOf就肯定失效了。</li>
+</ul>
+<blockquote><br>比如，一个页面（父页面）有一个框架，框架中引用了一个页面（子页面），在子页面中声明了一个array，并将其赋值给父页面的一个变量，这时判断该变量是否是array类型，就是失败<br></blockquote>
+
+<ul>
+<li>用typeof的缺陷在于，JavaScript中存在基本类型和包装类型，对于数值5来说，它是基本类型Number，通过typeof可以准备的判断出。但是如果是包装对象<b>var k = new Number(5)</b>，在意义上其仍然应该是属于数值类型，但是通过typeof获得的结果是object，因此就不正确。</li>
+</ul>
+<p><strong>所以，在这里的实现，我们采用了Object.prototype.toString.call(obj)的方式来获取正确的类型。</strong></p>
+
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/11/05/Object-Path-Source-Code/" data-id="cigl5p0ia000fgei170hfhx2k" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/11/05/Object-Path-Source-Code/" data-id="cigs90tn1000fcbi1flf4f6ii" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/JavaScript/">JavaScript</a></li></ul>
@@ -283,17 +472,36 @@
     
     <div class="article-entry" itemprop="articleBody">
       
-        <p>本人新手，学习安卓，这里用来记录一下学习心得和笔记。</p>
+        <p>本人新手，学习安卓，这里用来记录一下阅读《第一行代码》的笔试和体会。</p>
 <ol>
 <li>在XML引入一个id，就使用@id/id_name，如果要添加一个id，就使用@+id/id_name</li>
 <li>给主活动指定的Label不仅会成为标题栏中的内容，还会成为Launcher中应用程序显示的名称。</li>
-<li></li>
+<li>Intent 调用StartActivityForResult用来给上一层Activity返回数据</li>
+<li>活动的生存期</li>
 </ol>
+<ul>
+<li>运行状态，当一个活动处于返回栈的栈顶时，就处于运行状态，系统最不愿意回收的就是处于运行状态的活动。</li>
+<li>暂停状态，当一个活动不处于栈顶位置，但是仍然可见的时候，就进入了暂停状态（因为有些活动，如对话框等，就不会占据整个屏幕，因此其他活动仍然可见）</li>
+<li>停止状态，当一个活动不再处于栈顶位置，并且完全不可见的时候，就进入了停止状态。</li>
+<li>销毁状态，当一个活动从返回栈中被移除后，就进入了销毁状态。</li>
+</ul>
+<ol>
+<li>活动生命周期回调函数</li>
+</ol>
+<ul>
+<li>onCreate在活动第一次创建的时候调用</li>
+<li>onStart在活动由不可见变成可见的时候调用</li>
+<li>onResume在活动准备好和用户进行交互的时候调用，此时的活动一定位于栈的栈顶，且处于运行状态。</li>
+<li>onPause在系统准备去启动或者恢复另一个活动的时候调用。</li>
+<li>onStop在活动完全不可见的时候调用。</li>
+<li>onDestory在活动被销毁之前调用，之后的活动变为销毁状态。</li>
+<li>onRestart在活动由停止状态变为运行状态之前调用，也就是活动被重新启动了。</li>
+</ul>
 
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/10/29/Learn-Android-Day-by-Day/" data-id="cigl5p0ic000hgei1kh6qneeh" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/10/29/Learn-Android-Day-by-Day/" data-id="cigs90tn4000hcbi1l6ewnavh" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Android/">Android</a></li></ul>
@@ -505,7 +713,7 @@
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/10/29/Swift-Count-Down-Label/" data-id="cigl5p0i6000agei1nrdr3kfa" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/10/29/Swift-Count-Down-Label/" data-id="cigs90tmx000acbi1mrdpe7by" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Swift/">Swift</a></li></ul>
@@ -636,7 +844,7 @@ func computeAngle(p1:<span class="type">CGPoint</span> , p2:<span class="type">C
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/10/27/Swift-Circle-Slider/" data-id="cigl5p0i8000dgei10k7jx8kz" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/10/27/Swift-Circle-Slider/" data-id="cigs90tmz000dcbi1m9uveovk" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Swift/">Swift</a></li></ul>
@@ -858,7 +1066,7 @@ func computeAngle(p1:<span class="type">CGPoint</span> , p2:<span class="type">C
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/10/14/GLCalendarView/" data-id="cigl5p0if000kgei118a62nll" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/10/14/GLCalendarView/" data-id="cigs90tn6000kcbi1z9km7m3l" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
@@ -1079,7 +1287,7 @@ func computeAngle(p1:<span class="type">CGPoint</span> , p2:<span class="type">C
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/09/30/Debounce-and-Throttle-in-iOS/" data-id="cigl5p0ih000mgei1atdcue0u" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/09/30/Debounce-and-Throttle-in-iOS/" data-id="cigs90tn9000mcbi1uewmk3a2" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
@@ -1380,7 +1588,7 @@ func computeAngle(p1:<span class="type">CGPoint</span> , p2:<span class="type">C
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/09/23/flux-js-part-one/" data-id="cigl5p0hr0003gei13qqhmphe" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/09/23/flux-js-part-one/" data-id="cigs90tmf0003cbi13f5cb6s3" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/JavaScript/">JavaScript</a></li></ul>
@@ -2052,7 +2260,7 @@ CountryModel<span class="keyword">*</span> country = [[CountryModel alloc] initW
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/09/17/code-of-JSONModel/" data-id="cigl5p0i10006gei1gggub32j" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/09/17/code-of-JSONModel/" data-id="cigs90tms0006cbi1henx9h1x" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
@@ -2100,7 +2308,7 @@ CountryModel<span class="keyword">*</span> country = [[CountryModel alloc] initW
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/09/11/A-New-Start/" data-id="cigl5p0h20000gei1rd68vntp" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/09/11/A-New-Start/" data-id="cigs90tkx0000cbi1d96qlear" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>

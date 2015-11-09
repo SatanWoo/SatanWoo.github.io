@@ -5,25 +5,40 @@
   
   <title>大菜比学安卓 | Hexo</title>
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
-  <meta name="description" content="本人新手，学习安卓，这里用来记录一下学习心得和笔记。
+  <meta name="description" content="本人新手，学习安卓，这里用来记录一下阅读《第一行代码》的笔试和体会。
 
 在XML引入一个id，就使用@id/id_name，如果要添加一个id，就使用@+id/id_name
-给主活动指定的Label不仅会成为标题栏中的内容，还会成为Launcher中应用程序显示的名称。">
+给主活动指定的Label不仅会成为标题栏中的内容，还会成为Launcher中应用程序显示的名称。
+Intent 调用StartActivityForResult用来给上一层Activity返回数据
+活动的生存期
+
+
+运行状态">
 <meta property="og:type" content="article">
 <meta property="og:title" content="大菜比学安卓">
 <meta property="og:url" content="http://satanwoo.github.io/2015/10/29/Learn-Android-Day-by-Day/index.html">
 <meta property="og:site_name" content="Hexo">
-<meta property="og:description" content="本人新手，学习安卓，这里用来记录一下学习心得和笔记。
+<meta property="og:description" content="本人新手，学习安卓，这里用来记录一下阅读《第一行代码》的笔试和体会。
 
 在XML引入一个id，就使用@id/id_name，如果要添加一个id，就使用@+id/id_name
-给主活动指定的Label不仅会成为标题栏中的内容，还会成为Launcher中应用程序显示的名称。">
-<meta property="og:updated_time" content="2015-10-29T13:54:29.000Z">
+给主活动指定的Label不仅会成为标题栏中的内容，还会成为Launcher中应用程序显示的名称。
+Intent 调用StartActivityForResult用来给上一层Activity返回数据
+活动的生存期
+
+
+运行状态">
+<meta property="og:updated_time" content="2015-11-05T17:07:20.000Z">
 <meta name="twitter:card" content="summary">
 <meta name="twitter:title" content="大菜比学安卓">
-<meta name="twitter:description" content="本人新手，学习安卓，这里用来记录一下学习心得和笔记。
+<meta name="twitter:description" content="本人新手，学习安卓，这里用来记录一下阅读《第一行代码》的笔试和体会。
 
 在XML引入一个id，就使用@id/id_name，如果要添加一个id，就使用@+id/id_name
-给主活动指定的Label不仅会成为标题栏中的内容，还会成为Launcher中应用程序显示的名称。">
+给主活动指定的Label不仅会成为标题栏中的内容，还会成为Launcher中应用程序显示的名称。
+Intent 调用StartActivityForResult用来给上一层Activity返回数据
+活动的生存期
+
+
+运行状态">
   
     <link rel="alternative" href="/atom.xml" title="Hexo" type="application/atom+xml">
   
@@ -93,17 +108,36 @@
     
     <div class="article-entry" itemprop="articleBody">
       
-        <p>本人新手，学习安卓，这里用来记录一下学习心得和笔记。</p>
+        <p>本人新手，学习安卓，这里用来记录一下阅读《第一行代码》的笔试和体会。</p>
 <ol>
 <li>在XML引入一个id，就使用@id/id_name，如果要添加一个id，就使用@+id/id_name</li>
 <li>给主活动指定的Label不仅会成为标题栏中的内容，还会成为Launcher中应用程序显示的名称。</li>
-<li></li>
+<li>Intent 调用StartActivityForResult用来给上一层Activity返回数据</li>
+<li>活动的生存期</li>
 </ol>
+<ul>
+<li>运行状态，当一个活动处于返回栈的栈顶时，就处于运行状态，系统最不愿意回收的就是处于运行状态的活动。</li>
+<li>暂停状态，当一个活动不处于栈顶位置，但是仍然可见的时候，就进入了暂停状态（因为有些活动，如对话框等，就不会占据整个屏幕，因此其他活动仍然可见）</li>
+<li>停止状态，当一个活动不再处于栈顶位置，并且完全不可见的时候，就进入了停止状态。</li>
+<li>销毁状态，当一个活动从返回栈中被移除后，就进入了销毁状态。</li>
+</ul>
+<ol>
+<li>活动生命周期回调函数</li>
+</ol>
+<ul>
+<li>onCreate在活动第一次创建的时候调用</li>
+<li>onStart在活动由不可见变成可见的时候调用</li>
+<li>onResume在活动准备好和用户进行交互的时候调用，此时的活动一定位于栈的栈顶，且处于运行状态。</li>
+<li>onPause在系统准备去启动或者恢复另一个活动的时候调用。</li>
+<li>onStop在活动完全不可见的时候调用。</li>
+<li>onDestory在活动被销毁之前调用，之后的活动变为销毁状态。</li>
+<li>onRestart在活动由停止状态变为运行状态之前调用，也就是活动被重新启动了。</li>
+</ul>
 
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/10/29/Learn-Android-Day-by-Day/" data-id="cigl5p0ic000hgei1kh6qneeh" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/10/29/Learn-Android-Day-by-Day/" data-id="cigs90tn4000hcbi1l6ewnavh" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Android/">Android</a></li></ul>
