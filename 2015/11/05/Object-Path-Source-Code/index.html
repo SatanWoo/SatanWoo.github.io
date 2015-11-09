@@ -39,7 +39,7 @@ var obj = {
   a: {
     b: &quot;d&quot;,
     c:">
-<meta property="og:updated_time" content="2015-11-09T17:54:21.000Z">
+<meta property="og:updated_time" content="2015-11-09T17:57:55.000Z">
 <meta name="twitter:card" content="summary">
 <meta name="twitter:title" content="Object-Path 源码解读">
 <meta name="twitter:description" content="Object-Path今天看到了一个非常有意思的JavaScript库，乍一看有点iOS keypath chain的意思，名字叫Object-Path，地址点我，主要的功能包含了：
@@ -286,6 +286,7 @@ objectPath.<span class="keyword">get</span>(obj, <span class="string">'a.\u1200'
     <span class="keyword">return</span> key;
 } 
 </code></pre><p>这里的逻辑不难理解，通过parseInt将key转成整型，如果转换后的结果通过toString函数和原有的key一致，就直接返回整形，否则返回原有的key。<strong>通过===(强等于号)不难理解，这里if的满足条件当且仅当key本身是string类型，同时其值是个整数才可以满足，如”5”等，像类似”a.2”, “5.5”就不会满足。</strong></p>
+<p>剩下的诸如Get, Has方法，实现都大同小异，我们就不再一一解读了，大家有兴趣可以自行阅读。</p>
 <h3 id="补充知识：JavaScript类型判断">补充知识：JavaScript类型判断</h3><pre><code><span class="function"><span class="keyword">function</span> <span class="title">isNumber</span><span class="params">(value)</span></span>{
   <span class="keyword">return</span> <span class="keyword">typeof</span> value === <span class="string">'number'</span> || toString(value) === <span class="string">"[object Number]"</span>;
 }
@@ -315,11 +316,12 @@ objectPath.<span class="keyword">get</span>(obj, <span class="string">'a.\u1200'
 <li>用typeof的缺陷在于，JavaScript中存在基本类型和包装类型，对于数值5来说，它是基本类型Number，通过typeof可以准备的判断出。但是如果是包装对象<b>var k = new Number(5)</b>，在意义上其仍然应该是属于数值类型，但是通过typeof获得的结果是object，因此就不正确。</li>
 </ul>
 <p><strong>所以，在这里的实现，我们采用了Object.prototype.toString.call(obj)的方式来获取正确的类型。</strong></p>
+<p>嘿嘿，今天就到这里啦。</p>
 
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/11/05/Object-Path-Source-Code/" data-id="cigs90tn1000fcbi1flf4f6ii" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/11/05/Object-Path-Source-Code/" data-id="cigs957cr000feki1rqtkk7pr" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/JavaScript/">JavaScript</a></li></ul>

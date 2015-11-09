@@ -211,7 +211,7 @@
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/11/05/Understand-Viper/" data-id="cigs90tmv0008cbi1cmy758iy" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/11/05/Understand-Viper/" data-id="cigs957cl0008eki1nmn378kh" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
@@ -405,6 +405,7 @@ objectPath.<span class="keyword">get</span>(obj, <span class="string">'a.\u1200'
     <span class="keyword">return</span> key;
 } 
 </code></pre><p>这里的逻辑不难理解，通过parseInt将key转成整型，如果转换后的结果通过toString函数和原有的key一致，就直接返回整形，否则返回原有的key。<strong>通过===(强等于号)不难理解，这里if的满足条件当且仅当key本身是string类型，同时其值是个整数才可以满足，如”5”等，像类似”a.2”, “5.5”就不会满足。</strong></p>
+<p>剩下的诸如Get, Has方法，实现都大同小异，我们就不再一一解读了，大家有兴趣可以自行阅读。</p>
 <h3 id="补充知识：JavaScript类型判断">补充知识：JavaScript类型判断</h3><pre><code><span class="function"><span class="keyword">function</span> <span class="title">isNumber</span><span class="params">(value)</span></span>{
   <span class="keyword">return</span> <span class="keyword">typeof</span> value === <span class="string">'number'</span> || toString(value) === <span class="string">"[object Number]"</span>;
 }
@@ -434,11 +435,12 @@ objectPath.<span class="keyword">get</span>(obj, <span class="string">'a.\u1200'
 <li>用typeof的缺陷在于，JavaScript中存在基本类型和包装类型，对于数值5来说，它是基本类型Number，通过typeof可以准备的判断出。但是如果是包装对象<b>var k = new Number(5)</b>，在意义上其仍然应该是属于数值类型，但是通过typeof获得的结果是object，因此就不正确。</li>
 </ul>
 <p><strong>所以，在这里的实现，我们采用了Object.prototype.toString.call(obj)的方式来获取正确的类型。</strong></p>
+<p>嘿嘿，今天就到这里啦。</p>
 
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/11/05/Object-Path-Source-Code/" data-id="cigs90tn1000fcbi1flf4f6ii" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/11/05/Object-Path-Source-Code/" data-id="cigs957cr000feki1rqtkk7pr" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/JavaScript/">JavaScript</a></li></ul>
@@ -501,7 +503,7 @@ objectPath.<span class="keyword">get</span>(obj, <span class="string">'a.\u1200'
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/10/29/Learn-Android-Day-by-Day/" data-id="cigs90tn4000hcbi1l6ewnavh" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/10/29/Learn-Android-Day-by-Day/" data-id="cigs957cu000heki1hboxvltk" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Android/">Android</a></li></ul>
@@ -713,7 +715,7 @@ objectPath.<span class="keyword">get</span>(obj, <span class="string">'a.\u1200'
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/10/29/Swift-Count-Down-Label/" data-id="cigs90tmx000acbi1mrdpe7by" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/10/29/Swift-Count-Down-Label/" data-id="cigs957cn000aeki1csa6dy6p" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Swift/">Swift</a></li></ul>
@@ -844,7 +846,7 @@ func computeAngle(p1:<span class="type">CGPoint</span> , p2:<span class="type">C
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/10/27/Swift-Circle-Slider/" data-id="cigs90tmz000dcbi1m9uveovk" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/10/27/Swift-Circle-Slider/" data-id="cigs957cp000deki16f2ah12e" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Swift/">Swift</a></li></ul>
@@ -1066,7 +1068,7 @@ func computeAngle(p1:<span class="type">CGPoint</span> , p2:<span class="type">C
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/10/14/GLCalendarView/" data-id="cigs90tn6000kcbi1z9km7m3l" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/10/14/GLCalendarView/" data-id="cigs957cw000keki14yfqhiiw" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
@@ -1287,7 +1289,7 @@ func computeAngle(p1:<span class="type">CGPoint</span> , p2:<span class="type">C
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/09/30/Debounce-and-Throttle-in-iOS/" data-id="cigs90tn9000mcbi1uewmk3a2" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/09/30/Debounce-and-Throttle-in-iOS/" data-id="cigs957cz000meki15u8zxjpy" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
@@ -1588,7 +1590,7 @@ func computeAngle(p1:<span class="type">CGPoint</span> , p2:<span class="type">C
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/09/23/flux-js-part-one/" data-id="cigs90tmf0003cbi13f5cb6s3" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/09/23/flux-js-part-one/" data-id="cigs957ce0003eki1stwzkg92" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/JavaScript/">JavaScript</a></li></ul>
@@ -2260,7 +2262,7 @@ CountryModel<span class="keyword">*</span> country = [[CountryModel alloc] initW
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/09/17/code-of-JSONModel/" data-id="cigs90tms0006cbi1henx9h1x" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/09/17/code-of-JSONModel/" data-id="cigs957cj0006eki1il18k8c8" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
@@ -2308,7 +2310,7 @@ CountryModel<span class="keyword">*</span> country = [[CountryModel alloc] initW
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/09/11/A-New-Start/" data-id="cigs90tkx0000cbi1d96qlear" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/09/11/A-New-Start/" data-id="cigs957bd0000eki1261ru1ej" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
