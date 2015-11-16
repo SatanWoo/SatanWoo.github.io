@@ -4,7 +4,7 @@
   
   <link href="/atom.xml" rel="self"/>
   <link href="http://satanwoo.github.io/"/>
-  <updated>2015-11-11T19:55:32.000Z</updated>
+  <updated>2015-11-16T19:04:45.000Z</updated>
   <id>http://satanwoo.github.io/</id>
   
   <author>
@@ -13,6 +13,94 @@
   </author>
   
   <generator uri="http://hexo.io/">Hexo</generator>
+  
+  <entry>
+    <title><![CDATA[Swift每日一练：妙用CAReplicationLayer]]></title>
+    <link href="http://satanwoo.github.io/2015/11/17/Fun-of-CAReplicationLayer/"/>
+    <id>http://satanwoo.github.io/2015/11/17/Fun-of-CAReplicationLayer/</id>
+    <published>2015-11-16T17:54:05.000Z</published>
+    <updated>2015-11-16T19:04:45.000Z</updated>
+    <content type="html"><![CDATA[<p>今天我们来学习一下一个在iOS常常被忽视的类 - CAReplicationLayer。我们要使用这个类来完成两个开起来很炫酷的加载效果。</p>
+<p>老样子，先上具体的效果一看<br><img src="http://7lrzqz.com1.z0.glb.clouddn.com/LearnCAReplicationLayer.gif"></p>
+<p>怎么样，效果还不错吧。一个是看起来有渐变效果的圆形加载，另外一个则是模仿Apple Music的柱状图加载。</p>
+<p>接下来，就让我们一起揭开实现的面纱吧！</p>
+<h3 id="CAReplicationLayer">CAReplicationLayer</h3><p>CAReplicationLayer是CALayer的子类，它与传统的CALayer系列不同，它基本不直接承担诸多效果，而是更多的承担一种“容器”的职责。</p>
+<p>怎么理解呢？大家可以把CAReplicationLayer看成一个工厂，你提供给他一个产品的模型，它就可以为了源源不断的复制出纺织品。回到iOS中来说就是，你提供一个CALayer给CAReplicationLayer，并告诉它你希望它复制几份，就打造出多个具有效果样式的Layer。<strong>不仅如此，动画效果也会被一同复制</strong></p>
+<p>因此，对于CAReplicationLayer，我们有几个特别需要关注的参数。</p>
+<ul>
+<li>instanceCount： 代表你希望将你提供它的Layer复制几份</li>
+<li>instanceDelay： 这个参数在编写动画的前提下特别有用，它表明对每一个复制(或者原生)出来的Layer，启动动画之间的时间差在多少。</li>
+<li>instanceTransform： 这个参数表示对于每一个Layer，它们之间的<strong>形变</strong>差距是多少。比如，每个Layer需要有相同的间隔。</li>
+</ul>
+<h3 id="渐变效果的圆形加载">渐变效果的圆形加载</h3><p>了解完CAReplicationLayer的基本知识以后，我们首先来看看圆形加载效果怎么实现。</p>
+<p>第一步，毫无疑问的，需要构建一个CAReplicationLayer。</p>
+<pre><code>let replicationLayer2 = <span class="function"><span class="title">CAReplicatorLayer</span><span class="params">()</span></span>
+</code></pre><p>第二部，需要一个样品，让我们的CAReplicationLayer复制生产</p>
+<pre><code>let circle = <span class="function"><span class="title">CAShapeLayer</span><span class="params">()</span></span>
+circle<span class="class">.path</span> = <span class="function"><span class="title">UIBezierPath</span><span class="params">(ovalInRect: CGRect(x: <span class="number">0</span>, y: <span class="number">0</span>, width: <span class="number">10</span>, height: <span class="number">10</span>)</span></span>)<span class="class">.CGPath</span>
+circle<span class="class">.lineWidth</span> = <span class="number">1</span>
+circle<span class="class">.fillColor</span> = UIColor.<span class="function"><span class="title">whiteColor</span><span class="params">()</span></span><span class="class">.CGColor</span>
+circle<span class="class">.transform</span> = <span class="function"><span class="title">CATransform3DMakeScale</span><span class="params">(<span class="number">0.1</span>, <span class="number">0.1</span>, <span class="number">0.1</span>)</span></span>
+</code></pre><p>在这里，我们构建了一个白色小球，把初始大小设置为了0.1。</p>
+<p>接下去，我们需要然CAReplicationLayer开始复制了，</p>
+<pre><code>replicationLayer2<span class="class">.instanceCount</span> = <span class="number">12</span>
+replicationLayer2<span class="class">.instanceTransform</span> = <span class="function"><span class="title">CATransform3DMakeRotation</span><span class="params">(CGFloat(<span class="number">2</span> * M_PI/<span class="number">12.0</span>)</span></span>, <span class="number">0.0</span>, <span class="number">0.0</span>, <span class="number">1.0</span>)
+</code></pre><p>从上述代码我们可以看出，我们首先构建了<strong>12</strong>个复制体，然后将这12个小球通过instanceTransform绕<strong>Z</strong>轴均匀的分度在圆周上。</p>
+<p>现在赶快run一下你的app，看看效果是不是正如我所说的！</p>
+<p>现在万事具备，只欠动画了！</p>
+<p>首先我们来定义如例子中的放缩动画</p>
+<pre><code><span class="component">func scaleAnimation() -&gt; CABasicAnimation {
+    let animation = CABasicAnimation(keyPath: "transform<span class="string">.scale")</span>
+    animation<span class="string">.duration</span> = 1.5
+    animation<span class="string">.fromValue</span> = 1.0
+    animation<span class="string">.toValue</span> = 0.1
+    animation<span class="string">.repeatCount</span> = Float<span class="string">.infinity</span>
+
+    return animation
+}</span>
+</code></pre><p>我们定义了一个针对scale属性、时常1.5s的动画，然后我们将这个动画添加到小球上。</p>
+<pre><code>circle.<span class="function"><span class="title">addAnimation</span><span class="params">(scaleAnimation()</span></span>, forKey: <span class="string">"scale"</span>)
+</code></pre><p>现在如果你跑一下代码的话，你会发现，所有的小球都同时启动了动画，和例子的效果不一致，怎么回事呢？</p>
+<p>嘿嘿，还记得我们之前提及的属性<strong>instanceDelay</strong>吗？没错，我们需要借助它的力量。</p>
+<pre><code>replicationLayer2.instanceDelay = <span class="number">1.5</span>/<span class="number">12</span>
+</code></pre><p>现在再看看？哈哈，效果拔群！</p>
+<h3 id="Apple_Music加载效果">Apple Music加载效果</h3><p>下面的代码，很清晰易懂，我就不逐条解析啦，有问题欢迎大家在下方评论！</p>
+<pre><code><span class="comment">// 1. 创建容器ReplicationLayer</span>
+let replicationLayer = CAReplicatorLayer()
+
+<span class="comment">// 2. 创建柱状图</span>
+let bar = CALayer()
+bar.frame = CGRect(<span class="string">x:</span> <span class="number">0</span>, <span class="string">y:</span> <span class="number">0</span>, <span class="string">width:</span> <span class="number">8</span>, <span class="string">height:</span> <span class="number">40</span>)
+bar.position = CGPoint(<span class="string">x:</span> <span class="number">10</span>, <span class="string">y:</span> <span class="number">75</span>)
+bar.backgroundColor = UIColor.purpleColor().CGColor
+
+<span class="comment">// 3. 复制生产3个，并添加水平间隔</span>
+replicationLayer.addSublayer(bar)
+replicationLayer.instanceCount = <span class="number">3</span>
+replicationLayer.instanceTransform = CATransform3DMakeTranslation(<span class="number">20</span>, <span class="number">0</span>, <span class="number">0</span>)
+
+<span class="comment">// 4. 创建动画，构造时间差</span>
+func jumpAnimation(<span class="string">bar:</span>CALayer) -&gt; CABasicAnimation {
+    let animation = CABasicAnimation(<span class="string">keyPath:</span> <span class="string">"position.y"</span>)
+    animation.toValue = bar.position.y - <span class="number">35.0</span>
+    animation.duration = <span class="number">0.45</span>
+    animation.autoreverses = <span class="literal">true</span>
+    animation.repeatCount = Float.infinity
+
+    <span class="keyword">return</span> animation
+}
+
+bar.addAnimation(jumpAnimation(bar), <span class="string">forKey:</span> <span class="string">"jump"</span>)
+replicationLayer.instanceDelay = <span class="number">0.3</span>
+</code></pre>]]></content>
+    <summary type="html">
+    <![CDATA[<p>今天我们来学习一下一个在iOS常常被忽视的类 - CAReplicationLayer。我们要使用这个类来完成两个开起来很炫酷的加载效果。</p>
+<p>老样子，先上具体的效果一看<br><img src="http://7lrzqz.com1.z0.glb.clouddn]]>
+    </summary>
+    
+      <category term="Swift" scheme="http://satanwoo.github.io/tags/Swift/"/>
+    
+  </entry>
   
   <entry>
     <title><![CDATA[Swift每日一练：自定义转场在iOS8中的那些坑]]></title>
