@@ -88,20 +88,6 @@
 	//Add helper object
 	F.helpers.media = {
 		defaults : {
-			youtube : {
-				matcher : /(youtube\.com|youtu\.be|youtube-nocookie\.com)\/(watch\?v=|v\/|u\/|embed\/?)?(videoseries\?list=(.*)|[\w-]{11}|\?listType=(.*)&list=(.*)).*/i,
-				params  : {
-					autoplay    : 1,
-					autohide    : 1,
-					fs          : 1,
-					rel         : 0,
-					hd          : 1,
-					wmode       : 'opaque',
-					enablejsapi : 1
-				},
-				type : 'iframe',
-				url  : '//www.youtube.com/embed/$3'
-			},
 			vimeo : {
 				matcher : /(?:vimeo(?:pro)?.com)\/(?:[^\d]+)?(\d+)(?:.*)/,
 				params  : {
@@ -136,31 +122,6 @@
 				type : 'swf',
 				url  : '//www.dailymotion.com/swf/video/$1'
 			},
-			twitvid : {
-				matcher : /twitvid\.com\/([a-zA-Z0-9_\-\?\=]+)/i,
-				params  : {
-					autoplay : 0
-				},
-				type : 'iframe',
-				url  : '//www.twitvid.com/embed.php?guid=$1'
-			},
-			twitpic : {
-				matcher : /twitpic\.com\/(?!(?:place|photos|events)\/)([a-zA-Z0-9\?\=\-]+)/i,
-				type : 'image',
-				url  : '//twitpic.com/show/full/$1/'
-			},
-			instagram : {
-				matcher : /(instagr\.am|instagram\.com)\/p\/([a-zA-Z0-9_\-]+)\/?/i,
-				type : 'image',
-				url  : '//$1/p/$2/media/?size=l'
-			},
-			google_maps : {
-				matcher : /maps\.google\.([a-z]{2,3}(\.[a-z]{2})?)\/(\?ll=|maps\?)(.*)/i,
-				type : 'iframe',
-				url  : function( rez ) {
-					return '//maps.google.' + rez[1] + '/' + rez[3] + '' + rez[4] + '&output=' + (rez[4].indexOf('layer=c') > 0 ? 'svembed' : 'embed');
-				}
-			}
 		},
 
 		beforeLoad : function(opts, obj) {
