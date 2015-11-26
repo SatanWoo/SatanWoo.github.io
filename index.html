@@ -62,6 +62,223 @@
       <div class="outer">
         <section id="main">
   
+    <article id="post-FDFullScreenPopGesture-Source-Code" class="article article-type-post" itemscope itemprop="blogPost">
+  <div class="article-meta">
+    <a href="/2015/11/26/FDFullScreenPopGesture-Source-Code/" class="article-date">
+  <time datetime="2015-11-26T03:38:42.000Z" itemprop="datePublished">2015-11-26</time>
+</a>
+    
+  </div>
+  <div class="article-inner">
+    
+    
+      <header class="article-header">
+        
+  
+    <h1 itemprop="name">
+      <a class="article-title" href="/2015/11/26/FDFullScreenPopGesture-Source-Code/">FDFullScreenPopGesture源码解析</a>
+    </h1>
+  
+
+      </header>
+    
+    <div class="article-entry" itemprop="articleBody">
+      
+        <p><em>嘿嘿，花了三天时间把自己的代码从700行缩减成了200行，终于有时间可以拜读新源码了，好开心。</em></p>
+<p>好了，废话不多话，今天我们要读了百度出品的一个开源项目FDFullScreenPopGesture。</p>
+<h2 id="项目介绍">项目介绍</h2><p><a href="https://github.com/forkingdog/FDFullscreenPopGesture" target="_blank" rel="external">FDFullScreenPopGesture</a>是一款无需改动即可整合进入现有项目的全局手势操作，使用这个即可以在左侧边缘拖拽的时候返回上一级的效果。</p>
+<p>看到这，有人会问，我们这个直接用UIPanGestureRecognizer不也能达到吗？<br>没错，仅仅是返回上一级这个需求确实很简单。但是iOS7上返回上一级时候，UINavigationBar的切换效果你能实现吗？</p>
+<p>而且，我要说的重点是<strong>FDFullscreenPopGesture</strong>实现思路很赞！！！</p>
+<h2 id="源码分析">源码分析</h2><h3 id="结构分析">结构分析</h3><p>整个FDFullscreenPopGesture其实可以主要拆分成三块：</p>
+<pre><code>-<span class="ruby">- _FDFullscreenPopGestureRecognizerDelegate
+</span>-<span class="ruby">- <span class="constant">UIViewController</span> (<span class="constant">FDFullscreenPopGesturePrivate</span>)
+</span>-<span class="ruby">- <span class="constant">UINavigationController</span> (<span class="constant">FDFullscreenPopGesture</span>)</span>
+</code></pre><ul>
+<li><p>_FDFullscreenPopGestureRecognizerDelegate虽然名字看起来像一个Protocol，但是它实质上是一个<strong>NSObject</strong>子类，同时实现了<strong>UIGestureRecognizerDelegate</strong>。这么做的好处是什么呢？不知道大家有没有经历过ViewController重构，以前很多时候，比如我们写UIScrollView，UITableView，他们的Delegate，DataSource都耦合进了ViewController，常常导致MassViewController灾难的发生。<strong>单独构建一个专门负责的Delgeate“处理器”是非常有效的手段</strong></p>
+</li>
+<li><p>UIViewController (FDFullscreenPopGesturePrivate)是一个Category，我们在这个分类里面主要进行<strong>viewWillAppear</strong>的Hook，具体做什么，后面章节我们细细道来。</p>
+</li>
+<li><p>UINavigationController (FDFullscreenPopGesture)也是一个分类，是进行<strong>pushViewController:animated:</strong>方法的hook，实现部分我们后续再看。</p>
+</li>
+</ul>
+<h3 id="源码分析-1">源码分析</h3><h4 id="_FDFullscreenPopGestureRecognizerDelegate">_FDFullscreenPopGestureRecognizerDelegate</h4><pre><code>- (<span class="built_in">BOOL</span>)gestureRecognizerShouldBegin:(<span class="built_in">UIPanGestureRecognizer</span> *)gestureRecognizer
+{
+    <span class="comment">// 1.</span>
+    <span class="keyword">if</span> (<span class="keyword">self</span><span class="variable">.navigationController</span><span class="variable">.viewControllers</span><span class="variable">.count</span> &lt;= <span class="number">1</span>) {
+        <span class="keyword">return</span> <span class="literal">NO</span>;
+    }
+
+    <span class="comment">// 2.</span>
+    <span class="built_in">UIViewController</span> *topViewController = <span class="keyword">self</span><span class="variable">.navigationController</span><span class="variable">.viewControllers</span><span class="variable">.lastObject</span>;
+    <span class="keyword">if</span> (topViewController<span class="variable">.fd_interactivePopDisabled</span>) {
+        <span class="keyword">return</span> <span class="literal">NO</span>;
+    }
+
+    <span class="comment">// 3. </span>
+    <span class="built_in">CGPoint</span> beginningLocation = [gestureRecognizer locationInView:gestureRecognizer<span class="variable">.view</span>];
+    <span class="built_in">CGFloat</span> maxAllowedInitialDistance = topViewController<span class="variable">.fd_interactivePopMaxAllowedInitialDistanceToLeftEdge</span>;
+    <span class="keyword">if</span> (maxAllowedInitialDistance &gt; <span class="number">0</span> &amp;&amp; beginningLocation<span class="variable">.x</span> &gt; maxAllowedInitialDistance) {
+        <span class="keyword">return</span> <span class="literal">NO</span>;
+    }
+
+    <span class="comment">// 4.</span>
+    <span class="keyword">if</span> ([[<span class="keyword">self</span><span class="variable">.navigationController</span> valueForKey:<span class="string">@"_isTransitioning"</span>] boolValue]) {
+        <span class="keyword">return</span> <span class="literal">NO</span>;
+    }
+
+    <span class="comment">// 5.</span>
+    <span class="built_in">CGPoint</span> translation = [gestureRecognizer translationInView:gestureRecognizer<span class="variable">.view</span>];
+    <span class="keyword">if</span> (translation<span class="variable">.x</span> &lt;= <span class="number">0</span>) {
+        <span class="keyword">return</span> <span class="literal">NO</span>;
+    }
+
+    <span class="keyword">return</span> <span class="literal">YES</span>;
+}
+</code></pre><p>整个类特别精简，它的职责就是维护一个UINavigationController然后根据一系列的状态判断该手势是否生效。这些状态包括</p>
+<ol>
+<li>当前UINavigationController的栈是否只剩最后一个ViewController了</li>
+<li>当前即将出栈的topViewController是否禁用了<strong>fd_interactivePopDisabled</strong>，该变量我们稍后会说</li>
+<li>当前手势的启动点是不是离左侧边缘太远了，毕竟我们是要模拟iOS原生的手势操作，原生的不支持全屏，我们为啥要支持！</li>
+<li>当前是否已经处在转场过程中。在这里，可以看到它使用了valueForKey这一<strong>Key-Value-Coding</strong>技术，它可以访问私有变量<strong>_isTransitioning</strong>哦！</li>
+<li>方向相反的滑动滚粗。</li>
+</ol>
+<h4 id="UIViewController_(FDFullscreenPopGesturePrivate)">UIViewController (FDFullscreenPopGesturePrivate)</h4><p>整个这个类也非常简单，就是通过 <strong>fd_viewWillAppear</strong> hook了 <strong>viewWillAppear</strong> 这个方法，然后插入了自己一段回调的block。</p>
+<pre><code>- (<span class="keyword">void</span>)fd_viewWillAppear:(<span class="built_in">BOOL</span>)animated
+{
+    <span class="comment">// Forward to primary implementation.</span>
+    [<span class="keyword">self</span> fd_viewWillAppear:animated];
+
+    <span class="keyword">if</span> (<span class="keyword">self</span><span class="variable">.fd_willAppearInjectBlock</span>) {
+        <span class="keyword">self</span><span class="variable">.fd_willAppearInjectBlock</span>(<span class="keyword">self</span>, animated);
+    }
+}
+</code></pre><h4 id="UINavigationController_(FDFullscreenPopGesture)">UINavigationController (FDFullscreenPopGesture)</h4><p>这个分类是整个项目的逻辑控制核心。它干了这么几件事：</p>
+<ul>
+<li>用 <strong>fd_pushViewController:animated:</strong> hook <strong>pushViewController:animated:</strong></li>
+<li><strong>禁用</strong>UINavgationController的<strong>interactivePopGestureRecognizer</strong></li>
+<li>构建了属于自己UIPanGestureRecognizer替换interactivePopGestureRecognizer，同时把手势的delegate赋值给了_FDFullscreenPopGestureRecognizerDelegate</li>
+</ul>
+<p>它的主要核心代码如下：</p>
+<pre><code>- (<span class="keyword">void</span>)fd_pushViewController:(<span class="built_in">UIViewController</span> *)viewController animated:(<span class="built_in">BOOL</span>)animated
+{
+    <span class="keyword">if</span> (![<span class="keyword">self</span><span class="variable">.interactivePopGestureRecognizer</span><span class="variable">.view</span><span class="variable">.gestureRecognizers</span> containsObject:<span class="keyword">self</span><span class="variable">.fd_fullscreenPopGestureRecognizer</span>]) {
+
+        <span class="comment">// 1.</span>
+        [<span class="keyword">self</span><span class="variable">.interactivePopGestureRecognizer</span><span class="variable">.view</span> addGestureRecognizer:<span class="keyword">self</span><span class="variable">.fd_fullscreenPopGestureRecognizer</span>];
+
+        <span class="comment">// 2.</span>
+        <span class="built_in">NSArray</span> *internalTargets = [<span class="keyword">self</span><span class="variable">.interactivePopGestureRecognizer</span> valueForKey:<span class="string">@"targets"</span>];
+        <span class="keyword">id</span> internalTarget = [internalTargets<span class="variable">.firstObject</span> valueForKey:<span class="string">@"target"</span>];
+        SEL internalAction = <span class="built_in">NSSelectorFromString</span>(<span class="string">@"handleNavigationTransition:"</span>);
+        <span class="keyword">self</span><span class="variable">.fd_fullscreenPopGestureRecognizer</span><span class="variable">.delegate</span> = <span class="keyword">self</span><span class="variable">.fd_popGestureRecognizerDelegate</span>;
+        [<span class="keyword">self</span><span class="variable">.fd_fullscreenPopGestureRecognizer</span> addTarget:internalTarget action:internalAction];
+
+        <span class="comment">// 3.</span>
+        <span class="keyword">self</span><span class="variable">.interactivePopGestureRecognizer</span><span class="variable">.enabled</span> = <span class="literal">NO</span>;
+    }
+
+    <span class="comment">// 4.</span>
+    [<span class="keyword">self</span> fd_setupViewControllerBasedNavigationBarAppearanceIfNeeded:viewController];
+
+    <span class="comment">// Forward to primary implementation.</span>
+    <span class="keyword">if</span> (![<span class="keyword">self</span><span class="variable">.viewControllers</span> containsObject:viewController]) {
+        [<span class="keyword">self</span> fd_pushViewController:viewController animated:animated];
+    }
+}
+</code></pre><p>整体来看这段源码，无非做了如下这些事：</p>
+<ol>
+<li>将UIPanGestureRecognizer添加到本来interactivePopGestureRecognizer所在的view上</li>
+<li><div style="color:red"><strong>这段是重点的重点</strong>，一定要往下看！！！</div><br>将PanGesture的target设置为<strong>internalTarget</strong>，action设置为<br><strong>handleNavigationTransition</strong>.</li>
+<li>禁用interactivePopGestureRecognizer</li>
+<li><p>根据是否需要隐藏UINavigationBar来调用fd_setupViewControllerBasedNavigationBarAppearanceIfNeeded:viewController进行之前提到过的<strong>fdwillAppearInjectBlock</strong>设置，代码如下：</p>
+<ul>
+<li><p>(void)fd_setupViewControllerBasedNavigationBarAppearanceIfNeeded:(UIViewController *)appearingViewController<br>{<br>  if (!self.fd_viewControllerBasedNavigationBarAppearanceEnabled) {</p>
+<pre><code><span class="keyword">return</span>;
+</code></pre><p>  }</p>
+<p>  __weak typeof(self) weakSelf = self;<br>  _FDViewControllerWillAppearInjectBlock block = ^(UIViewController *viewController, BOOL animated) {</p>
+<pre><code><span class="label">__strong</span> typeof(weakSelf) <span class="keyword">strongSelf </span>= weakSelf<span class="comment">;</span>
+<span class="label">if</span> (<span class="keyword">strongSelf) </span>{
+    [<span class="keyword">strongSelf </span>setNavigationBarHidden:viewController.fd_prefersNavigationBarHidden animated:animated]<span class="comment">;</span>
+}
+</code></pre><p>  };</p>
+<p>  // Setup will appear inject block to appearing view controller.<br>  // Setup disappearing view controller as well, because not every view controller is added into<br>  // stack by pushing, maybe by “-setViewControllers:”.<br>  appearingViewController.fd_willAppearInjectBlock = block;<br>  UIViewController *disappearingViewController = self.viewControllers.lastObject;<br>  if (disappearingViewController &amp;&amp; !disappearingViewController.fd_willAppearInjectBlock) {</p>
+<pre><code>disappearingViewController.fd_willAppearInjectBlock = block<span class="comment">;</span>
+</code></pre><p>  }<br>}</p>
+</li>
+</ul>
+</li>
+</ol>
+<p>这段代码就是将即将消失和展现的ViewController在viewWillAppear设置了一个自定义UINavigationBar的回调，用以根据进入的方式来展现NaviagtionBar，而不会出现突兀的“镂空”。</p>
+<p>到这，源码就结束了，可以回家收衣服喽！</p>
+<h3 id="重点">重点</h3><p>源码是不是很简单？有什么好分析的呢？<br>如果你读到这，哈哈，恭喜啦，重点分析来啦。</p>
+<p>首先感谢@J_雨的天才思路，大家可以阅读<a href="http://www.jianshu.com/p/d39f7d22db6c" target="_blank" rel="external">轻松学习之二——iOS利用Runtime自定义控制器POP手势动画</a>这篇文章，真的很赞</p>
+<p>之前我们在上文用红色标注了一段内容：</p>
+<div style="color:red"><br>将PanGesture的target设置为<strong>internalTarget</strong>，action设置为<br><strong>handleNavigationTransition</strong>。</div>
+
+<p>看起来很容易理解，可是大家有没有想过为什么action的名称是handleNavigationTransition呢？</p>
+<p>首先我们先打印看看NavigationController的interactivePopGestureRecognizer究竟是个什么玩意？</p>
+<pre><code>&lt;<span class="built_in">UIScreenEdgePanGestureRecognizer</span>: <span class="number">0x7fea78ec5950</span>; state = Possible; delaysTouchesBegan = <span class="literal">YES</span>; view = &lt;<span class="built_in">UILayoutContainerView</span> <span class="number">0x7fea78f77960</span>&gt;; target= &lt;(action=handleNavigationTransition:, target=&lt;_<span class="built_in">UINavigationInteractiveTransition</span> <span class="number">0x7fea78c1c640</span>&gt;)&gt;
+</code></pre><p>这是什么玩意？让我们分别来看看它答应出来的这些属性。</p>
+<ol>
+<li>state = Possible，很简单，就是一个UIGestureRecognizerState = UIGestureRecognizerStatePossible。</li>
+<li>view = UILayoutContainerView，不太懂，暂时也没觉得有需要，不管他。</li>
+<li>target =&lt;(action=handleNavigationTransition:, target=<_uinavigationinteractivetransition 0x7fea78c1c640="">)，这个看起来很有用，因为我们都知道，Gesture就是通过<strong>Target-Action</strong>的方式进行动作触发的。</_uinavigationinteractivetransition></li>
+</ol>
+<p>所以我们赶紧看看这个<strong>target</strong>是个啥玩意，使用如下命令：</p>
+<pre><code><span class="collection">[self.navigationController.interactivePopGestureRecognizer valueForKey:@<span class="string">"target"</span>]</span><span class="comment">;</span>
+</code></pre><p>卧槽，一运行，Crash了，报找不到这个Key。咋回事，难道我记错了KVC的用户，赶紧换成valueForKey:@”View”试试。</p>
+<p>哎！没错啊！成功得到了如下输出：</p>
+<pre><code>-<span class="string">[UILayoutContainerView objectAtIndexedSubscript:]</span>
+</code></pre><p>那咋回事，看来必须祭出屠龙刀Runtime了，嘿嘿，Objective-C面前，一切私有变量都是纸老虎。</p>
+<pre><code><span class="keyword">unsigned</span> <span class="keyword">int</span> count = <span class="number">0</span>;
+Ivar *var = class_copyIvarList([UIGestureRecognizer <span class="keyword">class</span>], &amp;count);
+<span class="keyword">for</span> (<span class="keyword">unsigned</span> <span class="keyword">int</span> i = <span class="number">0</span>; i &lt; count; i++) {
+     Ivar _var = *(var + i);
+     NSLog(@<span class="string">"%s"</span>, ivar_getTypeEncoding(_var));
+     NSLog(@<span class="string">"%s"</span>, ivar_getName(_var));
+}
+</code></pre><p>输出太长了，我们找我们想看的，</p>
+<pre><code><span class="number">2015</span>-<span class="number">11</span>-<span class="number">27</span> <span class="number">02</span>:<span class="number">10</span>:<span class="number">03.873</span> SamplePhotosApp[<span class="number">85305</span>:<span class="number">2664323</span>] _targets
+<span class="number">2015</span>-<span class="number">11</span>-<span class="number">27</span> <span class="number">02</span>:<span class="number">10</span>:<span class="number">03.873</span> SamplePhotosApp[<span class="number">85305</span>:<span class="number">2664323</span>] @<span class="string">"NSMutableArray"</span>
+</code></pre><p>卧槽，这丫叫_targets，好吧，赶紧改成valueForKey:@”targets”再试试。<br>哎，等等，不是_targets吗，怎么能用targets呢？</p>
+<p><strong>咳咳，吴老师又要来讲课了！对于KVC来说，它的查找顺序是key -&gt; property -&gt; ivar，也就是说，它会先按照是否有targets这个名称的key，然后targets这个property，最后再找_targets这个ivar。</strong></p>
+<p>通过输出log，我们可以发现_targets是个数组，维护了一个个自定义结构维护的target-action配对。</p>
+<p>因此，我们现在只要找到这个自定义结构是啥，里面包含了啥就可以了是吧。</p>
+<p><strong>当头一棒</strong>，很遗憾，苹果太阴了，直接重载了这个自定义结构的debugDescription，特喵的什么都看不到。</p>
+<p>事情到了这咋办呢？其实我也没想到，还好上述的参考文章告诉了我们可以依靠断点，通过断点，我们发发现了该自定义结构叫<strong>UIGestureRecognizerTarget</strong>，我们通过KVC获取其target和action即可。</p>
+<h3 id="补充：关于Method_Swizzling">补充：关于Method Swizzling</h3><pre><code><span class="keyword">Class</span> <span class="keyword">class</span> = [<span class="keyword">self</span> <span class="keyword">class</span>];
+
+SEL originalSelector = @<span class="keyword">selector</span>(pushViewController:animated:);
+SEL swizzledSelector = @<span class="keyword">selector</span>(fd_pushViewController:animated:);
+
+<span class="function"><span class="keyword">Method</span> <span class="title">originalMethod</span> = <span class="title">class_getInstanceMethod</span><span class="params">(<span class="keyword">class</span>, originalSelector)</span>;</span>
+<span class="function"><span class="keyword">Method</span> <span class="title">swizzledMethod</span> = <span class="title">class_getInstanceMethod</span><span class="params">(<span class="keyword">class</span>, swizzledSelector)</span>;</span>
+
+BOOL success = class_addMethod(<span class="keyword">class</span>, originalSelector, method_getImplementation(swizzledMethod), method_getTypeEncoding(swizzledMethod));
+<span class="keyword">if</span> (success) <span class="comment">{
+    class_replaceMethod(class, swizzledSelector, method_getImplementation(originalMethod), method_getTypeEncoding(originalMethod));
+}</span> <span class="keyword">else</span> <span class="comment">{
+    method_exchangeImplementations(originalMethod, swizzledMethod);
+}</span>
+</code></pre><p>有很多人都了解Method Swizzling，但是不知道为什么这里需要进行<strong>BOOL success = class_addMethod</strong>判断。</p>
+<p>其主要原因就是如果直接通过method_exchangeImplementations来进行的话，可能子类里并没有originalSelector所代表的方法，你直接和父类进行了交换，这是我们不希望看到的。</p>
+<p>因此通过addMethod来判断，如果加成功了，说明原先这个函数在子类中并不存在，我们现在添加了，只要再把swizzleSelector指向旧函数即可；而如果没成功，说明这个函数在子类中存在了，我们直接替换也不会影响父类。</p>
+
+      
+    </div>
+    <footer class="article-footer">
+      <a data-url="http://satanwoo.github.io/2015/11/26/FDFullScreenPopGesture-Source-Code/" data-id="cihgkhu97000qwri12jnox4zw" class="article-share-link">Share</a>
+      
+      
+  <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
+
+    </footer>
+  </div>
+  
+</article>
+
+
+  
     <article id="post-Fun-of-CAReplicationLayer" class="article article-type-post" itemscope itemprop="blogPost">
   <div class="article-meta">
     <a href="/2015/11/17/Fun-of-CAReplicationLayer/" class="article-date">
@@ -160,7 +377,7 @@ replicationLayer.instanceDelay = <span class="number">0.3</span>
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/11/17/Fun-of-CAReplicationLayer/" data-id="cihez45y6000ooli1efyrozld" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/11/17/Fun-of-CAReplicationLayer/" data-id="cihgkhu94000owri1m1lkl876" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Swift/">Swift</a></li></ul>
@@ -366,7 +583,7 @@ modalVC<span class="class">.modalPresentationStyle</span> = <span class="class">
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/11/12/Swift-UITransition-iOS8/" data-id="cihez45xp000aoli1jmd4x9gl" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/11/12/Swift-UITransition-iOS8/" data-id="cihgkhu8m000awri12azgg4d9" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Swift/">Swift</a></li></ul>
@@ -526,7 +743,7 @@ modalVC<span class="class">.modalPresentationStyle</span> = <span class="class">
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/11/05/Understand-Viper/" data-id="cihez45xn0008oli1s7h7eovp" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/11/05/Understand-Viper/" data-id="cihgkhu8k0008wri1g50iwork" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
@@ -755,7 +972,7 @@ objectPath.<span class="keyword">get</span>(obj, <span class="string">'a.\u1200'
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/11/05/Object-Path-Source-Code/" data-id="cihez45xw000holi1n0m5nv7t" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/11/05/Object-Path-Source-Code/" data-id="cihgkhu8t000hwri1rp4cygbh" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/JavaScript/">JavaScript</a></li></ul>
@@ -818,7 +1035,7 @@ objectPath.<span class="keyword">get</span>(obj, <span class="string">'a.\u1200'
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/10/29/Learn-Android-Day-by-Day/" data-id="cihez45xy000joli1kkwmidl2" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/10/29/Learn-Android-Day-by-Day/" data-id="cihgkhu8v000jwri17v0yl95l" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Android/">Android</a></li></ul>
@@ -1030,7 +1247,7 @@ objectPath.<span class="keyword">get</span>(obj, <span class="string">'a.\u1200'
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/10/29/Swift-Count-Down-Label/" data-id="cihez45xs000doli1e4plcevy" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/10/29/Swift-Count-Down-Label/" data-id="cihgkhu8o000dwri1lxc8gnls" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Swift/">Swift</a></li></ul>
@@ -1161,7 +1378,7 @@ func computeAngle(p1:<span class="type">CGPoint</span> , p2:<span class="type">C
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/10/27/Swift-Circle-Slider/" data-id="cihez45xu000foli1gltaug16" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/10/27/Swift-Circle-Slider/" data-id="cihgkhu8q000fwri14af9apmr" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Swift/">Swift</a></li></ul>
@@ -1383,7 +1600,7 @@ func computeAngle(p1:<span class="type">CGPoint</span> , p2:<span class="type">C
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/10/14/GLCalendarView/" data-id="cihez45y2000moli1tqz8kj7j" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/10/14/GLCalendarView/" data-id="cihgkhu8y000mwri1arzdiao5" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
@@ -1604,311 +1821,10 @@ func computeAngle(p1:<span class="type">CGPoint</span> , p2:<span class="type">C
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/09/30/Debounce-and-Throttle-in-iOS/" data-id="cihez45ya000qoli1kkmxv1u2" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/09/30/Debounce-and-Throttle-in-iOS/" data-id="cihgkhu99000swri1x30vfq5o" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
-
-    </footer>
-  </div>
-  
-</article>
-
-
-  
-    <article id="post-flux-js-part-one" class="article article-type-post" itemscope itemprop="blogPost">
-  <div class="article-meta">
-    <a href="/2015/09/23/flux-js-part-one/" class="article-date">
-  <time datetime="2015-09-23T10:37:36.000Z" itemprop="datePublished">2015-09-23</time>
-</a>
-    
-  </div>
-  <div class="article-inner">
-    
-    
-      <header class="article-header">
-        
-  
-    <h1 itemprop="name">
-      <a class="article-title" href="/2015/09/23/flux-js-part-one/">Flux源码解析（一）</a>
-    </h1>
-  
-
-      </header>
-    
-    <div class="article-entry" itemprop="articleBody">
-      
-        <h3 id="Flux源码解析_第一章">Flux源码解析 第一章</h3><p>Flux是Facebook推出的一个新的Web架构，用来构建新一代的客户端的Web程序，今天我们来解析下其中的源码：Dispatcher.js和Invariant.js</p>
-<h4 id="准备工作">准备工作</h4><p>建议大家先了解一下什么是Flux架构，Facebook的官网上有非常详细的解释:<a href="http://facebook.github.io/flux/docs/overview.html#content" target="_blank" rel="external">链接点我</a></p>
-<h4 id="Invariant-js">Invariant.js</h4><p>首先让我们来看下Invariant.js的代码内容，非常短：</p>
-<pre><code><span class="pi">"use strict"</span>;
-
-<span class="keyword">var</span> invariant = <span class="function"><span class="keyword">function</span>(<span class="params">condition, format, a, b, c, d, e, f</span>) </span>{
-  <span class="number">1.</span> 
-  <span class="keyword">if</span> (__DEV__) {
-    <span class="keyword">if</span> (format === <span class="literal">undefined</span>) {
-      <span class="keyword">throw</span> <span class="keyword">new</span> <span class="built_in">Error</span>(<span class="string">'invariant requires an error message argument'</span>);
-    }
-  }
-
-  <span class="number">2.</span> 
-  <span class="keyword">if</span> (!condition) {
-    <span class="keyword">var</span> error;
-    <span class="keyword">if</span> (format === <span class="literal">undefined</span>) {
-      error = <span class="keyword">new</span> <span class="built_in">Error</span>(
-        <span class="string">'Minified exception occurred; use the non-minified dev environment '</span> +
-        <span class="string">'for the full error message and additional helpful warnings.'</span>
-      );
-    } <span class="keyword">else</span> {
-      <span class="keyword">var</span> args = [a, b, c, d, e, f];
-      <span class="keyword">var</span> argIndex = <span class="number">0</span>;
-      error = <span class="keyword">new</span> <span class="built_in">Error</span>(
-        <span class="string">'Invariant Violation: '</span> +
-        format.replace(<span class="regexp">/%s/g</span>, <span class="function"><span class="keyword">function</span>(<span class="params"></span>) </span>{ <span class="keyword">return</span> args[argIndex++]; })
-      );
-    }
-
-    error.framesToPop = <span class="number">1</span>; <span class="comment">// we don't care about invariant's own frame</span>
-    <span class="keyword">throw</span> error;
-  }
-};
-
-<span class="built_in">module</span>.exports = invariant;
-</code></pre><p>‘use strict’ 不必多说，就是构建了一个严格的JS的执行环境。<br>整个Invariant.js其实就是定义了一个函数, 名字叫Invariant， 他的参数包含一个condition（判断条件），一个自定义的报错格式，以及一系列的自定义参数。</p>
-<p><b>第一次读Flux.js源码的时候，这里采用的还是arguments可变参数的定义方式，今天写这篇文章的时候竟然就改写了，晕！</b></p>
-<p>然后我们来分两个段落查看下其中的代码含义。</p>
-<p>第一部分，定义了一个<strong>dev</strong>变量，这个变量就是一种类似于配置的环境变量。玩过JavaScript或者ruby的人可能都有所了解，比如非常著名的’development’, ‘product’, ‘test’就是与之类似的。<br>如果没有format是个未定义的变量（在这里就是没有传入第二个参数），那么就保个错。</p>
-<p>第二部分也很简单，如果condition为假值，说明这个条件没被满足，那么执行报错的功能，报错的时候使用的提示格式就是传入的format, 参数则为自定义的a-f。</p>
-<p>总之，这个Invariant.js的作用就是构建了一个类似<b>iOS中NSAssert</b>的东西。</p>
-<p>哦，这里要指出一下 <b>/%s/g</b>这个正则表达式，这玩意啥意思呢。其实就类似于我们常常用的printf函数，可以简单理解为，把format中所有的%s, 替换成自定义的参数，g表示为global。</p>
-<h4 id="重点:Dispatcher-js">重点:Dispatcher.js</h4><p>再让我们来看一看Dispatcher.js，闲话不多话，上代码。</p>
-<pre><code><span class="pi">'use strict'</span>;
-
-<span class="keyword">var</span> invariant = <span class="built_in">require</span>(<span class="string">'./invariant'</span>);
-
-<span class="keyword">export</span> <span class="keyword">type</span> DispatchToken = <span class="built_in">string</span>;
-
-<span class="keyword">var</span> _prefix = <span class="string">'ID_'</span>;
-
-<span class="keyword">class</span> Dispatcher&lt;TPayload&gt; {
-  _callbacks: {[key: DispatchToken]: (payload: TPayload) =&gt; <span class="built_in">void</span>};
-  _isDispatching: <span class="built_in">boolean</span>;
-  _isHandled: {[key: DispatchToken]: <span class="built_in">boolean</span>};
-  _isPending: {[key: DispatchToken]: <span class="built_in">boolean</span>};
-  _lastID: <span class="built_in">number</span>;
-  _pendingPayload: TPayload;
-
-  <span class="constructor"><span class="keyword">constructor</span>() </span>{
-    <span class="keyword">this</span>._callbacks = {};
-    <span class="keyword">this</span>._isDispatching = <span class="literal">false</span>;
-    <span class="keyword">this</span>._isHandled = {};
-    <span class="keyword">this</span>._isPending = {};
-    <span class="keyword">this</span>._lastID = <span class="number">1</span>;
-  }
-
-
-  unregister(id: DispatchToken): <span class="built_in">void</span> {
-    invariant(
-      <span class="keyword">this</span>._callbacks[id],
-      <span class="string">'Dispatcher.unregister(...): `%s` does not map to a registered callback.'</span>,
-      id
-    );
-    <span class="keyword">delete</span> <span class="keyword">this</span>._callbacks[id];
-  }
-
-  waitFor(ids: <span class="built_in">Array</span>&lt;DispatchToken&gt;): <span class="built_in">void</span> {
-    invariant(
-      <span class="keyword">this</span>._isDispatching,
-      <span class="string">'Dispatcher.waitFor(...): Must be invoked while dispatching.'</span>
-    );
-    <span class="keyword">for</span> (<span class="keyword">var</span> ii = <span class="number">0</span>; ii &lt; ids.length; ii++) {
-      <span class="keyword">var</span> id = ids[ii];
-      <span class="keyword">if</span> (<span class="keyword">this</span>._isPending[id]) {
-        invariant(
-          <span class="keyword">this</span>._isHandled[id],
-          <span class="string">'Dispatcher.waitFor(...): Circular dependency detected while '</span> +
-          <span class="string">'waiting for `%s`.'</span>,
-          id
-        );
-        <span class="keyword">continue</span>;
-      }
-      invariant(
-        <span class="keyword">this</span>._callbacks[id],
-        <span class="string">'Dispatcher.waitFor(...): `%s` does not map to a registered callback.'</span>,
-        id
-      );
-      <span class="keyword">this</span>._invokeCallback(id);
-    }
-  }
-
-  dispatch(payload: TPayload): <span class="built_in">void</span> {
-    invariant(
-      !<span class="keyword">this</span>._isDispatching,
-      <span class="string">'Dispatch.dispatch(...): Cannot dispatch in the middle of a dispatch.'</span>
-    );
-    <span class="keyword">this</span>._startDispatching(payload);
-    <span class="keyword">try</span> {
-      <span class="keyword">for</span> (<span class="keyword">var</span> id <span class="keyword">in</span> <span class="keyword">this</span>._callbacks) {
-        <span class="keyword">if</span> (<span class="keyword">this</span>._isPending[id]) {
-          <span class="keyword">continue</span>;
-        }
-        <span class="keyword">this</span>._invokeCallback(id);
-      }
-    } <span class="keyword">finally</span> {
-      <span class="keyword">this</span>._stopDispatching();
-    }
-  }
-
-  isDispatching(): <span class="built_in">boolean</span> {
-    <span class="keyword">return</span> <span class="keyword">this</span>._isDispatching;
-  }
-
-  _invokeCallback(id: DispatchToken): <span class="built_in">void</span> {
-    <span class="keyword">this</span>._isPending[id] = <span class="literal">true</span>;
-    <span class="keyword">this</span>._callbacks[id](<span class="keyword">this</span>._pendingPayload);
-    <span class="keyword">this</span>._isHandled[id] = <span class="literal">true</span>;
-  }
-
-  _startDispatching(payload: TPayload): <span class="built_in">void</span> {
-    <span class="keyword">for</span> (<span class="keyword">var</span> id <span class="keyword">in</span> <span class="keyword">this</span>._callbacks) {
-      <span class="keyword">this</span>._isPending[id] = <span class="literal">false</span>;
-      <span class="keyword">this</span>._isHandled[id] = <span class="literal">false</span>;
-    }
-    <span class="keyword">this</span>._pendingPayload = payload;
-    <span class="keyword">this</span>._isDispatching = <span class="literal">true</span>;
-  }
-
-  _stopDispatching(): <span class="built_in">void</span> {
-    <span class="keyword">delete</span> <span class="keyword">this</span>._pendingPayload;
-    <span class="keyword">this</span>._isDispatching = <span class="literal">false</span>;
-  }
-}
-
-<span class="module"><span class="keyword">module</span>.exports = Dispatcher;</span>
-</code></pre><p>首先我们来看一下这句话：</p>
-<pre><code><span class="keyword">export</span> <span class="keyword">type</span> DispatchToken = <span class="built_in">string</span>;
-</code></pre><p>这其实就是一个typedef，那么DispatchToken是什么意思呢？如果你本文最上方的Flux解答的话，你就可以了解到，其实一个Flux的回调代码块有唯一的一个token，这个token就是用来让别人Invokoe你代码的。</p>
-<p>那么这个DispatchToken怎么确保唯一呢？看下面这句话：</p>
-<pre><code><span class="keyword">var</span> id = _prefix + <span class="keyword">this</span>._lastID++;
-</code></pre><p>第一感觉是不是想，我了个擦，怎么那么简单。后来想想，JavaScript在浏览器中执行就是单线程，这种自增ID的做法又快又安全呐。</p>
-<p>下面我们来解释一下Dispatcher这个类，这个类的目的很简单，六个字归纳一下：唯一，中控，分配。<br>可以把他看成一个单例对象，所有的任务分发都必须由这个类统一控制。</p>
-<p>那么，这个类中包含了哪些玩意呢？让我们赶快来一探究竟！</p>
-<pre><code><span class="rule"><span class="attribute">_callbacks</span>:<span class="value"> {[key: DispatchToken]: (payload: TPayload) =&gt; void}</span></span>;
-<span class="rule"><span class="attribute">_isDispatching</span>:<span class="value"> boolean</span></span>;
-<span class="rule"><span class="attribute">_isHandled</span>:<span class="value"> {[key: DispatchToken]: boolean}</span></span>;
-<span class="rule"><span class="attribute">_isPending</span>:<span class="value"> {[key: DispatchToken]: boolean}</span></span>;
-<span class="rule"><span class="attribute">_lastID</span>:<span class="value"> number</span></span>;
-<span class="rule"><span class="attribute">_pendingPayload</span>:<span class="value"> TPayload</span></span>;
-</code></pre><ul>
-<li>callbacks，就是DispatchToken和函数回调的一个Dictionary。</li>
-<li>isDispatching，体现当前Dispatcher是否处于dispatch状态。</li>
-<li>isHandled，通过token去检测一个函数是否被处理过了。</li>
-<li>isPending，通过token去检测一个函数是否被提交Dispatcher了。</li>
-<li>lastID，最近一次被加入Dispatcher的函数体的UniqueID，即DispatchToken。</li>
-<li>pendingPayload，需要传递给调用函数的参数，iOS开发者可以理解为<b>userInfo</b>。</li>
-</ul>
-<p>下面我们一个个函数来看看。</p>
-<pre><code><span class="keyword">register</span>(callback: (payload: TPayload) =&gt; <span class="keyword">void</span>): DispatchToken {
-    var <span class="keyword">id</span> = _prefix + <span class="keyword">this</span><span class="variable">._lastID</span>++;
-    <span class="keyword">this</span><span class="variable">._callbacks</span>[<span class="keyword">id</span>] = callback;
-    <span class="keyword">return</span> <span class="keyword">id</span>;
-}
-</code></pre><p>这函数就是注册一个callback进入dispatcher，同时为这个callback生成DispatchToken，加入字典。</p>
-<pre><code>unregister(<span class="property">id</span>: DispatchToken): void {
-    invariant(
-      this._callbacks[<span class="property">id</span>],
-      'Dispatcher.unregister(...): `%s` <span class="keyword">does</span> <span class="keyword">not</span> map <span class="keyword">to</span> a registered callback.',
-      <span class="property">id</span>
-    );
-    delete this._callbacks[<span class="property">id</span>];
-}
-</code></pre><p>有注册就有取消注册，unregister就是通过DispatchToken将注册的callback从字典中删除。当然了，这里使用了我们在上文中提过的Invariant来进行一个判断：即字典中必须包含对应这个DispatchToken的函数。</p>
-<p>dispatch函数是Dispatcher用来分发payload的函数。</p>
-<pre><code>dispatch(payload: TPayload): <span class="keyword">void</span> {
-    invariant(
-      !<span class="keyword">this</span>._isDispatching,
-      <span class="string">'Dispatch.dispatch(...): Cannot dispatch in the middle of a dispatch.'</span>
-    );
-    <span class="keyword">this</span>._startDispatching(payload);
-    <span class="keyword">try</span> {
-      <span class="keyword">for</span> (<span class="keyword">var</span> id <span class="keyword">in</span> <span class="keyword">this</span>._callbacks) {
-        <span class="keyword">if</span> (<span class="keyword">this</span>._isPending[id]) {
-          <span class="keyword">continue</span>;
-        }
-        <span class="keyword">this</span>._invokeCallback(id);
-      }
-    } <span class="keyword">finally</span> {
-      <span class="keyword">this</span>._stopDispatching();
-    }
-  }
-</code></pre><p>整个函数的含义就是，首先是判断当前Dispatcher是否已经处于Dispatching状态中了，如果是，不能打断。然后通过_startDispatching更新状态。更新状态结束以后，将非pending状态的callback进通过_invokeCallback执行<b>（pending在这里的含义可以简单理解为，还没准备好或者被卡住了）</b>。所有执行完了以后，通过_stopDispatching恢复状态。</p>
-<p>接下来便让我一一来看看其中涉及的几个函数，首先是_startDispatching函数。</p>
-<pre><code>_startDispatching(payload: TPayload): <span class="keyword">void</span> {
-    <span class="keyword">for</span> (var <span class="keyword">id</span> <span class="keyword">in</span> <span class="keyword">this</span><span class="variable">._callbacks</span>) {
-      <span class="keyword">this</span><span class="variable">._isPending</span>[<span class="keyword">id</span>] = <span class="literal">false</span>;
-      <span class="keyword">this</span><span class="variable">._isHandled</span>[<span class="keyword">id</span>] = <span class="literal">false</span>;
-    }
-    <span class="keyword">this</span><span class="variable">._pendingPayload</span> = payload;
-    <span class="keyword">this</span><span class="variable">._isDispatching</span> = <span class="literal">true</span>;
-  }
-</code></pre><p>首先该函数将所有注册的callback的状态都清空，并标记Dispatcher的状态进入dispatching。</p>
-<p>同样，与之对应的有的_stopDispatching，函数很简单，不具体解释了。</p>
-<pre><code>_stopDispatching(): <span class="keyword">void</span> {
-    <span class="keyword">delete</span> <span class="keyword">this</span>._pendingPayload;
-    <span class="keyword">this</span>._isDispatching = <span class="literal">false</span>;
-}
-</code></pre><p>而_invokeCallback函数也很简单，当真正调用callback之前将其状态设置为pending，执行完成之后设置为handled。<br>    _invokeCallback(id: DispatchToken): void {<br>        this._isPending[id] = true;<br>        this._callbacks<a href="this._pendingPayload">id</a>;<br>        this._isHandled[id] = true;<br>      }</p>
-<p>读到这里，有些人可能有些疑问，这个pending到底是用来做什么的呢？别着急，看了下面这个最重要的函数waitFor，你就会了解。</p>
-<pre><code>waitFor(ids: Array&lt;DispatchToken&gt;): void {
-     <span class="number">1.</span> 
-    invariant(
-      this._isDispatching,
-      'Dispatcher.waitFor(...): Must be invoked <span class="keyword">while</span> dispatching.'
-    );
-
-     <span class="number">2.</span>
-    <span class="keyword">for</span> (var ii = <span class="number">0</span>; ii &lt; ids.<span class="property">length</span>; ii++) {
-      var <span class="property">id</span> = ids[ii];
-      <span class="keyword">if</span> (this._isPending[<span class="property">id</span>]) {
-        <span class="number">3.</span> 
-        invariant(
-          this._isHandled[<span class="property">id</span>],
-          'Dispatcher.waitFor(...): Circular dependency detected <span class="keyword">while</span> ' +
-          'waiting <span class="keyword">for</span> `%s`.',
-          <span class="property">id</span>
-        );
-        <span class="keyword">continue</span>;
-      }
-       <span class="number">4.</span>
-      invariant(
-        this._callbacks[<span class="property">id</span>],
-        'Dispatcher.waitFor(...): `%s` <span class="keyword">does</span> <span class="keyword">not</span> map <span class="keyword">to</span> a registered callback.',
-        <span class="property">id</span>
-      );
-
-      <span class="number">5.</span>
-      this._invokeCallback(<span class="property">id</span>);
-    }
-  }
-</code></pre><p>这个waitFor啥意思呢？我们首先看下他的参数，一个数组，里面全是DispatchToken。再看下实现。</p>
-<ul>
-<li>首先是一个Invariant判断当前必须处于Dispatching状态。一开始比较难理解，简单来说就是，如果不处于Dispatching状态中，那么说明压根没有函数在执行，那你等谁呢？</li>
-<li>然后该函数从DispatchToken的数组中进行遍历，如果遍历到的DispatchToken处于pending状态，就暂时跳过他。</li>
-<li>但是，在这有个必要的循环以来的检查，试想如下情况，如果A函数以来B的Token, B函数依赖A的Token，就会造成“死锁”。<b>所以，当一个函数依赖的对象处于pending，说明这个函数已经被开始执行了，但是如果同时该函数没有进入handled状态，说明该函数也被卡死了。</b></li>
-<li>检查token对应的callback是否存在</li>
-<li>调用这个token对应的函数。</li>
-</ul>
-<p>从上诉步骤中，我们可以看到，waitFor就是一个等待函数，当B执行，执行到某些条件不满足的时候（我们称之为依赖没解决），就是等待依赖去完成，简单来说，就是如下函数代表的意思：</p>
-<pre><code><span class="keyword">while</span> (!satisfied) ; <span class="keyword">do</span>Something
-</code></pre><p>到这里，差不多Dispatcher.js就解释完了，下次继续。</p>
-
-      
-    </div>
-    <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/09/23/flux-js-part-one/" data-id="cihez45xb0003oli1mcuuz0kk" class="article-share-link">Share</a>
-      
-      
-  <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/JavaScript/">JavaScript</a></li></ul>
 
     </footer>
   </div>
@@ -1932,7 +1848,7 @@ func computeAngle(p1:<span class="type">CGPoint</span> , p2:<span class="type">C
   <div class="widget-wrap">
     <h3 class="widget-title">Tags</h3>
     <div class="widget">
-      <ul class="tag-list"><li class="tag-list-item"><a class="tag-list-link" href="/tags/Android/">Android</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/JavaScript/">JavaScript</a><span class="tag-list-count">2</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Swift/">Swift</a><span class="tag-list-count">4</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/iOS/">iOS</a><span class="tag-list-count">5</span></li></ul>
+      <ul class="tag-list"><li class="tag-list-item"><a class="tag-list-link" href="/tags/Android/">Android</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/JavaScript/">JavaScript</a><span class="tag-list-count">2</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Swift/">Swift</a><span class="tag-list-count">4</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/iOS/">iOS</a><span class="tag-list-count">6</span></li></ul>
     </div>
   </div>
 
@@ -1950,7 +1866,7 @@ func computeAngle(p1:<span class="type">CGPoint</span> , p2:<span class="type">C
   <div class="widget-wrap">
     <h3 class="widget-title">Archives</h3>
     <div class="widget">
-      <ul class="archive-list"><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/11/">November 2015</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/10/">October 2015</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/09/">September 2015</a><span class="archive-list-count">4</span></li></ul>
+      <ul class="archive-list"><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/11/">November 2015</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/10/">October 2015</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/09/">September 2015</a><span class="archive-list-count">4</span></li></ul>
     </div>
   </div>
 
@@ -1960,6 +1876,10 @@ func computeAngle(p1:<span class="type">CGPoint</span> , p2:<span class="type">C
     <h3 class="widget-title">Recents</h3>
     <div class="widget">
       <ul>
+        
+          <li>
+            <a href="/2015/11/26/FDFullScreenPopGesture-Source-Code/">FDFullScreenPopGesture源码解析</a>
+          </li>
         
           <li>
             <a href="/2015/11/17/Fun-of-CAReplicationLayer/">Swift每日一练：妙用CAReplicationLayer</a>
@@ -1975,10 +1895,6 @@ func computeAngle(p1:<span class="type">CGPoint</span> , p2:<span class="type">C
         
           <li>
             <a href="/2015/11/05/Object-Path-Source-Code/">Object-Path 源码解读</a>
-          </li>
-        
-          <li>
-            <a href="/2015/10/29/Learn-Android-Day-by-Day/">大菜比学安卓</a>
           </li>
         
       </ul>
