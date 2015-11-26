@@ -4,7 +4,7 @@
   
   <link href="/atom.xml" rel="self"/>
   <link href="http://satanwoo.github.io/"/>
-  <updated>2015-11-26T18:21:58.000Z</updated>
+  <updated>2015-11-26T18:24:34.000Z</updated>
   <id>http://satanwoo.github.io/</id>
   
   <author>
@@ -19,7 +19,7 @@
     <link href="http://satanwoo.github.io/2015/11/26/FDFullScreenPopGesture-Source-Code/"/>
     <id>http://satanwoo.github.io/2015/11/26/FDFullScreenPopGesture-Source-Code/</id>
     <published>2015-11-26T03:38:42.000Z</published>
-    <updated>2015-11-26T18:21:58.000Z</updated>
+    <updated>2015-11-26T18:24:34.000Z</updated>
     <content type="html"><![CDATA[<p><em>嘿嘿，花了三天时间把自己的代码从700行缩减成了200行，终于有时间可以拜读新源码了，好开心。</em></p>
 <p>好了，废话不多话，今天我们要读了百度出品的一个开源项目FDFullScreenPopGesture。</p>
 <h2 id="项目介绍">项目介绍</h2><p><a href="https://github.com/forkingdog/FDFullscreenPopGesture" target="_blank" rel="external">FDFullScreenPopGesture</a>是一款无需改动即可整合进入现有项目的全局手势操作，使用这个即可以在左侧边缘拖拽的时候返回上一级的效果。</p>
@@ -127,22 +127,30 @@
 <li><div style="color:red"><strong>这段是重点的重点</strong>，一定要往下看！！！</div><br>将PanGesture的target设置为<strong>internalTarget</strong>，action设置为<br><strong>handleNavigationTransition</strong>.</li>
 <li>禁用interactivePopGestureRecognizer</li>
 <li><p>根据是否需要隐藏UINavigationBar来调用fd_setupViewControllerBasedNavigationBarAppearanceIfNeeded:viewController进行之前提到过的<strong>fdwillAppearInjectBlock</strong>设置，代码如下：</p>
-<ul>
-<li><p>(void)fd_setupViewControllerBasedNavigationBarAppearanceIfNeeded:(UIViewController *)appearingViewController<br>{<br>  if (!self.fd_viewControllerBasedNavigationBarAppearanceEnabled) {</p>
-<pre><code><span class="keyword">return</span>;
-</code></pre><p>  }</p>
-<p>  __weak typeof(self) weakSelf = self;<br>  _FDViewControllerWillAppearInjectBlock block = ^(UIViewController *viewController, BOOL animated) {</p>
-<pre><code><span class="label">__strong</span> typeof(weakSelf) <span class="keyword">strongSelf </span>= weakSelf<span class="comment">;</span>
-<span class="label">if</span> (<span class="keyword">strongSelf) </span>{
-    [<span class="keyword">strongSelf </span>setNavigationBarHidden:viewController.fd_prefersNavigationBarHidden animated:animated]<span class="comment">;</span>
+<pre><code>- (void)fd_setupViewControllerBasedNavigationBarAppearanceIfNeeded:(UIViewController *)appearingViewController
+{
+    <span class="preprocessor">if</span> (!<span class="keyword">self.fd_viewControllerBasedNavigationBarAppearanceEnabled) </span>{
+        return<span class="comment">;</span>
+    }
+
+    __weak typeof(<span class="keyword">self) </span>weakSelf = <span class="keyword">self;
+</span>    _FDViewControllerWillAppearInjectBlock <span class="keyword">block </span>= ^(UIViewController *viewController, <span class="keyword">BOOL </span>animated) {
+        __strong typeof(weakSelf) <span class="keyword">strongSelf </span>= weakSelf<span class="comment">;</span>
+        <span class="preprocessor">if</span> (<span class="keyword">strongSelf) </span>{
+            [<span class="keyword">strongSelf </span>setNavigationBarHidden:viewController.fd_prefersNavigationBarHidden animated:animated]<span class="comment">;</span>
+        }
+    }<span class="comment">;</span>
+
+    // Setup will appear inject <span class="keyword">block </span>to appearing view controller.
+    // Setup disappearing view controller as well, <span class="keyword">because </span>not every view controller is <span class="keyword">added </span>into
+    // stack <span class="keyword">by </span><span class="keyword">pushing, </span>maybe <span class="keyword">by </span><span class="string">"-setViewControllers:"</span>.
+    appearingViewController.fd_willAppearInjectBlock = <span class="keyword">block;
+</span>    UIViewController *disappearingViewController = <span class="keyword">self.viewControllers.lastObject;
+</span>    <span class="preprocessor">if</span> (disappearingViewController &amp;&amp; !disappearingViewController.fd_willAppearInjectBlock) {
+        disappearingViewController.fd_willAppearInjectBlock = <span class="keyword">block;
+</span>    }
 }
-</code></pre><p>  };</p>
-<p>  // Setup will appear inject block to appearing view controller.<br>  // Setup disappearing view controller as well, because not every view controller is added into<br>  // stack by pushing, maybe by “-setViewControllers:”.<br>  appearingViewController.fd_willAppearInjectBlock = block;<br>  UIViewController *disappearingViewController = self.viewControllers.lastObject;<br>  if (disappearingViewController &amp;&amp; !disappearingViewController.fd_willAppearInjectBlock) {</p>
-<pre><code>disappearingViewController.fd_willAppearInjectBlock = block<span class="comment">;</span>
-</code></pre><p>  }<br>}</p>
-</li>
-</ul>
-</li>
+</code></pre></li>
 </ol>
 <p>这段代码就是将即将消失和展现的ViewController在viewWillAppear设置了一个自定义UINavigationBar的回调，用以根据进入的方式来展现NaviagtionBar，而不会出现突兀的“镂空”。</p>
 <p>到这，源码就结束了，可以回家收衣服喽！</p>

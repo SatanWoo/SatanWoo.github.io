@@ -191,22 +191,30 @@
 <li><div style="color:red"><strong>这段是重点的重点</strong>，一定要往下看！！！</div><br>将PanGesture的target设置为<strong>internalTarget</strong>，action设置为<br><strong>handleNavigationTransition</strong>.</li>
 <li>禁用interactivePopGestureRecognizer</li>
 <li><p>根据是否需要隐藏UINavigationBar来调用fd_setupViewControllerBasedNavigationBarAppearanceIfNeeded:viewController进行之前提到过的<strong>fdwillAppearInjectBlock</strong>设置，代码如下：</p>
-<ul>
-<li><p>(void)fd_setupViewControllerBasedNavigationBarAppearanceIfNeeded:(UIViewController *)appearingViewController<br>{<br>  if (!self.fd_viewControllerBasedNavigationBarAppearanceEnabled) {</p>
-<pre><code><span class="keyword">return</span>;
-</code></pre><p>  }</p>
-<p>  __weak typeof(self) weakSelf = self;<br>  _FDViewControllerWillAppearInjectBlock block = ^(UIViewController *viewController, BOOL animated) {</p>
-<pre><code><span class="label">__strong</span> typeof(weakSelf) <span class="keyword">strongSelf </span>= weakSelf<span class="comment">;</span>
-<span class="label">if</span> (<span class="keyword">strongSelf) </span>{
-    [<span class="keyword">strongSelf </span>setNavigationBarHidden:viewController.fd_prefersNavigationBarHidden animated:animated]<span class="comment">;</span>
+<pre><code>- (void)fd_setupViewControllerBasedNavigationBarAppearanceIfNeeded:(UIViewController *)appearingViewController
+{
+    <span class="preprocessor">if</span> (!<span class="keyword">self.fd_viewControllerBasedNavigationBarAppearanceEnabled) </span>{
+        return<span class="comment">;</span>
+    }
+
+    __weak typeof(<span class="keyword">self) </span>weakSelf = <span class="keyword">self;
+</span>    _FDViewControllerWillAppearInjectBlock <span class="keyword">block </span>= ^(UIViewController *viewController, <span class="keyword">BOOL </span>animated) {
+        __strong typeof(weakSelf) <span class="keyword">strongSelf </span>= weakSelf<span class="comment">;</span>
+        <span class="preprocessor">if</span> (<span class="keyword">strongSelf) </span>{
+            [<span class="keyword">strongSelf </span>setNavigationBarHidden:viewController.fd_prefersNavigationBarHidden animated:animated]<span class="comment">;</span>
+        }
+    }<span class="comment">;</span>
+
+    // Setup will appear inject <span class="keyword">block </span>to appearing view controller.
+    // Setup disappearing view controller as well, <span class="keyword">because </span>not every view controller is <span class="keyword">added </span>into
+    // stack <span class="keyword">by </span><span class="keyword">pushing, </span>maybe <span class="keyword">by </span><span class="string">"-setViewControllers:"</span>.
+    appearingViewController.fd_willAppearInjectBlock = <span class="keyword">block;
+</span>    UIViewController *disappearingViewController = <span class="keyword">self.viewControllers.lastObject;
+</span>    <span class="preprocessor">if</span> (disappearingViewController &amp;&amp; !disappearingViewController.fd_willAppearInjectBlock) {
+        disappearingViewController.fd_willAppearInjectBlock = <span class="keyword">block;
+</span>    }
 }
-</code></pre><p>  };</p>
-<p>  // Setup will appear inject block to appearing view controller.<br>  // Setup disappearing view controller as well, because not every view controller is added into<br>  // stack by pushing, maybe by “-setViewControllers:”.<br>  appearingViewController.fd_willAppearInjectBlock = block;<br>  UIViewController *disappearingViewController = self.viewControllers.lastObject;<br>  if (disappearingViewController &amp;&amp; !disappearingViewController.fd_willAppearInjectBlock) {</p>
-<pre><code>disappearingViewController.fd_willAppearInjectBlock = block<span class="comment">;</span>
-</code></pre><p>  }<br>}</p>
-</li>
-</ul>
-</li>
+</code></pre></li>
 </ol>
 <p>这段代码就是将即将消失和展现的ViewController在viewWillAppear设置了一个自定义UINavigationBar的回调，用以根据进入的方式来展现NaviagtionBar，而不会出现突兀的“镂空”。</p>
 <p>到这，源码就结束了，可以回家收衣服喽！</p>
@@ -267,7 +275,7 @@ BOOL success = class_addMethod(<span class="keyword">class</span>, originalSelec
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/11/26/FDFullScreenPopGesture-Source-Code/" data-id="cihgkhu97000qwri12jnox4zw" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/11/26/FDFullScreenPopGesture-Source-Code/" data-id="cihgkkzq0000qz2i1957k1ml3" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
@@ -377,7 +385,7 @@ replicationLayer.instanceDelay = <span class="number">0.3</span>
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/11/17/Fun-of-CAReplicationLayer/" data-id="cihgkhu94000owri1m1lkl876" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/11/17/Fun-of-CAReplicationLayer/" data-id="cihgkkzpy000oz2i18g9rzrlm" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Swift/">Swift</a></li></ul>
@@ -583,7 +591,7 @@ modalVC<span class="class">.modalPresentationStyle</span> = <span class="class">
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/11/12/Swift-UITransition-iOS8/" data-id="cihgkhu8m000awri12azgg4d9" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/11/12/Swift-UITransition-iOS8/" data-id="cihgkkzpf000az2i18xcnn1dg" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Swift/">Swift</a></li></ul>
@@ -743,7 +751,7 @@ modalVC<span class="class">.modalPresentationStyle</span> = <span class="class">
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/11/05/Understand-Viper/" data-id="cihgkhu8k0008wri1g50iwork" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/11/05/Understand-Viper/" data-id="cihgkkzpd0008z2i1k4a7csqf" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
@@ -972,7 +980,7 @@ objectPath.<span class="keyword">get</span>(obj, <span class="string">'a.\u1200'
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/11/05/Object-Path-Source-Code/" data-id="cihgkhu8t000hwri1rp4cygbh" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/11/05/Object-Path-Source-Code/" data-id="cihgkkzpm000hz2i1gexp94vd" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/JavaScript/">JavaScript</a></li></ul>
@@ -1035,7 +1043,7 @@ objectPath.<span class="keyword">get</span>(obj, <span class="string">'a.\u1200'
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/10/29/Learn-Android-Day-by-Day/" data-id="cihgkhu8v000jwri17v0yl95l" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/10/29/Learn-Android-Day-by-Day/" data-id="cihgkkzpo000jz2i1fppg5b7j" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Android/">Android</a></li></ul>
@@ -1247,7 +1255,7 @@ objectPath.<span class="keyword">get</span>(obj, <span class="string">'a.\u1200'
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/10/29/Swift-Count-Down-Label/" data-id="cihgkhu8o000dwri1lxc8gnls" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/10/29/Swift-Count-Down-Label/" data-id="cihgkkzph000dz2i19zbyxhbx" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Swift/">Swift</a></li></ul>
@@ -1378,7 +1386,7 @@ func computeAngle(p1:<span class="type">CGPoint</span> , p2:<span class="type">C
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/10/27/Swift-Circle-Slider/" data-id="cihgkhu8q000fwri14af9apmr" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/10/27/Swift-Circle-Slider/" data-id="cihgkkzpj000fz2i17a5l15ip" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Swift/">Swift</a></li></ul>
@@ -1600,7 +1608,7 @@ func computeAngle(p1:<span class="type">CGPoint</span> , p2:<span class="type">C
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/10/14/GLCalendarView/" data-id="cihgkhu8y000mwri1arzdiao5" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/10/14/GLCalendarView/" data-id="cihgkkzps000mz2i12jyxbmzm" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
@@ -1821,7 +1829,7 @@ func computeAngle(p1:<span class="type">CGPoint</span> , p2:<span class="type">C
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/09/30/Debounce-and-Throttle-in-iOS/" data-id="cihgkhu99000swri1x30vfq5o" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/09/30/Debounce-and-Throttle-in-iOS/" data-id="cihgkkzq3000sz2i13e2ohqpu" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
