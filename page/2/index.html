@@ -62,6 +62,227 @@
       <div class="outer">
         <section id="main">
   
+    <article id="post-Debounce-and-Throttle-in-iOS" class="article article-type-post" itemscope itemprop="blogPost">
+  <div class="article-meta">
+    <a href="/2015/09/30/Debounce-and-Throttle-in-iOS/" class="article-date">
+  <time datetime="2015-09-30T10:44:45.000Z" itemprop="datePublished">2015-09-30</time>
+</a>
+    
+  </div>
+  <div class="article-inner">
+    
+    
+      <header class="article-header">
+        
+  
+    <h1 itemprop="name">
+      <a class="article-title" href="/2015/09/30/Debounce-and-Throttle-in-iOS/">实现iOS中的函数节流和函数防抖</a>
+    </h1>
+  
+
+      </header>
+    
+    <div class="article-entry" itemprop="articleBody">
+      
+        <h3 id="函数防抖与节流">函数防抖与节流</h3><p>今天来和大家谈论一个非常有意思的话题，就是函数节流和函数防抖。<br>可能大家还不是非常了解这两个术语的意思，让我们先来看下他们的含义吧。</p>
+<blockquote><br>Throttling enforces a maximum number of times a function can be called over time. As in “execute this function at most once every 100 milliseconds.”<br></blockquote>
+
+<p>首先是函数节流（Throttling），意思就是说一个函数在一定时间内，只能执行有限次数。比如，一个函数在100毫秒呢，最多只能执行一次。<b>当然，也可以不执行！</b></p>
+<p>看完了节流，我们再来看看函数防抖（Debouncing）。</p>
+<blockquote><br>Debouncing enforces that a function not be called again until a certain amount of time has passed without it being called. As in “execute this function only if 100 milliseconds have passed without it being called.”<br></blockquote>
+
+<p>函数防抖的意思就是，一个函数被执行过一次以后，在一段时间内不能再次执行。比如，一个函数执行完了之后，100毫秒之内不能第二次执行。</p>
+<p>咦？有人看到这，肯定就有疑惑了，这两玩意有啥区别啊？这么解释吧，函数防抖可能会被无限延迟。用现实乘坐公交车中的例子来说，Throttle就是准点就发车（比如15分钟一班公交车）；Debounce就是黑车，上了一个人以后，司机说，再等一个人，等不到，咱么10分钟后出发。但是呢，如果在10分钟内又有一个人上车，这个10分钟自动延后直到等待的10分钟内没人上车了。换句话说，Debounce可以理解成merge一段时间的一系列相同函数调用。</p>
+<p>如果还不能理解，这里有个很好玩的<a href="http://demo.nimius.net/debounce_throttle/" target="_blank" rel="external">在线演示</a> (PS:你必须用电脑上)</p>
+<h3 id="JavaScript中的函数节流和防抖">JavaScript中的函数节流和防抖</h3><p>说到防抖和节流，我们就不得不先来提一提JavaScript中坑爹的DOM操作。我们直接看underscore.js中的源码：<br>首先是Throttle：</p>
+<pre><code>_.throttle = function(func, wait) {
+  <span class="keyword">var</span> context, args, <span class="literal">result</span>;
+  <span class="keyword">var</span> timeout = null;
+
+  <span class="keyword">var</span> previous = <span class="number">0</span>;
+  <span class="keyword">var</span> later = function() {
+    // 若设定了开始边界不执行选项，上次执行时间始终为<span class="number">0</span>
+    previous = options.leading === <span class="literal">false</span> ? <span class="number">0</span> : _.now();
+    timeout = null;
+    <span class="literal">result</span> = func.apply(context, args);
+    <span class="keyword">if</span> (!timeout) context = args = null;
+  };
+  <span class="keyword">return</span> function() {
+    <span class="keyword">var</span> now = _.now();
+    // 首次执行时，如果设定了开始边界不执行选项，将上次执行时间设定为当前时间。
+    <span class="keyword">if</span> (!previous &amp;&amp; options.leading === <span class="literal">false</span>) previous = now;
+    // 延迟执行时间间隔
+    <span class="keyword">var</span> remaining = wait - (now - previous);
+    context = this;
+    args = arguments;
+    // 延迟时间间隔remaining小于等于<span class="number">0</span>，表示上次执行至此所间隔时间已经超过一个时间窗口
+    // remaining大于时间窗口wait，表示客户端系统时间被调整过
+    <span class="keyword">if</span> (remaining &lt;= <span class="number">0</span> || remaining &gt; wait) {
+      clearTimeout(timeout);
+      timeout = null;
+      previous = now;
+      <span class="literal">result</span> = func.apply(context, args);
+      <span class="keyword">if</span> (!timeout) context = args = null;
+    //如果延迟执行不存在，且没有设定结尾边界不执行选项
+    } <span class="keyword">else</span> <span class="keyword">if</span> (!timeout &amp;&amp; options.trailing !== <span class="literal">false</span>) {
+      timeout = setTimeout(later, remaining);
+    }
+    <span class="keyword">return</span> <span class="literal">result</span>;
+  };
+};
+</code></pre><p>代码逻辑非常好理解，</p>
+<pre><code><span class="variable"><span class="keyword">var</span> remaining</span> = wait - (now - previous);
+</code></pre><p>就是计算下上一次调用的时间和现在所处的时间间隔是不是超过了wait的时间<b>（这个时间只有可能会大于等于wait，因为runloop是很繁忙的，前面一个任务很耗时，那你就多等一会呗）</b>。<br>可能会有人不理解option是啥意思，我们看下代码中涉及了以下两个参数：</p>
+<pre><code><span class="tag">options</span><span class="class">.leading</span>和<span class="tag">options</span><span class="class">.trailing</span>
+</code></pre><p>这两个参数的意思就是禁止第一次调用和最后一次调用，简单吧。</p>
+<p>理解了函数节流，我们再来看看防抖是怎么做的。<br>    _.debounce = function(func, wait, immediate) {<br>      var timeout, args, context, timestamp, result;</p>
+<pre><code>  <span class="keyword">var</span> later = function() {
+    // 据上一次触发时间间隔
+    <span class="keyword">var</span> last = _.now() - timestamp;
+
+    // 上次被包装函数被调用时间间隔last小于设定时间间隔wait
+    <span class="keyword">if</span> (last &lt; wait &amp;&amp; last &gt; <span class="number">0</span>) {
+      timeout = setTimeout(later, wait - last);
+    } <span class="keyword">else</span> {
+      timeout = null;
+      // 如果设定为immediate===<span class="literal">true</span>，因为开始边界已经调用过了此处无需调用
+      <span class="keyword">if</span> (!immediate) {
+        <span class="literal">result</span> = func.apply(context, args);
+        <span class="keyword">if</span> (!timeout) context = args = null;
+      }
+    }
+  };
+
+  <span class="keyword">return</span> function() {
+    context = this;
+    args = arguments;
+    timestamp = _.now();
+    <span class="keyword">var</span> callNow = immediate &amp;&amp; !timeout;
+    // 如果延时不存在，重新设定延时
+    <span class="keyword">if</span> (!timeout) timeout = setTimeout(later, wait);
+    <span class="keyword">if</span> (callNow) {
+      <span class="literal">result</span> = func.apply(context, args);
+      context = args = null;
+    }
+
+    <span class="keyword">return</span> <span class="literal">result</span>;
+  };
+};
+</code></pre><p>可以看到，在防抖的函数中包含了一个<b>timestamp</b>，这个参数用来记录了当前这个函数最后一次被调用是什么时候，每次调用的时候，就更新了timestamp。有人可能会问，这个timestamp在多次调用的过程中还能保留吗？<b>答案是肯定的，debounce函数返回的实际是一个匿名函数，这个匿名函数就是一个闭包环境，可以捕捉timestap进行持久话访问，所以多次调用这个匿名函数实际上访问的都是同一个timestamp。</b></p>
+<h3 id="实现iOS中的函数节流">实现iOS中的函数节流</h3><p>重头戏来啦！！！！。<br>在iOS中，我们经常会遇到这样的需求，比如说你要根据UIScrollView的contentOffset进行某些计算。这些计算有的很简单不耗时，比如根据offset动态的更改UINavigationBar的alpha值。但是有些就很复杂，比如你要根据某些offset启动某些动画，或者进行大规模的运算，还有很多时候时候会发送很多异步的API请求，由于很多用户会不停的用指尖在完美的iPhone屏幕上来回滑动，你一定不想你的App甚至是服务器这些操作给玩崩了，所以，函数节流是必不可少的。</p>
+<h4 id="初级版本">初级版本</h4><p>第一个版本的函数节流如下：</p>
+<pre><code><span class="preprocessor">#import <span class="title">"PerformSelectorWithDebounce.h"</span></span>
+<span class="preprocessor">#import <span class="title">&lt;objc/runtime.h&gt;</span></span>
+<span class="preprocessor">#import <span class="title">&lt;objc/message.h&gt;</span></span>
+
+<span class="class"><span class="keyword">@implementation</span> <span class="title">NSObject</span> (<span class="title">Throttle</span>)</span>
+
+<span class="keyword">const</span> <span class="keyword">char</span> * WZThrottledSelectorKey;
+
+- (<span class="keyword">void</span>) wz_performSelector:(SEL)aSelector withThrottle:(<span class="built_in">NSTimeInterval</span>)duration
+{
+    <span class="built_in">NSMutableDictionary</span> *blockedSelectors = objc_getAssociatedObject(<span class="keyword">self</span>, WZThrottledSelectorKey);
+
+    <span class="keyword">if</span>(!blockedSelectors)
+    {
+        blockedSelectors = [<span class="built_in">NSMutableDictionary</span> dictionary];
+        objc_setAssociatedObject(<span class="keyword">self</span>, kDictionaryOfSelectorsToBlock, blockedSelectors, OBJC_ASSO<span class="built_in">CIATION_RETAIN</span>);
+    }
+
+    <span class="built_in">NSString</span> * selectorName = <span class="built_in">NSStringFromSelector</span>(aSelector);
+    <span class="keyword">if</span>(![blockedSelectors objectForKey:aSelectorAsStr])
+    {
+        [blockedSelectors setObject:selectorName selectorName];
+
+        objc_msgSend(<span class="keyword">self</span>, aSelector);
+        [<span class="keyword">self</span> performSelector:<span class="keyword">@selector</span>(unlockSelector:) withObject:aSelectorAsStr afterDelay:duration];
+
+    }
+}
+
+-(<span class="keyword">void</span>)unlockSelector:(<span class="built_in">NSString</span>*)selectorAsString
+{
+    <span class="built_in">NSMutableDictionary</span> *blockedSelectors = objc_getAssociatedObject(<span class="keyword">self</span>, WZThrottledSelectorKey);
+    [blockedSelectors removeObjectForKey:selectorAsString];
+}
+</code></pre><p>初看这个代码逻辑，这个代码基本实现了在一定时间内只调用有限次数的函数。但是，这哪是函数节流啊，这是函数断流！不信你们在<b>[UIScrollView scrollViewDidScroll]</b>试试看，你们就知道啥叫断流了。<b>原因也很简单，我们的unlockSelector是基于performSelector解锁的，而performSelector是基于runloop的，我们在不停的滚动的时候就会导致整个主runloop被我们占用，因此，unlock的函数一直没有得到调用，结果就导致了断流。</b></p>
+<h4 id="高级版本">高级版本</h4><p>因此，我又实现了一个高级版本，代码如下，需要测试用例和源码的可以上我的github自取，<a href="https://github.com/SatanWoo/iOSThrottle" target="_blank" rel="external">地址戳我</a>。代码逻辑很简单同时也解决了上述版本所提及的问题。</p>
+<pre><code><span class="preprocessor">#import <span class="title">"NSObject+Throttle.h"</span></span>
+<span class="preprocessor">#import <span class="title">&lt;objc/runtime.h&gt;</span></span>
+<span class="preprocessor">#import <span class="title">&lt;objc/message.h&gt;</span></span>
+
+<span class="keyword">static</span> <span class="keyword">char</span> WZThrottledSelectorKey;
+<span class="keyword">static</span> <span class="keyword">char</span> WZThrottledSerialQueue;
+
+<span class="class"><span class="keyword">@implementation</span> <span class="title">NSObject</span> (<span class="title">Throttle</span>)</span>
+
+- (<span class="keyword">void</span>)wz_performSelector:(SEL)aSelector withThrottle:(<span class="built_in">NSTimeInterval</span>)inteval
+{
+    <span class="built_in">dispatch_async</span>([<span class="keyword">self</span> getSerialQueue], ^{
+        <span class="built_in">NSMutableDictionary</span> *blockedSelectors = [objc_getAssociatedObject(<span class="keyword">self</span>, &amp;WZThrottledSelectorKey) mutableCopy];
+
+        <span class="keyword">if</span> (!blockedSelectors) {
+            blockedSelectors = [<span class="built_in">NSMutableDictionary</span> dictionary];
+            objc_setAssociatedObject(<span class="keyword">self</span>, &amp;WZThrottledSelectorKey, blockedSelectors, OBJC_ASSO<span class="built_in">CIATION_COPY_NONATOMIC</span>);
+        }
+
+        <span class="built_in">NSString</span> *selectorName = <span class="built_in">NSStringFromSelector</span>(aSelector);
+        <span class="keyword">if</span> (![blockedSelectors objectForKey:selectorName]) {
+            [blockedSelectors setObject:selectorName forKey:selectorName];
+            objc_setAssociatedObject(<span class="keyword">self</span>, &amp;WZThrottledSelectorKey, blockedSelectors, OBJC_ASSO<span class="built_in">CIATION_COPY_NONATOMIC</span>);
+
+            <span class="built_in">dispatch_async</span>(dispatch_get_main_queue(), ^{
+                objc_msgSend(<span class="keyword">self</span>, aSelector);
+
+                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(inteval * <span class="built_in">NSEC_PER_SEC</span>)), [<span class="keyword">self</span> getSerialQueue], ^{
+                    [<span class="keyword">self</span> unlockSelector:selectorName];
+                });
+            });
+        }
+    });
+}
+
+<span class="preprocessor">#pragma mark - Private</span>
+- (<span class="keyword">void</span>)unlockSelector:(<span class="built_in">NSString</span> *)selectorName
+{
+    <span class="built_in">dispatch_async</span>([<span class="keyword">self</span> getSerialQueue], ^{
+        <span class="built_in">NSMutableDictionary</span> *blockedSelectors = [objc_getAssociatedObject(<span class="keyword">self</span>, &amp;WZThrottledSelectorKey) mutableCopy];
+
+        <span class="keyword">if</span> ([blockedSelectors objectForKey:selectorName]) {
+            [blockedSelectors removeObjectForKey:selectorName];
+        }
+
+        objc_setAssociatedObject(<span class="keyword">self</span>, &amp;WZThrottledSelectorKey, blockedSelectors, OBJC_ASSO<span class="built_in">CIATION_COPY_NONATOMIC</span>);
+    });
+}
+
+- (<span class="built_in">dispatch_queue_t</span>)getSerialQueue
+{
+    <span class="built_in">dispatch_queue_t</span> serialQueur = objc_getAssociatedObject(<span class="keyword">self</span>, &amp;WZThrottledSerialQueue);
+    <span class="keyword">if</span> (!serialQueur) {
+        serialQueur = dispatch_queue_create(<span class="string">"com.satanwoo.throttle"</span>, <span class="literal">NULL</span>);
+        objc_setAssociatedObject(<span class="keyword">self</span>, &amp;WZThrottledSerialQueue, serialQueur, OBJC_ASSO<span class="built_in">CIATION_RETAIN_NONATOMIC</span>);
+    }
+    <span class="keyword">return</span> serialQueur;
+}
+
+<span class="keyword">@end</span>
+</code></pre>
+      
+    </div>
+    <footer class="article-footer">
+      <a data-url="http://satanwoo.github.io/2015/09/30/Debounce-and-Throttle-in-iOS/" data-id="cii0njrbx000upzi19hyoio1c" class="article-share-link">Share</a>
+      
+      
+  <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
+
+    </footer>
+  </div>
+  
+</article>
+
+
+  
     <article id="post-flux-js-part-one" class="article article-type-post" itemscope itemprop="blogPost">
   <div class="article-meta">
     <a href="/2015/09/23/flux-js-part-one/" class="article-date">
@@ -351,7 +572,7 @@
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/09/23/flux-js-part-one/" data-id="cihgkkzoy0003z2i1ozdj0bo1" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/09/23/flux-js-part-one/" data-id="cii0njr960003pzi1axxxh3fq" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/JavaScript/">JavaScript</a></li></ul>
@@ -1023,7 +1244,7 @@ CountryModel<span class="keyword">*</span> country = [[CountryModel alloc] initW
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/09/17/code-of-JSONModel/" data-id="cihgkkzpa0006z2i1iashzzc4" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/09/17/code-of-JSONModel/" data-id="cii0njrah0006pzi14i136qhh" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
@@ -1071,7 +1292,7 @@ CountryModel<span class="keyword">*</span> country = [[CountryModel alloc] initW
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/09/11/A-New-Start/" data-id="cihgkkzny0000z2i1w082vzyw" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/09/11/A-New-Start/" data-id="cii0njr7p0000pzi191c56qy9" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
@@ -1098,7 +1319,7 @@ CountryModel<span class="keyword">*</span> country = [[CountryModel alloc] initW
   <div class="widget-wrap">
     <h3 class="widget-title">Tags</h3>
     <div class="widget">
-      <ul class="tag-list"><li class="tag-list-item"><a class="tag-list-link" href="/tags/Android/">Android</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/JavaScript/">JavaScript</a><span class="tag-list-count">2</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Swift/">Swift</a><span class="tag-list-count">4</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/iOS/">iOS</a><span class="tag-list-count">6</span></li></ul>
+      <ul class="tag-list"><li class="tag-list-item"><a class="tag-list-link" href="/tags/Android/">Android</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/JavaScript/">JavaScript</a><span class="tag-list-count">2</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Swift/">Swift</a><span class="tag-list-count">4</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/iOS/">iOS</a><span class="tag-list-count">7</span></li></ul>
     </div>
   </div>
 
@@ -1116,7 +1337,7 @@ CountryModel<span class="keyword">*</span> country = [[CountryModel alloc] initW
   <div class="widget-wrap">
     <h3 class="widget-title">Archives</h3>
     <div class="widget">
-      <ul class="archive-list"><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/11/">November 2015</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/10/">October 2015</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/09/">September 2015</a><span class="archive-list-count">4</span></li></ul>
+      <ul class="archive-list"><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/12/">December 2015</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/11/">November 2015</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/10/">October 2015</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/09/">September 2015</a><span class="archive-list-count">4</span></li></ul>
     </div>
   </div>
 
@@ -1126,6 +1347,10 @@ CountryModel<span class="keyword">*</span> country = [[CountryModel alloc] initW
     <h3 class="widget-title">Recents</h3>
     <div class="widget">
       <ul>
+        
+          <li>
+            <a href="/2015/12/11/TBAnnotationClustering/">TBAnnotationClustering源码解析</a>
+          </li>
         
           <li>
             <a href="/2015/11/26/FDFullScreenPopGesture-Source-Code/">FDFullScreenPopGesture源码解析</a>
@@ -1141,10 +1366,6 @@ CountryModel<span class="keyword">*</span> country = [[CountryModel alloc] initW
         
           <li>
             <a href="/2015/11/05/Understand-Viper/">浅入浅出VIPER设计架构(1)</a>
-          </li>
-        
-          <li>
-            <a href="/2015/11/05/Object-Path-Source-Code/">Object-Path 源码解读</a>
           </li>
         
       </ul>
