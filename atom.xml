@@ -4,7 +4,7 @@
   
   <link href="/atom.xml" rel="self"/>
   <link href="http://satanwoo.github.io/"/>
-  <updated>2015-12-10T19:42:47.000Z</updated>
+  <updated>2015-12-10T19:45:14.000Z</updated>
   <id>http://satanwoo.github.io/</id>
   
   <author>
@@ -19,7 +19,7 @@
     <link href="http://satanwoo.github.io/2015/12/11/TBAnnotationClustering/"/>
     <id>http://satanwoo.github.io/2015/12/11/TBAnnotationClustering/</id>
     <published>2015-12-10T16:56:04.000Z</published>
-    <updated>2015-12-10T19:42:47.000Z</updated>
+    <updated>2015-12-10T19:45:14.000Z</updated>
     <content type="html"><![CDATA[<p>毕设这两天飞一般的加速，终于可以写写源码解析了，嘿嘿，这周读两个跟性能相关的源码，首先是一个跟地图相关的，今天来看看一个数据结构在iOS开发中的妙用。</p>
 <h3 id="TBAnnotationClustering">TBAnnotationClustering</h3><p>我们都知道，MapView的实现机制其实和UITableView类似，首先他们都是基于UIScrollView支持滑动的，此外，他们都采用了循环服用的机制了来保持内存的开销。</p>
 <p><strong>但是</strong>，两者之间有个很大的区别就是数量级的差距，UITableView就算充满整个屏幕，充其量也就是10多个同时可见的VisibleCell，因此就多维护一个大小是VisibleCells数量 ＋ 2的这样一个循环队列，进行复用。但是MapView就不一样了，地图上同时展示一段范围内几千个Point of Interest是非常有可能的，这一下子的内存开销和性能卡顿就非常不得了，因此我们需要一种合理的手段来避免，这就是我们今天要讲解的TBAnnotationClustering的由来。</p>
@@ -276,18 +276,9 @@ TBQuadTreeGatherDataInRange(node-&gt;southEast, range, block);
 </ul>
 <p>什么是网格？就是根据Cell大小将地图划分成了一块块区域，通过minX， maxX, minY - maxY找到对应的网格。类似于array[1][2]找到第二行第三列的网格（从0开始索引）。</p>
 <ul>
-<li><ol>
-<li>遍历每一个网格，获取当前网格对应的四叉树节点中的数据信息，并记录个数。</li>
-</ol>
-</li>
-<li><ol>
-<li>如果个数是1，那么直接显示，包含数据节点的附加信息，比如在这里就是酒店名称和酒店电话。</li>
-</ol>
-</li>
-<li><ol>
-<li>如果个数大于1的话，利用均值计算中心点，中心点是所有包含的数据节点平均值，同时信息只简单的显示个数。</li>
-</ol>
-</li>
+<li>3.遍历每一个网格，获取当前网格对应的四叉树节点中的数据信息，并记录个数。</li>
+<li>4.如果个数是1，那么直接显示，包含数据节点的附加信息，比如在这里就是酒店名称和酒店电话。</li>
+<li>5.如果个数大于1的话，利用均值计算中心点，中心点是所有包含的数据节点平均值，同时信息只简单的显示个数。</li>
 </ul>
 <p>至此，整个代码就解读完整啦。</p>
 ]]></content>
