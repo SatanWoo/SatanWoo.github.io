@@ -16,7 +16,7 @@ TBAnnotationClustering我们都知道，MapView的实现机制其实和UITableVi
 TBAnnotationClustering我们都知道，MapView的实现机制其实和UITableView类似，首先他们都是基于UIScrollView支持滑动的，此外，他们都采用了循环服用的机制了来保持内存的开销。
 但是，两者之间有个很大的区别">
 <meta property="og:image" content="http://img.blog.csdn.net/20131005154434687?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvemhvdXh1Z3VhbmcyMzY=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast">
-<meta property="og:updated_time" content="2015-12-10T19:45:14.000Z">
+<meta property="og:updated_time" content="2015-12-11T09:38:46.000Z">
 <meta name="twitter:card" content="summary">
 <meta name="twitter:title" content="TBAnnotationClustering源码解析">
 <meta name="twitter:description" content="毕设这两天飞一般的加速，终于可以写写源码解析了，嘿嘿，这周读两个跟性能相关的源码，首先是一个跟地图相关的，今天来看看一个数据结构在iOS开发中的妙用。
@@ -236,30 +236,30 @@ TBBoundingBox TBBoundingBoxMake(<span class="built_in">double</span> x0, <span c
 <li>首先先判断这个数据是否落在该长方形中，不是直接滚蛋。</li>
 <li>如果当前包含的数据节点个数没有超过最大数目，直接应用在其中。</li>
 <li>如果四个子节点为空，就先创建</li>
-<li><p>然后再递归插入</p>
-<p>  void TBQuadTreeGatherDataInRange(TBQuadTreeNode* node, TBBoundingBox range, TBDataReturnBlock block)<br>  {</p>
-<pre><code><span class="keyword">if</span> (!TBBoundingBoxIntersectsBoundingBox(node-&gt;boundingBox, range)) {
-    <span class="keyword">return</span>;
-}
-
-<span class="keyword">for</span> (<span class="keyword">int</span> i = <span class="number">0</span>; i &lt; node-&gt;count; i++) {
-    <span class="keyword">if</span> (TBBoundingBoxContainsData(range, node-&gt;points[i])) {
-        block(node-&gt;points[i]);
-    }
-}
-
-<span class="keyword">if</span> (node-&gt;northWest == <span class="keyword">NULL</span>) {
-    <span class="keyword">return</span>;
-}
-
-TBQuadTreeGatherDataInRange(node-&gt;northWest, range, block);
-TBQuadTreeGatherDataInRange(node-&gt;northEast, range, block);
-TBQuadTreeGatherDataInRange(node-&gt;southWest, range, block);
-TBQuadTreeGatherDataInRange(node-&gt;southEast, range, block);
-</code></pre><p>  }</p>
-</li>
+<li>然后再递归插入</li>
 </ul>
-<p>这个就是通过DFS进行节点的遍历，一旦有落在range内的数据节点，就进行回调。</p>
+<pre><code><span class="type">void</span> <span class="type">TBQuadTreeGatherDataInRange</span>(<span class="type">TBQuadTreeNode</span>* node, <span class="type">TBBoundingBox</span> <span class="type">range</span>, <span class="type">TBDataReturnBlock</span> <span class="keyword">block</span>)
+{
+    <span class="keyword">if</span> (!<span class="type">TBBoundingBoxIntersectsBoundingBox</span>(node-&gt;boundingBox, <span class="type">range</span>)) {
+        <span class="keyword">return</span>;
+    }
+
+    <span class="keyword">for</span> (<span class="type">int</span> i = <span class="number">0</span>; i &lt; node-&gt;count; i++) {
+        <span class="keyword">if</span> (<span class="type">TBBoundingBoxContainsData</span>(<span class="type">range</span>, node-&gt;points[i])) {
+            <span class="keyword">block</span>(node-&gt;points[i]);
+        }
+    }
+
+    <span class="keyword">if</span> (node-&gt;northWest == <span class="type">NULL</span>) {
+        <span class="keyword">return</span>;
+    }
+
+    <span class="type">TBQuadTreeGatherDataInRange</span>(node-&gt;northWest, <span class="type">range</span>, <span class="keyword">block</span>);
+    <span class="type">TBQuadTreeGatherDataInRange</span>(node-&gt;northEast, <span class="type">range</span>, <span class="keyword">block</span>);
+    <span class="type">TBQuadTreeGatherDataInRange</span>(node-&gt;southWest, <span class="type">range</span>, <span class="keyword">block</span>);
+    <span class="type">TBQuadTreeGatherDataInRange</span>(node-&gt;southEast, <span class="type">range</span>, <span class="keyword">block</span>);
+}
+</code></pre><p>这个就是通过DFS进行节点的遍历，一旦有落在range内的数据节点，就进行回调。</p>
 <p><strong>综上所述，就是一个基本的四叉树，可以很明显的看到，在四叉树的构建、遍历中，都用了树的递归，也就是俗称的DFS算法。</strong></p>
 <h4 id="TBCoordinateQuadTree">TBCoordinateQuadTree</h4><p>这个类呢，和实质上的四叉树或者性能优化并无太大关系，只是一层简单的封装，我们大致来了解一下就好。</p>
 <pre><code><span class="keyword">TBBoundingBox </span><span class="keyword">TBBoundingBoxForMapRect(MKMapRect </span>mapRect)
@@ -355,7 +355,7 @@ TBQuadTreeGatherDataInRange(node-&gt;southEast, range, block);
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/12/11/TBAnnotationClustering/" data-id="cii0nmsoz000asci1vbnaql66" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/12/11/TBAnnotationClustering/" data-id="cii1mi1hm000aiui17088wmex" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
@@ -365,6 +365,15 @@ TBQuadTreeGatherDataInRange(node-&gt;southEast, range, block);
   
     
 <nav id="article-nav">
+  
+    <a href="/2015/12/11/LLDB-1/" id="article-nav-newer" class="article-nav-link-wrap">
+      <strong class="article-nav-caption">Newer</strong>
+      <div class="article-nav-title">
+        
+          浅入浅出LLDB（1）
+        
+      </div>
+    </a>
   
   
     <a href="/2015/11/26/FDFullScreenPopGesture-Source-Code/" id="article-nav-older" class="article-nav-link-wrap">
@@ -406,7 +415,7 @@ TBQuadTreeGatherDataInRange(node-&gt;southEast, range, block);
   <div class="widget-wrap">
     <h3 class="widget-title">Tags</h3>
     <div class="widget">
-      <ul class="tag-list"><li class="tag-list-item"><a class="tag-list-link" href="/tags/Android/">Android</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/JavaScript/">JavaScript</a><span class="tag-list-count">2</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Swift/">Swift</a><span class="tag-list-count">4</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/iOS/">iOS</a><span class="tag-list-count">7</span></li></ul>
+      <ul class="tag-list"><li class="tag-list-item"><a class="tag-list-link" href="/tags/Android/">Android</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/JavaScript/">JavaScript</a><span class="tag-list-count">2</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Swift/">Swift</a><span class="tag-list-count">4</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/iOS/">iOS</a><span class="tag-list-count">8</span></li></ul>
     </div>
   </div>
 
@@ -424,7 +433,7 @@ TBQuadTreeGatherDataInRange(node-&gt;southEast, range, block);
   <div class="widget-wrap">
     <h3 class="widget-title">Archives</h3>
     <div class="widget">
-      <ul class="archive-list"><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/12/">December 2015</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/11/">November 2015</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/10/">October 2015</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/09/">September 2015</a><span class="archive-list-count">4</span></li></ul>
+      <ul class="archive-list"><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/12/">December 2015</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/11/">November 2015</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/10/">October 2015</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/09/">September 2015</a><span class="archive-list-count">4</span></li></ul>
     </div>
   </div>
 
@@ -434,6 +443,10 @@ TBQuadTreeGatherDataInRange(node-&gt;southEast, range, block);
     <h3 class="widget-title">Recents</h3>
     <div class="widget">
       <ul>
+        
+          <li>
+            <a href="/2015/12/11/LLDB-1/">浅入浅出LLDB（1）</a>
+          </li>
         
           <li>
             <a href="/2015/12/11/TBAnnotationClustering/">TBAnnotationClustering源码解析</a>
@@ -449,10 +462,6 @@ TBQuadTreeGatherDataInRange(node-&gt;southEast, range, block);
         
           <li>
             <a href="/2015/11/12/Swift-UITransition-iOS8/">Swift每日一练：自定义转场在iOS8中的那些坑</a>
-          </li>
-        
-          <li>
-            <a href="/2015/11/05/Understand-Viper/">浅入浅出VIPER设计架构(1)</a>
           </li>
         
       </ul>

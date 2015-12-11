@@ -4,7 +4,7 @@
   
   <link href="/atom.xml" rel="self"/>
   <link href="http://satanwoo.github.io/"/>
-  <updated>2015-12-10T19:45:14.000Z</updated>
+  <updated>2015-12-11T12:01:20.000Z</updated>
   <id>http://satanwoo.github.io/</id>
   
   <author>
@@ -15,11 +15,84 @@
   <generator uri="http://hexo.io/">Hexo</generator>
   
   <entry>
+    <title><![CDATA[浅入浅出LLDB（1）]]></title>
+    <link href="http://satanwoo.github.io/2015/12/11/LLDB-1/"/>
+    <id>http://satanwoo.github.io/2015/12/11/LLDB-1/</id>
+    <published>2015-12-11T08:50:04.000Z</published>
+    <updated>2015-12-11T12:01:20.000Z</updated>
+    <content type="html"><![CDATA[<p>这周开始好好钻研一下LLDB相关的知识，这是一系列的文章。有些初级知识可能大家都有所涉猎，嘿嘿，懂得自然懂，看我的博客，什么时候会收获小。</p>
+<h3 id="基础语法">基础语法</h3><p>1.<figure class="highlight"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">&#26377;&#21861;&#19981;&#20250;&#65292;&#23601;&#30452;&#25509;&#36755;&#20837;help&#65292;&#20320;&#20250;&#24471;&#21040;&#22914;&#19979;&#30340;&#19968;&#31995;&#21015;&#20449;&#24687;&#65292;&#10;&#10;&#9;command           -- A set of commands for managing or customizing the&#10;                       debugger commands.&#10;    disassemble       -- Disassemble bytes in the current function, or elsewhere&#10;                       in the executable program as specified by the user.&#10;&#10;2.```print</span><br></pre></td></tr></table></figure></p>
+<p>输出变量值<br>比如，对于如下的程序语句 <figure class="highlight"><figcaption><span>haha = 5;``` 你只要在LLDB里面输入 ``` print haha``` 就可以得到如下输出结果。</span></figcaption><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">&#10;&#9;(lldb) p haha&#10;&#9;(Int) $R0 = 5&#10;&#9;&#10;**&#35831;&#27880;&#24847;**&#65292;&#22312;[&#19982;&#35843;&#35797;&#22120;&#20849;&#33310;- LLDB &#30340;&#21326;&#23572;&#20857;](http://objccn.io/issue-19-2/)&#19968;&#25991;&#20013;&#26366;&#32463;&#25552;&#20986;&#20250;&#36755;&#20986;&#31867;&#20284;&#20110; ```$0 = 5```&#65292;&#24182;&#25351;&#20986;**$0&#26159;&#24403;&#21069;&#30340;&#36755;&#20986;&#20540;**&#12290;&#36825;&#20010;&#35828;&#35805;&#20854;&#23454;&#26159;&#19981;&#20005;&#35880;&#30340;&#65292;&#27491;&#30830;&#30340;&#35828;&#27861;&#26159;&#65292;&#24212;&#35813;&#26159;**&#24403;&#21069;&#30340;haha&#30340;&#20540;5&#23384;&#22312;&#20102;R0&#23492;&#23384;&#22120;&#37324;&#12290;**&#10;&#10;&#27604;&#22914;&#65292;&#24403;&#25105;&#20204;&#26500;&#24314;&#22914;&#19979;&#30340;&#31243;&#24207;&#35821;&#21477;&#26102;&#65292;&#10;&#10;&#9;let haha = 5;&#10;&#9;let object = &#34;jkjksdjf&#34;;&#10;&#9;&#10;&#25105;&#20204;&#22312;&#20998;&#21035;``` print haha ```&#20197;&#21450;&#9;``` print object```&#23601;&#20250;&#20998;&#21035;&#24471;&#21040;&#10;```(Int) $R0 = 5```&#21644;```(String) $R1 = &#34;jkjksdjf&#34;</span><br></pre></td></tr></table></figure></p>
+<p>这说明haha的值和object的值分别以int型和string型存在了R0和R1寄存器之中。</p>
+<p><strong>当然，图快速的话</strong>，可以像我上面一样将print简写成p。</p>
+<p>3.<code>po</code><br>输出变量值  </p>
+<p>哎，有人奇怪了，po也是输出变量值，那和p有啥区别啊？本质上没啥区别，如果真要说，就是<strong>po = e -O –</strong>，具体我们后续再说啦。</p>
+<p>4.<code>breakpoubt l</code> 输出所有的断点，可以得到如下的结果</p>
+<pre><code>Current breakpoints:
+<span class="number">1</span>: file = <span class="string">'xxx/ViewController.swift'</span>, line = <span class="number">19</span>, locations = <span class="number">1</span>, resolved = <span class="number">1</span>, hit count = <span class="number">1</span>
+
+<span class="number">1.1</span>: where = xxx<span class="class">.ViewController</span><span class="class">.viewDidLoad</span> (xxx.ViewController)() -&gt; () + <span class="number">131</span> at ViewController<span class="class">.swift</span>:<span class="number">19</span>, <span class="tag">address</span> = <span class="number">0</span>x0000000108d0a443, resolved, hit count = <span class="number">1</span> 
+</code></pre><p>其中 <strong>1: file</strong>的这个1就是ID号。<br>那这里的1.1是什么鬼？<strong>嘿嘿，当里使用Symbolic Breakpoint的时候，你一个断点很有可能截获了多个地方，比如AViewController和BViewController的viewDidLoad都被加上了断点，这个时候就需要靠诸如1.1和1.2之类的细分ID来进行区别了。</strong></p>
+<p>当然，有人会问，输出这个断点有什么用啊。嘿嘿，当你使用<strong>Xcode Symbolic Breakpoint</strong>的时候，你就会发现究竟在多少个地方下了断点了。</p>
+<p><strong>同样的</strong>，你可以将breakpoint简写成br。</p>
+<p>5.<code>br delete ID</code> 这里的ID就是之前的断点的ID号<br>通过这个命令，可以删除ID对应的断点</p>
+<p>6.<code>br e ID</code> 启用一个ID号对应的断点</p>
+<p>7.<code>br di ID</code> 禁用一个ID号对应的断点</p>
+<p>8.<code>b xxx.swift:lineY</code> 在xxx文件的第lineY行设置一个断点<br>如 <code>b ViewController.swift:10</code> 就是在ViewController的第10号下了一个断点。</p>
+<p><strong>需要注意的是，</strong>通过b命令设置的断点，无法直观的在Xcode界面上显示出来，而<code>br delete</code>删除一个断点可以直接在Xcode上看出效果。</p>
+<p>9.<code>br set -n functionName</code> 对functionName设置Symbolic Breakpoint<br>如<code>br set -n viewDidLoad</code> 就是对所有的viewDidLoad设置了Symboloc Breakpoint</p>
+<p>10.<code>br mod -C &quot;Condition&quot; ID</code> 对ID号对应的breakpoint添加条件触发<br>假设我们有下面这样的一段代码</p>
+<pre><code><span class="number">1.</span> <span class="comment">//ViewController.swift</span>
+<span class="number">2.</span> <span class="keyword">for</span> var value in money {
+<span class="number">3.</span>     totalValue += value
+<span class="number">4.</span> }
+</code></pre><p>我们首先先使用<code>b ViewController.swift:3</code>设置一个断点，然后使用<code>br l</code>查询到对应的ID为3。<br>然后我们使用<code>br mod -C &quot;totalValue &gt; 50&quot; 3</code>对这个断点设置条件触发，条件为<strong>当totalValue 大于50时候才触发</strong>。</p>
+<p>当然，可能有些人会问，如果我不想删除断点，只是想移除条件触发怎么办？很简单，只要输入<code>br mod -C &quot;&quot; ID</code>，将其中的Condition部分设置为空即可。</p>
+<p>11.<code>continue</code> 继续运行程序<br>12.<code>n</code>        step over单步调试<br>13.<code>s</code>        step in进行函数<br>14.<code>finish</code>   step out退出函数</p>
+<h3 id="大杀器">大杀器</h3><p>上面的命令是不是很多，一个个敲实在是太麻烦，那如果我想对一个断点执行多条语句怎么办？<br>嘿嘿，大杀器来了。</p>
+<p><code>br com add ID</code> 对ID对应的断点进入交互式指定。如：</p>
+<pre><code><span class="keyword">br</span> <span class="keyword">com</span> <span class="built_in">add</span> <span class="number">2</span>
+&gt; bt
+&gt; <span class="keyword">continue</span>
+&gt; DONE
+</code></pre><p> 上面的语句指的是，对2号断点进行交互式指定，当这个断点触发的时候，首先执行<code>bt</code>(具体bt命令的意思我们后续再说，粗略理解就是backtrace输出调用栈，可以简单看下面的例子)，然后执行<code>continue</code>，最后通过关键字<strong>Done</strong>退出指定，这里的Done类似于shell里面的exit。</p>
+<pre><code>frame <span class="preprocessor">#<span class="number">0</span>: xxx`xxx.ViewController.viewDidLoad (self=<span class="number">0x00007faf52439c20</span>)() -&gt; () + <span class="number">470</span> at ViewController.swift:<span class="number">27</span></span>
+frame <span class="preprocessor">#<span class="number">1</span>: xxx`@objc xxx.ViewController.viewDidLoad (xxx.ViewController)() -&gt; () + <span class="number">34</span> at ViewController.swift:<span class="number">0</span></span>
+frame <span class="preprocessor">#<span class="number">2</span>: UIKit`-[UIViewController loadViewIfRequired] + <span class="number">1198</span></span>
+frame <span class="preprocessor">#<span class="number">3</span>: UIKit`-[UIViewController view] + <span class="number">27</span></span>
+frame <span class="preprocessor">#<span class="number">4</span>: UIKit`-[UIWindow addRootViewControllerViewIfPossible] + <span class="number">61</span></span>
+frame <span class="preprocessor">#<span class="number">5</span>: UIKit`-[UIWindow _setHidden:forced:] + <span class="number">282</span></span>
+frame <span class="preprocessor">#<span class="number">6</span>: UIKit`-[UIWindow makeKeyAndVisible] + <span class="number">42</span></span>
+frame <span class="preprocessor">#<span class="number">7</span>: UIKit`-[UIApplication _callInitializationDelegatesForMainScene:transitionContext:] + <span class="number">4131</span></span>
+frame <span class="preprocessor">#<span class="number">8</span>: UIKit`-[UIApplication _runWithMainScene:transitionContext:completion:] + <span class="number">1760</span></span>
+frame <span class="preprocessor">#<span class="number">9</span>: UIKit`-[UIApplication workspaceDidEndTransaction:] + <span class="number">188</span></span>
+frame <span class="preprocessor">#<span class="number">10</span>: FrontBoardServices`-[FBSSerialQueue _performNext] + <span class="number">192</span></span>
+frame <span class="preprocessor">#<span class="number">11</span>: FrontBoardServices`-[FBSSerialQueue _performNextFromRunLoopSource] + <span class="number">45</span></span>
+frame <span class="preprocessor">#<span class="number">12</span>: CoreFoundation`__CFRUNLOOP_IS_CALLING_OUT_TO_A_SOURCE0_PERFORM_FUNCTION__ + <span class="number">17</span></span>
+frame <span class="preprocessor">#<span class="number">13</span>: CoreFoundation`__CFRunLoopDoSources0 + <span class="number">556</span></span>
+frame <span class="preprocessor">#<span class="number">14</span>: CoreFoundation`__CFRunLoopRun + <span class="number">867</span></span>
+frame <span class="preprocessor">#<span class="number">15</span>: CoreFoundation`CFRunLoopRunSpecific + <span class="number">488</span></span>
+frame <span class="preprocessor">#<span class="number">16</span>: UIKit`-[UIApplication _run] + <span class="number">402</span></span>
+frame <span class="preprocessor">#<span class="number">17</span>: UIKit`UIApplicationMain + <span class="number">171</span></span>
+frame <span class="preprocessor">#<span class="number">18</span>: xxx`main + <span class="number">109</span> at AppDelegate.swift:<span class="number">12</span></span>
+frame <span class="preprocessor">#<span class="number">19</span>: libdyld.dylib`start + <span class="number">1</span></span>
+frame <span class="preprocessor">#<span class="number">20</span>: libdyld.dylib`start + <span class="number">1</span></span>
+</code></pre>]]></content>
+    <summary type="html">
+    <![CDATA[<p>这周开始好好钻研一下LLDB相关的知识，这是一系列的文章。有些初级知识可能大家都有所涉猎，嘿嘿，懂得自然懂，看我的博客，什么时候会收获小。</p>
+<h3 id="基础语法">基础语法</h3><p>1.<figure class="highlight"><table><t]]>
+    </summary>
+    
+      <category term="iOS" scheme="http://satanwoo.github.io/tags/iOS/"/>
+    
+  </entry>
+  
+  <entry>
     <title><![CDATA[TBAnnotationClustering源码解析]]></title>
     <link href="http://satanwoo.github.io/2015/12/11/TBAnnotationClustering/"/>
     <id>http://satanwoo.github.io/2015/12/11/TBAnnotationClustering/</id>
     <published>2015-12-10T16:56:04.000Z</published>
-    <updated>2015-12-10T19:45:14.000Z</updated>
+    <updated>2015-12-11T09:38:46.000Z</updated>
     <content type="html"><![CDATA[<p>毕设这两天飞一般的加速，终于可以写写源码解析了，嘿嘿，这周读两个跟性能相关的源码，首先是一个跟地图相关的，今天来看看一个数据结构在iOS开发中的妙用。</p>
 <h3 id="TBAnnotationClustering">TBAnnotationClustering</h3><p>我们都知道，MapView的实现机制其实和UITableView类似，首先他们都是基于UIScrollView支持滑动的，此外，他们都采用了循环服用的机制了来保持内存的开销。</p>
 <p><strong>但是</strong>，两者之间有个很大的区别就是数量级的差距，UITableView就算充满整个屏幕，充其量也就是10多个同时可见的VisibleCell，因此就多维护一个大小是VisibleCells数量 ＋ 2的这样一个循环队列，进行复用。但是MapView就不一样了，地图上同时展示一段范围内几千个Point of Interest是非常有可能的，这一下子的内存开销和性能卡顿就非常不得了，因此我们需要一种合理的手段来避免，这就是我们今天要讲解的TBAnnotationClustering的由来。</p>
@@ -166,30 +239,30 @@ TBBoundingBox TBBoundingBoxMake(<span class="built_in">double</span> x0, <span c
 <li>首先先判断这个数据是否落在该长方形中，不是直接滚蛋。</li>
 <li>如果当前包含的数据节点个数没有超过最大数目，直接应用在其中。</li>
 <li>如果四个子节点为空，就先创建</li>
-<li><p>然后再递归插入</p>
-<p>  void TBQuadTreeGatherDataInRange(TBQuadTreeNode* node, TBBoundingBox range, TBDataReturnBlock block)<br>  {</p>
-<pre><code><span class="keyword">if</span> (!TBBoundingBoxIntersectsBoundingBox(node-&gt;boundingBox, range)) {
-    <span class="keyword">return</span>;
-}
-
-<span class="keyword">for</span> (<span class="keyword">int</span> i = <span class="number">0</span>; i &lt; node-&gt;count; i++) {
-    <span class="keyword">if</span> (TBBoundingBoxContainsData(range, node-&gt;points[i])) {
-        block(node-&gt;points[i]);
-    }
-}
-
-<span class="keyword">if</span> (node-&gt;northWest == <span class="keyword">NULL</span>) {
-    <span class="keyword">return</span>;
-}
-
-TBQuadTreeGatherDataInRange(node-&gt;northWest, range, block);
-TBQuadTreeGatherDataInRange(node-&gt;northEast, range, block);
-TBQuadTreeGatherDataInRange(node-&gt;southWest, range, block);
-TBQuadTreeGatherDataInRange(node-&gt;southEast, range, block);
-</code></pre><p>  }</p>
-</li>
+<li>然后再递归插入</li>
 </ul>
-<p>这个就是通过DFS进行节点的遍历，一旦有落在range内的数据节点，就进行回调。</p>
+<pre><code><span class="type">void</span> <span class="type">TBQuadTreeGatherDataInRange</span>(<span class="type">TBQuadTreeNode</span>* node, <span class="type">TBBoundingBox</span> <span class="type">range</span>, <span class="type">TBDataReturnBlock</span> <span class="keyword">block</span>)
+{
+    <span class="keyword">if</span> (!<span class="type">TBBoundingBoxIntersectsBoundingBox</span>(node-&gt;boundingBox, <span class="type">range</span>)) {
+        <span class="keyword">return</span>;
+    }
+
+    <span class="keyword">for</span> (<span class="type">int</span> i = <span class="number">0</span>; i &lt; node-&gt;count; i++) {
+        <span class="keyword">if</span> (<span class="type">TBBoundingBoxContainsData</span>(<span class="type">range</span>, node-&gt;points[i])) {
+            <span class="keyword">block</span>(node-&gt;points[i]);
+        }
+    }
+
+    <span class="keyword">if</span> (node-&gt;northWest == <span class="type">NULL</span>) {
+        <span class="keyword">return</span>;
+    }
+
+    <span class="type">TBQuadTreeGatherDataInRange</span>(node-&gt;northWest, <span class="type">range</span>, <span class="keyword">block</span>);
+    <span class="type">TBQuadTreeGatherDataInRange</span>(node-&gt;northEast, <span class="type">range</span>, <span class="keyword">block</span>);
+    <span class="type">TBQuadTreeGatherDataInRange</span>(node-&gt;southWest, <span class="type">range</span>, <span class="keyword">block</span>);
+    <span class="type">TBQuadTreeGatherDataInRange</span>(node-&gt;southEast, <span class="type">range</span>, <span class="keyword">block</span>);
+}
+</code></pre><p>这个就是通过DFS进行节点的遍历，一旦有落在range内的数据节点，就进行回调。</p>
 <p><strong>综上所述，就是一个基本的四叉树，可以很明显的看到，在四叉树的构建、遍历中，都用了树的递归，也就是俗称的DFS算法。</strong></p>
 <h4 id="TBCoordinateQuadTree">TBCoordinateQuadTree</h4><p>这个类呢，和实质上的四叉树或者性能优化并无太大关系，只是一层简单的封装，我们大致来了解一下就好。</p>
 <pre><code><span class="keyword">TBBoundingBox </span><span class="keyword">TBBoundingBoxForMapRect(MKMapRect </span>mapRect)
