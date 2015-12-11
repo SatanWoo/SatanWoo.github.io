@@ -6,18 +6,21 @@
   <title>浅入浅出LLDB（1） | Hexo</title>
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
   <meta name="description" content="这周开始好好钻研一下LLDB相关的知识，这是一系列的文章。有些初级知识可能大家都有所涉猎，嘿嘿，懂得自然懂，看我的博客，什么时候会收获小。
-基础语法1.1&amp;#26377;&amp;#21861;&amp;#19981;&amp;#20250;&amp;#65292;&amp;#23601;&amp;#30452;&amp;#25509;&amp;#36755;&amp;#20837;help&amp;#65292;&amp;#20320;&amp;#20250;&amp;#24471;&amp;#21040">
+基础语法1.help 有啥不会，就直接输入help，你会得到如下的一系列信息，
+command           -- A set of commands for managing or customizing the">
 <meta property="og:type" content="article">
 <meta property="og:title" content="浅入浅出LLDB（1）">
 <meta property="og:url" content="http://satanwoo.github.io/2015/12/11/LLDB-1/index.html">
 <meta property="og:site_name" content="Hexo">
 <meta property="og:description" content="这周开始好好钻研一下LLDB相关的知识，这是一系列的文章。有些初级知识可能大家都有所涉猎，嘿嘿，懂得自然懂，看我的博客，什么时候会收获小。
-基础语法1.1&amp;#26377;&amp;#21861;&amp;#19981;&amp;#20250;&amp;#65292;&amp;#23601;&amp;#30452;&amp;#25509;&amp;#36755;&amp;#20837;help&amp;#65292;&amp;#20320;&amp;#20250;&amp;#24471;&amp;#21040">
-<meta property="og:updated_time" content="2015-12-11T12:01:20.000Z">
+基础语法1.help 有啥不会，就直接输入help，你会得到如下的一系列信息，
+command           -- A set of commands for managing or customizing the">
+<meta property="og:updated_time" content="2015-12-11T12:05:46.000Z">
 <meta name="twitter:card" content="summary">
 <meta name="twitter:title" content="浅入浅出LLDB（1）">
 <meta name="twitter:description" content="这周开始好好钻研一下LLDB相关的知识，这是一系列的文章。有些初级知识可能大家都有所涉猎，嘿嘿，懂得自然懂，看我的博客，什么时候会收获小。
-基础语法1.1&amp;#26377;&amp;#21861;&amp;#19981;&amp;#20250;&amp;#65292;&amp;#23601;&amp;#30452;&amp;#25509;&amp;#36755;&amp;#20837;help&amp;#65292;&amp;#20320;&amp;#20250;&amp;#24471;&amp;#21040">
+基础语法1.help 有啥不会，就直接输入help，你会得到如下的一系列信息，
+command           -- A set of commands for managing or customizing the">
   
     <link rel="alternative" href="/atom.xml" title="Hexo" type="application/atom+xml">
   
@@ -87,8 +90,19 @@
     <div class="article-entry" itemprop="articleBody">
       
         <p>这周开始好好钻研一下LLDB相关的知识，这是一系列的文章。有些初级知识可能大家都有所涉猎，嘿嘿，懂得自然懂，看我的博客，什么时候会收获小。</p>
-<h3 id="基础语法">基础语法</h3><p>1.<figure class="highlight"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">&#26377;&#21861;&#19981;&#20250;&#65292;&#23601;&#30452;&#25509;&#36755;&#20837;help&#65292;&#20320;&#20250;&#24471;&#21040;&#22914;&#19979;&#30340;&#19968;&#31995;&#21015;&#20449;&#24687;&#65292;&#10;&#10;&#9;command           -- A set of commands for managing or customizing the&#10;                       debugger commands.&#10;    disassemble       -- Disassemble bytes in the current function, or elsewhere&#10;                       in the executable program as specified by the user.&#10;&#10;2.```print</span><br></pre></td></tr></table></figure></p>
-<p>输出变量值<br>比如，对于如下的程序语句 <figure class="highlight"><figcaption><span>haha = 5;``` 你只要在LLDB里面输入 ``` print haha``` 就可以得到如下输出结果。</span></figcaption><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">&#10;&#9;(lldb) p haha&#10;&#9;(Int) $R0 = 5&#10;&#9;&#10;**&#35831;&#27880;&#24847;**&#65292;&#22312;[&#19982;&#35843;&#35797;&#22120;&#20849;&#33310;- LLDB &#30340;&#21326;&#23572;&#20857;](http://objccn.io/issue-19-2/)&#19968;&#25991;&#20013;&#26366;&#32463;&#25552;&#20986;&#20250;&#36755;&#20986;&#31867;&#20284;&#20110; ```$0 = 5```&#65292;&#24182;&#25351;&#20986;**$0&#26159;&#24403;&#21069;&#30340;&#36755;&#20986;&#20540;**&#12290;&#36825;&#20010;&#35828;&#35805;&#20854;&#23454;&#26159;&#19981;&#20005;&#35880;&#30340;&#65292;&#27491;&#30830;&#30340;&#35828;&#27861;&#26159;&#65292;&#24212;&#35813;&#26159;**&#24403;&#21069;&#30340;haha&#30340;&#20540;5&#23384;&#22312;&#20102;R0&#23492;&#23384;&#22120;&#37324;&#12290;**&#10;&#10;&#27604;&#22914;&#65292;&#24403;&#25105;&#20204;&#26500;&#24314;&#22914;&#19979;&#30340;&#31243;&#24207;&#35821;&#21477;&#26102;&#65292;&#10;&#10;&#9;let haha = 5;&#10;&#9;let object = &#34;jkjksdjf&#34;;&#10;&#9;&#10;&#25105;&#20204;&#22312;&#20998;&#21035;``` print haha ```&#20197;&#21450;&#9;``` print object```&#23601;&#20250;&#20998;&#21035;&#24471;&#21040;&#10;```(Int) $R0 = 5```&#21644;```(String) $R1 = &#34;jkjksdjf&#34;</span><br></pre></td></tr></table></figure></p>
+<h3 id="基础语法">基础语法</h3><p>1.<code>help</code> 有啥不会，就直接输入help，你会得到如下的一系列信息，</p>
+<pre><code>command           -- A <span class="keyword">set</span> <span class="keyword">of</span> commands <span class="keyword">for</span> managing <span class="keyword">or</span> customizing the
+                   debugger commands.
+disassemble       -- Disassemble bytes <span class="keyword">in</span> the current <span class="keyword">function</span>, <span class="keyword">or</span> elsewhere
+                   <span class="keyword">in</span> the executable program <span class="keyword">as</span> specified <span class="keyword">by</span> the user.
+</code></pre><p>2.<code>print</code> 输出变量值<br>比如，对于如下的程序语句 <code>let haha = 5;</code> 你只要在LLDB里面输入 <code>print haha</code> 就可以得到如下输出结果。</p>
+<pre><code>(lldb) p haha
+(Int) <span class="variable">$R0</span> = <span class="number">5</span>
+</code></pre><p><strong>请注意</strong>，在<a href="http://objccn.io/issue-19-2/" target="_blank" rel="external">与调试器共舞- LLDB 的华尔兹</a>一文中曾经提出会输出类似于 <code>$0 = 5</code>，并指出<strong>$0是当前的输出值</strong>。这个说话其实是不严谨的，正确的说法是，应该是<strong>当前的haha的值5存在了R0寄存器里。</strong></p>
+<p>比如，当我们构建如下的程序语句时，</p>
+<pre><code><span class="keyword">let</span> haha = <span class="number">5</span>;
+<span class="keyword">let</span> <span class="keyword">object</span> = <span class="string">"jkjksdjf"</span>;
+</code></pre><p>我们在分别<code>print haha</code>以及    <code>print object</code>就会分别得到<code>(Int) $R0 = 5</code>和<code>(String) $R1 = &quot;jkjksdjf&quot;</code></p>
 <p>这说明haha的值和object的值分别以int型和string型存在了R0和R1寄存器之中。</p>
 <p><strong>当然，图快速的话</strong>，可以像我上面一样将print简写成p。</p>
 <p>3.<code>po</code><br>输出变量值  </p>
@@ -147,7 +161,7 @@ frame <span class="preprocessor">#<span class="number">20</span>: libdyld.dylib`
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/12/11/LLDB-1/" data-id="cii1mi1i4000oiui19a8t12yw" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/12/11/LLDB-1/" data-id="cii1mnn3m000olyi1q2tzv45g" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
