@@ -62,6 +62,137 @@
       <div class="outer">
         <section id="main">
   
+    <article id="post-Swift-Circle-Slider" class="article article-type-post" itemscope itemprop="blogPost">
+  <div class="article-meta">
+    <a href="/2015/10/27/Swift-Circle-Slider/" class="article-date">
+  <time datetime="2015-10-27T07:24:11.000Z" itemprop="datePublished">2015-10-27</time>
+</a>
+    
+  </div>
+  <div class="article-inner">
+    
+    
+      <header class="article-header">
+        
+  
+    <h1 itemprop="name">
+      <a class="article-title" href="/2015/10/27/Swift-Circle-Slider/">Swift每日一练：圆形滑动条</a>
+    </h1>
+  
+
+      </header>
+    
+    <div class="article-entry" itemprop="articleBody">
+      
+        <p>最近遇到了好多人问我会不会Swift，虽然我很早就进行了Swift的学习，但是苹果对于Swift的更新真是日新月异，和我当时beta版本学习的时候大大不同了，所以，从今天起准备督促自己进行每日一练。</p>
+<p>今天想要做的是一个360度的圆型滑动条。</p>
+<h3 id="预览效果">预览效果</h3><p><img src="http://7lrzqz.com1.z0.glb.clouddn.com/RotationSlider.gif"></p>
+<p>细节方面还有欠缺，比如，没有进行旋转圈数的控制，同时也没有进行拖拽范围的控制。</p>
+<h3 id="效果实现">效果实现</h3><p>我们首先来大致看看怎么做分解：</p>
+<pre><code>-<span class="ruby"> 一个圆环
+</span>-<span class="ruby"> 一个渐变色
+</span>-<span class="ruby"> 一个控制球
+</span>-<span class="ruby"> 一个显示文字</span>
+</code></pre><p>首先看看圆环怎么实现的，很简单，我们利用Core Graphic使用如下代码即可以画出一个圆圈，只要加上描边宽度，就可以形成圆环效果。</p>
+<pre><code>CGContextAddArc(
+    ctx,
+    self.frame.size.width/<span class="number">2</span>,
+    self.frame.size.height/<span class="number">2</span>,
+    self.radius,
+    <span class="number">0</span>,
+    <span class="number">2.0</span> * M_PI,
+    <span class="number">0</span>
+)
+UIColor(red: <span class="number">0</span>, green: <span class="number">0</span>, blue: <span class="number">0</span>, alpha: <span class="number">1.0</span>).<span class="built_in">set</span>()
+CGContextSetLineWidth(ctx, <span class="number">72</span>)
+CGContextSetLineCap(ctx, kCGLineCapButt)
+CGContextDrawPath(ctx, kCGPathStroke)
+</code></pre><p>然后我们的圆环背景色是渐变的，这可怎么办？我们直接使用CAGradientLayer吗？当然那是其中之一的方法，不过这次我们试试用Mask ＋ 背景色的方式实现。什么是Mask呢？简单来理解就是，如果你想做出非常复杂的形状，你可以将构造一个包含这种形状的图片，需要显示形状的地方用<strong>非白色</strong>的颜色来填充，不显示的地方用<strong>白色</strong>填充。因此，我们构建一个从上到下的渐变色背景，然后配合黑色的圆环进行Mask，就可以得到带有渐变色背景的。</p>
+<pre><code><span class="built_in">CGContextSaveGState</span>(ctx)     
+<span class="built_in">CGContextClipToMask</span>(ctx, <span class="keyword">self</span><span class="variable">.bounds</span>, mask)
+
+let startColorComponents = <span class="built_in">CGColorGetComponents</span>(startColor<span class="variable">.CGColor</span>)
+let endColorComponents = <span class="built_in">CGColorGetComponents</span>(endColor<span class="variable">.CGColor</span>)
+let components = [
+  startColorComponents[<span class="number">0</span>], startColorComponents[<span class="number">1</span>], startColorComponents[<span class="number">2</span>], <span class="number">1.0</span>,
+  endColorComponents[<span class="number">0</span>], endColorComponents[<span class="number">1</span>], endColorComponents[<span class="number">2</span>], <span class="number">1.0</span>
+]
+let gradient = <span class="built_in">CGGradientCreateWithColorComponents</span>(<span class="built_in">CGColorSpaceCreateDeviceRGB</span>(), components, <span class="literal">nil</span>, <span class="number">2</span>)
+
+<span class="built_in">CGContextDrawLinearGradient</span>(
+    ctx,
+    gradient,
+    <span class="built_in">CGPointMake</span>(<span class="built_in">CGRectGetMidX</span>(rect), <span class="built_in">CGRectGetMinY</span>(rect)),
+    <span class="built_in">CGPointMake</span>(<span class="built_in">CGRectGetMidX</span>(rect), <span class="built_in">CGRectGetMaxY</span>(rect)),
+    <span class="number">0</span>
+);
+
+<span class="built_in">CGContextRestoreGState</span>(ctx);
+</code></pre><p>到此，绘画的工作基本就结束了，画白色小球的原理很简单，也不赘述了。我们下面来说一下根据手势来控制白色小球旋转位置，主要的思路还是控制位置来计算弧度。</p>
+<pre><code>override func touchesMoved(touches: <span class="type">Set</span>&lt;<span class="type">NSObject</span>&gt;, withEvent event: <span class="type">UIEvent</span>)     {    
+    //println(<span class="string">"Touches Moved"</span>)
+
+    <span class="keyword">if</span> <span class="keyword">let</span> touch = touches.first <span class="keyword">as</span>? <span class="type">UITouch</span> {
+        <span class="keyword">var</span> location = touch.locationInView(self)
+        moveHandle(location)
+    }
+}
+
+func computeAngle(p1:<span class="type">CGPoint</span> , p2:<span class="type">CGPoint</span>) -&gt; <span class="type">Double</span> {
+    <span class="keyword">var</span> delta = <span class="type">CGPoint</span>(x: p2.x - p1.x, y: p1.y - p2.y)
+
+    <span class="keyword">let</span> radians = <span class="type">Double</span>(atan2(delta.y, delta.x))
+    <span class="keyword">let</span> <span class="literal">result</span> = toDegree(radians)
+    <span class="keyword">return</span> <span class="literal">result</span> &gt;= <span class="number">0</span> ? <span class="literal">result</span> : <span class="literal">result</span> + <span class="number">360</span>
+}
+</code></pre><p>其中，有一点我们要特别注意<br><b>var delta = CGPoint(x: p2.x - p1.x, y: p1.y - p2.y)</b>，在Y轴的计算上，我们需要进行上下翻转的计算，原因就在于我们通过UITouch拿到的location的Y坐标，是UIKit系的坐标体系，Y轴原点在上方，而我们通过绘图的时候需要进行进行Y轴的上下颠倒。</p>
+<p>此外，根据计算的弧度，来更新小球的位置，由于我们是逆时针的slider，所以我们需要用 360 减去我们实际计算得到的弧度。</p>
+<h3 id="一些感受">一些感受</h3><p>真的，Swift中的类型安全太恶心了，不能忍，于是只好玩起了操作符重载</p>
+<pre><code><span class="func"><span class="keyword">func</span> -<span class="params">(lhs:CGFloat, rhs:Double)</span></span> -&gt; <span class="type">CGFloat</span> {
+    <span class="keyword">return</span> lhs - <span class="type">CGFloat</span>(rhs)
+}
+
+<span class="func"><span class="keyword">func</span> +<span class="params">(lhs:Double, rhs:CGFloat)</span></span> -&gt; <span class="type">CGFloat</span> {
+    <span class="keyword">return</span> <span class="type">CGFloat</span>(lhs) + rhs
+}
+
+<span class="func"><span class="keyword">func</span> +<span class="params">(lhs:CGFloat, rhs:Double)</span></span> -&gt; <span class="type">CGFloat</span> {
+    <span class="keyword">return</span> lhs + <span class="type">CGFloat</span>(rhs)
+}
+
+<span class="func"><span class="keyword">func</span> *<span class="params">(lhs:Double, rhs:CGFloat)</span></span> -&gt; <span class="type">CGFloat</span> {
+    <span class="keyword">return</span> <span class="type">CGFloat</span>(lhs) * rhs
+}
+
+<span class="func"><span class="keyword">func</span> *<span class="params">(lhs:CGFloat, rhs:Double)</span></span> -&gt; <span class="type">CGFloat</span> {
+    <span class="keyword">return</span> lhs * <span class="type">CGFloat</span>(rhs)
+}
+
+<span class="func"><span class="keyword">func</span> /<span class="params">(lhs:Double, rhs:CGFloat)</span></span> -&gt; <span class="type">CGFloat</span> {
+    <span class="keyword">return</span> <span class="type">CGFloat</span>(lhs) / rhs
+}
+
+<span class="func"><span class="keyword">func</span> /<span class="params">(lhs:CGFloat, rhs:Double)</span></span> -&gt; <span class="type">CGFloat</span> {
+    <span class="keyword">return</span> lhs / <span class="type">CGFloat</span>(rhs)
+}
+</code></pre><p>最后附上<a href="https://github.com/SatanWoo/SwiftRotateSlider" target="_blank" rel="external">项目地址</a></p>
+<p>好了，不多说了，我要升级El Captain了。</p>
+
+      
+    </div>
+    <footer class="article-footer">
+      <a data-url="http://satanwoo.github.io/2015/10/27/Swift-Circle-Slider/" data-id="cii4f2glf000hnpi1lftojhr0" class="article-share-link">Share</a>
+      
+      
+  <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Swift/">Swift</a></li></ul>
+
+    </footer>
+  </div>
+  
+</article>
+
+
+  
     <article id="post-GLCalendarView" class="article article-type-post" itemscope itemprop="blogPost">
   <div class="article-meta">
     <a href="/2015/10/14/GLCalendarView/" class="article-date">
@@ -272,7 +403,7 @@
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/10/14/GLCalendarView/" data-id="cii1mnn3o000qlyi1mjiu5hnd" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/10/14/GLCalendarView/" data-id="cii4f2glv000tnpi15iu15qaf" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
@@ -493,7 +624,7 @@
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/09/30/Debounce-and-Throttle-in-iOS/" data-id="cii1mnn3x000wlyi1jganlw81" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/09/30/Debounce-and-Throttle-in-iOS/" data-id="cii4f2gm2000znpi19hwcpkhf" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
@@ -794,7 +925,7 @@
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/09/23/flux-js-part-one/" data-id="cii1mnn2p0003lyi1m09k2aom" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/09/23/flux-js-part-one/" data-id="cii4f2gks0003npi1bj1z67o8" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/JavaScript/">JavaScript</a></li></ul>
@@ -1466,7 +1597,7 @@ CountryModel<span class="keyword">*</span> country = [[CountryModel alloc] initW
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/09/17/code-of-JSONModel/" data-id="cii1mnn2z0006lyi15meyy98b" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/09/17/code-of-JSONModel/" data-id="cii4f2gl10006npi1hm0fgz7t" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
@@ -1514,7 +1645,7 @@ CountryModel<span class="keyword">*</span> country = [[CountryModel alloc] initW
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/09/11/A-New-Start/" data-id="cii1mnn1v0000lyi1lme8vuff" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/09/11/A-New-Start/" data-id="cii4f2gjt0000npi1egomomzc" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
@@ -1541,7 +1672,7 @@ CountryModel<span class="keyword">*</span> country = [[CountryModel alloc] initW
   <div class="widget-wrap">
     <h3 class="widget-title">Tags</h3>
     <div class="widget">
-      <ul class="tag-list"><li class="tag-list-item"><a class="tag-list-link" href="/tags/Android/">Android</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/JavaScript/">JavaScript</a><span class="tag-list-count">2</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Swift/">Swift</a><span class="tag-list-count">4</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/iOS/">iOS</a><span class="tag-list-count">8</span></li></ul>
+      <ul class="tag-list"><li class="tag-list-item"><a class="tag-list-link" href="/tags/Android/">Android</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/JavaScript/">JavaScript</a><span class="tag-list-count">2</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/R/">R</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Swift/">Swift</a><span class="tag-list-count">4</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/iOS/">iOS</a><span class="tag-list-count">8</span></li></ul>
     </div>
   </div>
 
@@ -1550,7 +1681,7 @@ CountryModel<span class="keyword">*</span> country = [[CountryModel alloc] initW
   <div class="widget-wrap">
     <h3 class="widget-title">Tag Cloud</h3>
     <div class="widget tagcloud">
-      <a href="/tags/Android/" style="font-size: 10px;">Android</a> <a href="/tags/JavaScript/" style="font-size: 13.33px;">JavaScript</a> <a href="/tags/Swift/" style="font-size: 16.67px;">Swift</a> <a href="/tags/iOS/" style="font-size: 20px;">iOS</a>
+      <a href="/tags/Android/" style="font-size: 10px;">Android</a> <a href="/tags/JavaScript/" style="font-size: 13.33px;">JavaScript</a> <a href="/tags/R/" style="font-size: 10px;">R</a> <a href="/tags/Swift/" style="font-size: 16.67px;">Swift</a> <a href="/tags/iOS/" style="font-size: 20px;">iOS</a>
     </div>
   </div>
 
@@ -1559,7 +1690,7 @@ CountryModel<span class="keyword">*</span> country = [[CountryModel alloc] initW
   <div class="widget-wrap">
     <h3 class="widget-title">Archives</h3>
     <div class="widget">
-      <ul class="archive-list"><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/12/">December 2015</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/11/">November 2015</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/10/">October 2015</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/09/">September 2015</a><span class="archive-list-count">4</span></li></ul>
+      <ul class="archive-list"><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/12/">December 2015</a><span class="archive-list-count">3</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/11/">November 2015</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/10/">October 2015</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/09/">September 2015</a><span class="archive-list-count">4</span></li></ul>
     </div>
   </div>
 
@@ -1569,6 +1700,10 @@ CountryModel<span class="keyword">*</span> country = [[CountryModel alloc] initW
     <h3 class="widget-title">Recents</h3>
     <div class="widget">
       <ul>
+        
+          <li>
+            <a href="/2015/12/13/Learn-R-1/">一步步学R（1）</a>
+          </li>
         
           <li>
             <a href="/2015/12/11/LLDB-1/">浅入浅出LLDB（1）</a>
@@ -1584,10 +1719,6 @@ CountryModel<span class="keyword">*</span> country = [[CountryModel alloc] initW
         
           <li>
             <a href="/2015/11/17/Fun-of-CAReplicationLayer/">Swift每日一练：妙用CAReplicationLayer</a>
-          </li>
-        
-          <li>
-            <a href="/2015/11/12/Swift-UITransition-iOS8/">Swift每日一练：自定义转场在iOS8中的那些坑</a>
           </li>
         
       </ul>

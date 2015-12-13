@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  
+  <title>一步步学R（1） | Hexo</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+  <meta name="description" content="嘿嘿，作为一名天才，当然要掌握一定的数据分析能力啦，所以从今天起，我们来一步步学习R这门有意思的语言。
+这一系列的文章的开发环境都是基于Mac的。
+安装
+首先你要安装R语言的环境 安装点我
+可选：安装RStudio（类似于Matlab），安装之前必须已经安装了R 安装点我
+
+基础知识R里面的基础类型
+Character，如 “a”，”haha”
+Number（实数），如 5， 5.5
+Intege">
+<meta property="og:type" content="article">
+<meta property="og:title" content="一步步学R（1）">
+<meta property="og:url" content="http://satanwoo.github.io/2015/12/13/Learn-R-1/index.html">
+<meta property="og:site_name" content="Hexo">
+<meta property="og:description" content="嘿嘿，作为一名天才，当然要掌握一定的数据分析能力啦，所以从今天起，我们来一步步学习R这门有意思的语言。
+这一系列的文章的开发环境都是基于Mac的。
+安装
+首先你要安装R语言的环境 安装点我
+可选：安装RStudio（类似于Matlab），安装之前必须已经安装了R 安装点我
+
+基础知识R里面的基础类型
+Character，如 “a”，”haha”
+Number（实数），如 5， 5.5
+Intege">
+<meta property="og:updated_time" content="2015-12-13T10:56:27.000Z">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="一步步学R（1）">
+<meta name="twitter:description" content="嘿嘿，作为一名天才，当然要掌握一定的数据分析能力啦，所以从今天起，我们来一步步学习R这门有意思的语言。
+这一系列的文章的开发环境都是基于Mac的。
+安装
+首先你要安装R语言的环境 安装点我
+可选：安装RStudio（类似于Matlab），安装之前必须已经安装了R 安装点我
+
+基础知识R里面的基础类型
+Character，如 “a”，”haha”
+Number（实数），如 5， 5.5
+Intege">
+  
+    <link rel="alternative" href="/atom.xml" title="Hexo" type="application/atom+xml">
+  
+  
+    <link rel="icon" href="/favicon.png">
+  
+  <link rel="stylesheet" href="/css/style.css" type="text/css">
+  
+
+</head>
+<body>
+  <div id="container">
+    <div id="wrap">
+      <header id="header">
+  <div id="banner"></div>
+  <div id="header-outer" class="outer">
+    <div id="header-title" class="inner">
+      <h1 id="logo-wrap">
+        <a href="/" id="logo">Hexo</a>
+      </h1>
+      
+    </div>
+    <div id="header-inner" class="inner">
+      <nav id="main-nav">
+        <a id="main-nav-toggle" class="nav-icon"></a>
+        
+          <a class="main-nav-link" href="/">Home</a>
+        
+          <a class="main-nav-link" href="/archives">Archives</a>
+        
+          <a class="main-nav-link" href="/sitemap.xml">map</a>
+        
+      </nav>
+      <nav id="sub-nav">
+        
+          <a id="nav-rss-link" class="nav-icon" href="/atom.xml" title="RSS Feed"></a>
+        
+        <a id="nav-search-btn" class="nav-icon" title="Search"></a>
+      </nav>
+      <div id="search-form-wrap">
+        <form action="//google.com/search" method="get" accept-charset="UTF-8" class="search-form"><input type="search" name="q" results="0" class="search-form-input" placeholder="Search"><button type="submit" class="search-form-submit">&#xF002;</button><input type="hidden" name="sitesearch" value="http://satanwoo.github.io"></form>
+      </div>
+    </div>
+  </div>
+</header>
+      <div class="outer">
+        <section id="main"><article id="post-Learn-R-1" class="article article-type-post" itemscope itemprop="blogPost">
+  <div class="article-meta">
+    <a href="/2015/12/13/Learn-R-1/" class="article-date">
+  <time datetime="2015-12-13T07:03:36.000Z" itemprop="datePublished">2015-12-13</time>
+</a>
+    
+  </div>
+  <div class="article-inner">
+    
+    
+      <header class="article-header">
+        
+  
+    <h1 class="article-title" itemprop="name">
+      一步步学R（1）
+    </h1>
+  
+
+      </header>
+    
+    <div class="article-entry" itemprop="articleBody">
+      
+        <p>嘿嘿，作为一名天才，当然要掌握一定的数据分析能力啦，所以从今天起，我们来一步步学习R这门有意思的语言。</p>
+<p>这一系列的文章的开发环境都是基于Mac的。</p>
+<h3 id="安装">安装</h3><ol>
+<li>首先你要安装R语言的环境 <a href="https://cran.r-project.org/" target="_blank" rel="external">安装点我</a></li>
+<li>可选：安装RStudio（类似于Matlab），安装之前必须已经安装了R <a href="https://www.rstudio.com/" target="_blank" rel="external">安装点我</a></li>
+</ol>
+<h3 id="基础知识">基础知识</h3><h4 id="R里面的基础类型">R里面的基础类型</h4><ul>
+<li>Character，如 “a”，”haha”</li>
+<li>Number（实数），如 5， 5.5</li>
+<li><p>Integer（整数），如 5，6</p>
+<p>  <strong>要注意的是，默认情况，所有的整数类型都为实数，如果要特定为整数，需要加L，如5L</strong></p>
+</li>
+<li><p>Logical，如TRUE, FALSE</p>
+<p>  <strong>FALSE = 0，TRUE为一切非0数，可以简写为F/T</strong></p>
+</li>
+<li><p>Complex（复数），如 5 + 7i</p>
+</li>
+</ul>
+<h4 id="操作">操作</h4><p><code>x &lt;- 5</code> 表示将5赋值给x<br><code>x</code>      表示输出x，效果等同于<code>print(x)</code></p>
+<h4 id="向量">向量</h4><p>虽然向量不是一个基本类型，但是却是R语言中非常关键的一种数据结构</p>
+<p><code>x &lt;- 5</code> 这句语句虽然表面上看起来是定义了一个<strong>Number</strong>类型的x，值为5。但是实质上却是构建了一个大小为1的向量，通过<code>x</code>语句我们可以得到一下结果：</p>
+<pre><code>&gt; x
+[<span class="number">1</span>] <span class="number">5</span>
+</code></pre><p>所以<code>x</code> 等同于语句 <code>x[1]</code>，会输出5。</p>
+<p><strong>注意：R语言里面的数据索引从1开始</strong></p>
+<p>除了默认构造的向量以外，我们可以通过<code>vector(class, size)</code>来构建指定类型和大小的向量，如：</p>
+<pre><code>&gt; k &lt;- <span class="function"><span class="title">vector</span><span class="params">(<span class="string">'logical'</span>, <span class="number">5</span>L)</span></span>
+&gt; z &lt;- <span class="function"><span class="title">vector</span><span class="params">(<span class="string">"complex"</span>, <span class="number">7</span>)</span></span>
+</code></pre><p>以上两句我们分别构建了一个名为k的logical向量，大小5以及一个复数向量，大小为7。</p>
+<p><strong>注意：在R的向量里，同一个向量只能包含相同类型的对象，如果包含了不相同，会进行隐式转换，如果不能转换就会报错。</strong></p>
+<p>如：</p>
+<pre><code>&gt; k &lt;- <span class="function"><span class="title">c</span><span class="params">(T, <span class="string">"a"</span>)</span></span>
+&gt; k
+[<span class="number">1</span>] <span class="string">"TRUE"</span> <span class="string">"a"</span> 
+</code></pre><p>当然也可以强制转换：</p>
+<p><code>as.character</code>， <code>as.logical</code>， <code>as.numeric</code>，<code>as.complex</code>，<code>as.integer</code></p>
+<h4 id="list">list</h4><p>list是一种可以同时保存多个类型对象的数据结构，通过<code>list(a, b, c, d)</code>进行构建。</p>
+<h4 id="Matrix">Matrix</h4><p>matrix就是多维向量，通过函数<code>matrix(data, nrows, ncols)</code> 构建，默认是按列排列数据，可以通过更改byrow=T来按照行来构建。</p>
+<h4 id="Factor">Factor</h4><p>简单理解，就是分类定义的数组，比如，<code>x &lt;- factor(c(&#39;yes&#39;, &#39;no&#39;, &#39;yes&#39;, &#39;no&#39;, &#39;yes&#39;))</code>  ，虽然看起来构建了一个和Character类型的向量差不多，但是实质上，我们可以通过</p>
+<pre><code>&gt; x &lt;- <span class="function"><span class="title">factor</span><span class="params">(c(<span class="string">'yes'</span>, <span class="string">'no'</span>, <span class="string">'yes'</span>)</span></span>)
+&gt; <span class="function"><span class="title">levels</span><span class="params">(x)</span></span>
+[<span class="number">1</span>] <span class="string">"no"</span>  <span class="string">"yes"</span>
+</code></pre><p>这个向量代表了几种分类。</p>
+<h4 id="Missing_Values">Missing Values</h4><p>Na和NaN, <strong>NaN仅代表数值计算的不存在，而Na是代表一切的不存在，即Na包含NaN</strong><br>我们可以通过<code>is.Na</code>和<code>is.NaN</code>来进行判断。</p>
+<h4 id="Data_Frames">Data Frames</h4><p>Data Frames简单理解就是一个表格，但是与Matrix不同的是，她可以包含不同类型的data，也就是说，<strong>DataFrames的每一列都是一个list</strong>。</p>
+<pre><code>&gt; k &lt;- data.<span class="function"><span class="title">frame</span><span class="params">(foo = <span class="number">1</span>:<span class="number">3</span>, w = c(T, F, F)</span></span>, row<span class="class">.names</span> = <span class="function"><span class="title">c</span><span class="params">(<span class="string">'1'</span>, <span class="string">'a'</span>, <span class="string">'k'</span>)</span></span>)
+&gt; k
+  foo     w
+<span class="number">1</span>   <span class="number">1</span>  TRUE
+<span class="tag">a</span>   <span class="number">2</span> FALSE
+k   <span class="number">3</span> FALSE
+</code></pre><p><strong>需要注意的是，每一个list的长度，都必须完全一样</strong>。</p>
+<h4 id="Names（别名）">Names（别名）</h4><p>对于一个向量、list或者matrix等等，我们都可以为里面的元素加上别名，如:</p>
+<pre><code>&gt; x &lt;- <span class="number">1</span>:<span class="number">3</span>
+&gt; <span class="function"><span class="title">names</span><span class="params">(x)</span></span> &lt;- <span class="function"><span class="title">c</span><span class="params">(T, F, <span class="string">"ha"</span>)</span></span>
+&gt; x
+ TRUE FALSE    ha 
+    <span class="number">1</span>     <span class="number">2</span>     <span class="number">3</span> 
+</code></pre><p>其中，这些别名都会以字符串的形式存在，因此，你可以通过x[“TRUE”]来访问元素1。</p>
+<hr>
+<h3 id="进阶的R_哈哈哈">进阶的R 哈哈哈</h3><h4 id="Partical_Matching">Partical Matching</h4><p>R里面有个很酷的特性叫做Partial Matching。比如你定义了如下的list：<code>x &lt;- list(caonikljslkdfj = 5)</code>，每次都要输入<code>caonikljslkdfj</code>势必很麻烦，因此你可以使用<strong>$</strong>来获取，如<code>x$c</code> 即可以得到5了。</p>
+<h4 id="Subset">Subset</h4><p>在R里面，获取数据或者构建数据简直就是a piece of cake。(哈哈哈，英语好就是屌啊)</p>
+<p>比如有这样一个向量<code>x &lt;- c(1, 2, 3, 4, 5)</code>，</p>
+<p>你可以<code>x[1]</code> 来获取元素1，也可以通过<code>x[1:3]</code>来获取元素1到元素3。同样，你也可以通过<code>x[x &gt; 2]</code> 来获取元素中值比2大的元素。</p>
+<p>你也可以通过logical来构建另外的向量，如：</p>
+<pre><code>&gt; u &lt;- x &gt; <span class="number">2</span>
+&gt; u
+[<span class="number">1</span>] <span class="literal">FALSE</span> <span class="literal">FALSE</span>  <span class="literal">TRUE</span>  <span class="literal">TRUE</span>  <span class="literal">TRUE</span>
+</code></pre><p>而对于Matrix类型来说，<code>c &lt;- matrix(1:3, nrows = 3, ncols = 1)</code>，你可以使用<code>c[1, ]</code>来获取第一行所有列的数据，或者<code>c[,1]</code>来获取第一列所有行的数据。</p>
+<h4 id="[]_vs_[[]]_vs_$">[] vs [[]] vs $</h4><p>首先，这三个符号都可以获取元素，但是区别在于：</p>
+<ul>
+<li>[]返回的是和变量本身类型相同的东西，如果对list使用[]，那么返回的就是list，如果对向量使用，返回的就是向量，无关取出的元素本身的类型。</li>
+<li>[]可以获取多个元素，而[[]]和$不行。</li>
+<li>$可以模糊匹配（Partial Matching），而[[]]不行，如果要启用模糊匹配，得使用[[name, exact = F]]</li>
+<li>$不可以使用计算值，[[]]可以</li>
+</ul>
+<p>是不是很拗口？让我们来看几个例子，在看例子之前强调一点，</p>
+<p><strong>元素并非特指一个，而是一个基本的数据结构，比如对于向量 <code>x &lt;- 1:5</code>来说，里面的元素1到元素5分别都是一个元素。而对于<code>c&lt;- list(foo = 1:3, bar = 0.5)</code>来说，foo和bar都分别是一个元素，尽管foo本身仍然是个向量。</strong></p>
+<h5 id="例子">例子</h5><p>对于<code>c &lt;- list(foo = 1:3, bar = 0.6)</code>定义的一个list，我们分别使用：</p>
+<pre><code>&gt; c[<span class="string">"foo"</span>]
+$foo
+[<span class="number">1</span>] <span class="number">1</span> <span class="number">2</span> <span class="number">3</span>
+
+&gt; c[[<span class="string">"foo"</span>]]
+[<span class="number">1</span>] <span class="number">1</span> <span class="number">2</span> <span class="number">3</span>
+&gt; c$foo
+[<span class="number">1</span>] <span class="number">1</span> <span class="number">2</span> <span class="number">3</span>
+</code></pre><p>可以看到，通过［］取出的foo元素仍然是list，而[[]]和$取出的都是向量元素本身了。</p>
+<p>再比如计算变量的差别：</p>
+<pre><code>&gt; name &lt;- <span class="string">"foo"</span>
+&gt; c[[name]]
+[<span class="number">1</span>] <span class="number">1</span> <span class="number">2</span> <span class="number">3</span>
+&gt; c$name
+<span class="literal">NULL</span>
+</code></pre><p>可以看到，[[]]可以使用计算变量，而$不可以。<strong>这点其实和JavaScript里面的dot和[]操作符很类似的</strong></p>
+<p>模糊匹配差别：</p>
+<pre><code>&gt; c$f
+[<span class="number">1</span>] <span class="number">1</span> <span class="number">2</span> <span class="number">3</span>
+&gt; c[[<span class="string">"f"</span>]]
+<span class="literal">NULL</span>
+&gt; c[[<span class="string">"f"</span>, exact = F]]
+[<span class="number">1</span>] <span class="number">1</span> <span class="number">2</span> <span class="number">3</span>
+</code></pre><h4 id="向量化操作">向量化操作</h4><p><strong>R里面的所有计算操作都是并行的</strong>。</p>
+<p>因此，如果要计算两个Matrix的乘积，需要使用<code>%*%</code>，否则如果直接使用<code>*</code>就是对应位置的元素相乘而已。</p>
+
+      
+    </div>
+    <footer class="article-footer">
+      <a data-url="http://satanwoo.github.io/2015/12/13/Learn-R-1/" data-id="cii4f2gll000lnpi1w29o6s2n" class="article-share-link">Share</a>
+      
+      
+  <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/R/">R</a></li></ul>
+
+    </footer>
+  </div>
+  
+    
+<nav id="article-nav">
+  
+  
+    <a href="/2015/12/11/LLDB-1/" id="article-nav-older" class="article-nav-link-wrap">
+      <strong class="article-nav-caption">Older</strong>
+      <div class="article-nav-title">浅入浅出LLDB（1）</div>
+    </a>
+  
+</nav>
+
+  
+</article>
+
+
+<section id="comments">
+  <!-- 多说评论框 start -->
+  <div class="ds-thread" data-thread-key="post-Learn-R-1" data-title="一步步学R（1）" data-url="http://satanwoo.github.io/2015/12/13/Learn-R-1/"></div>
+  <!-- 多说评论框 end -->
+  <!-- 多说公共JS代码 start (一个网页只需插入一次) -->
+  <script type="text/javascript">
+  var duoshuoQuery = {short_name:'satanwoo'};
+    (function() {
+      var ds = document.createElement('script');
+      ds.type = 'text/javascript';ds.async = true;
+      ds.src = (document.location.protocol == 'https:' ? 'https:' : 'http:') + '//static.duoshuo.com/embed.js';
+      ds.charset = 'UTF-8';
+      (document.getElementsByTagName('head')[0] 
+       || document.getElementsByTagName('body')[0]).appendChild(ds);
+    })();
+    </script>
+  <!-- 多说公共JS代码 end -->
+</section>
+</section>
+        
+          <aside id="sidebar">
+  
+    
+  
+    
+  <div class="widget-wrap">
+    <h3 class="widget-title">Tags</h3>
+    <div class="widget">
+      <ul class="tag-list"><li class="tag-list-item"><a class="tag-list-link" href="/tags/Android/">Android</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/JavaScript/">JavaScript</a><span class="tag-list-count">2</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/R/">R</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Swift/">Swift</a><span class="tag-list-count">4</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/iOS/">iOS</a><span class="tag-list-count">8</span></li></ul>
+    </div>
+  </div>
+
+  
+    
+  <div class="widget-wrap">
+    <h3 class="widget-title">Tag Cloud</h3>
+    <div class="widget tagcloud">
+      <a href="/tags/Android/" style="font-size: 10px;">Android</a> <a href="/tags/JavaScript/" style="font-size: 13.33px;">JavaScript</a> <a href="/tags/R/" style="font-size: 10px;">R</a> <a href="/tags/Swift/" style="font-size: 16.67px;">Swift</a> <a href="/tags/iOS/" style="font-size: 20px;">iOS</a>
+    </div>
+  </div>
+
+  
+    
+  <div class="widget-wrap">
+    <h3 class="widget-title">Archives</h3>
+    <div class="widget">
+      <ul class="archive-list"><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/12/">December 2015</a><span class="archive-list-count">3</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/11/">November 2015</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/10/">October 2015</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/09/">September 2015</a><span class="archive-list-count">4</span></li></ul>
+    </div>
+  </div>
+
+  
+    
+  <div class="widget-wrap">
+    <h3 class="widget-title">Recents</h3>
+    <div class="widget">
+      <ul>
+        
+          <li>
+            <a href="/2015/12/13/Learn-R-1/">一步步学R（1）</a>
+          </li>
+        
+          <li>
+            <a href="/2015/12/11/LLDB-1/">浅入浅出LLDB（1）</a>
+          </li>
+        
+          <li>
+            <a href="/2015/12/11/TBAnnotationClustering/">TBAnnotationClustering源码解析</a>
+          </li>
+        
+          <li>
+            <a href="/2015/11/26/FDFullScreenPopGesture-Source-Code/">FDFullScreenPopGesture源码解析</a>
+          </li>
+        
+          <li>
+            <a href="/2015/11/17/Fun-of-CAReplicationLayer/">Swift每日一练：妙用CAReplicationLayer</a>
+          </li>
+        
+      </ul>
+    </div>
+  </div>
+
+  
+</aside>
+        
+      </div>
+      <footer id="footer">
+  
+  <div class="outer">
+    <div id="footer-info" class="inner">
+      &copy; 2015 John Doe<br>
+      Powered by <a href="http://hexo.io/" target="_blank">Hexo</a>
+    </div>
+  </div>
+</footer>
+    </div>
+    <nav id="mobile-nav">
+  
+    <a href="/" class="mobile-nav-link">Home</a>
+  
+    <a href="/archives" class="mobile-nav-link">Archives</a>
+  
+    <a href="/sitemap.xml" class="mobile-nav-link">map</a>
+  
+</nav>
+    
+
+
+  <link rel="stylesheet" href="/fancybox/jquery.fancybox.css" type="text/css">
+  <script src="/fancybox/jquery.fancybox.pack.js" type="text/javascript"></script>
+
+
+<script src="/js/script.js" type="text/javascript"></script>
+
+  </div>
+</body>
+</html>
