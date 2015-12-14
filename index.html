@@ -62,6 +62,60 @@
       <div class="outer">
         <section id="main">
   
+    <article id="post-Regression-Model-1" class="article article-type-post" itemscope itemprop="blogPost">
+  <div class="article-meta">
+    <a href="/2015/12/15/Regression-Model-1/" class="article-date">
+  <time datetime="2015-12-14T16:31:35.000Z" itemprop="datePublished">2015-12-15</time>
+</a>
+    
+  </div>
+  <div class="article-inner">
+    
+    
+      <header class="article-header">
+        
+  
+    <h1 itemprop="name">
+      <a class="article-title" href="/2015/12/15/Regression-Model-1/">Regression Model</a>
+    </h1>
+  
+
+      </header>
+    
+    <div class="article-entry" itemprop="articleBody">
+      
+        <h3 id="Regression_Model是什么">Regression Model是什么</h3><p>Regression Model是一种基本的数据分析模型，通俗点来说就是我们在中学时期学习的截距式直线方程。通过斜率和截距来定义一种诸如 <code>y = kx + b</code>的方程。一旦有了这样的方程，我们就可以通过我们现有的数据集，比如一堆<code>x</code> 来预测y。</p>
+<p>今天就让我们来研究研究这一种数据模型</p>
+<h4 id="Centering">Centering</h4><p>Centering是一种常用的数学用语，意为 <em>集中化</em>。什么意思呢？就是说如果我有从x1, x2 … xn 这n个数据构成的数据集{x}，我可以求出他们的平均值为<em>XM</em>。我可以构建 <code>bi = xi - XM</code> 这样一个数列，这样的话，{b}这个数据集的平均值就为0，这一个过程就叫Centering。</p>
+<h4 id="Variances（方差）">Variances（方差）</h4><p>方式的定义是:</p>
+<blockquote>
+<p>求出一个数据集的平均数XM, 对于{x} 中的每一个数，求其与平均数差的平方。再这这些差的平房加在一起求和，最后用和除以n - 1，这里的n是数据集中数据的个数。</p>
+</blockquote>
+<p>而标准差就是方差的平方根。 <strong>通过构建<code>bi = xi / 标准差s</code> 可以得到{b}数据集，它的标准差为1，这一过程也叫做Scaling</strong></p>
+<h4 id="Normalization">Normalization</h4><p>将数据集先Centering再Scaling的过程叫做Normalization。</p>
+<h4 id="Covariance（协方差）">Covariance（协方差）</h4><p>协方差的定义其实和方差类似，只不过针对的是一对数据集{x, y}。</p>
+<blockquote>
+<p>求出数据集{x}的平均数M，求出数据集{y}的平均数N，对于每一个i，求和<code>(xi - M) * (yi - N)</code>，最后和除以<code>n - 1</code>，其中n是数据集中数据的个数。</p>
+</blockquote>
+<h4 id="Corrleation（两个数据集的关联）">Corrleation（两个数据集的关联）</h4><p>Correlation就是将两个数据集的协方差除以{x}的标准差和{y}的标准差的乘积。<br><strong>Correlation的值域从－1到1，越接近两端表示两个数据集关联度越大，越靠近0表示越小。</strong></p>
+<h3 id="重点">重点</h3><p>对于 y = kx + b 来说，可以通过如下公式求解方程：</p>
+<p><code>k = cor(y, x) * s(y) / s(x)</code>  以及 <code>b = mean(y) - k * mean(x)</code></p>
+
+      
+    </div>
+    <footer class="article-footer">
+      <a data-url="http://satanwoo.github.io/2015/12/15/Regression-Model-1/" data-id="cii69y3dm000jv4i17uqzplvc" class="article-share-link">Share</a>
+      
+      
+  <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Math/">Math</a></li></ul>
+
+    </footer>
+  </div>
+  
+</article>
+
+
+  
     <article id="post-Learn-R-1" class="article article-type-post" itemscope itemprop="blogPost">
   <div class="article-meta">
     <a href="/2015/12/13/Learn-R-1/" class="article-date">
@@ -192,7 +246,7 @@ $foo
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/12/13/Learn-R-1/" data-id="cii4f2gll000lnpi1w29o6s2n" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/12/13/Learn-R-1/" data-id="cii69y3e0000ov4i18agc2nab" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/R/">R</a></li></ul>
@@ -298,7 +352,7 @@ frame <span class="preprocessor">#<span class="number">20</span>: libdyld.dylib`
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/12/11/LLDB-1/" data-id="cii4f2glt000rnpi1rv68bm3e" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/12/11/LLDB-1/" data-id="cii69y3e7000uv4i1n6922u86" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
@@ -597,7 +651,7 @@ TBBoundingBox TBBoundingBoxMake(<span class="built_in">double</span> x0, <span c
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/12/11/TBAnnotationClustering/" data-id="cii4f2gl6000anpi1y7icqqb9" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/12/11/TBAnnotationClustering/" data-id="cii69y3d8000av4i10syiruoa" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
@@ -822,7 +876,7 @@ BOOL success = class_addMethod(<span class="keyword">class</span>, originalSelec
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/11/26/FDFullScreenPopGesture-Source-Code/" data-id="cii4f2gm0000xnpi1kdpcb3xp" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/11/26/FDFullScreenPopGesture-Source-Code/" data-id="cii69y3ek0010v4i13oy5h917" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
@@ -932,7 +986,7 @@ replicationLayer.instanceDelay = <span class="number">0.3</span>
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/11/17/Fun-of-CAReplicationLayer/" data-id="cii4f2gly000vnpi1h0i23ic9" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/11/17/Fun-of-CAReplicationLayer/" data-id="cii69y3eh000yv4i170r4emyc" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Swift/">Swift</a></li></ul>
@@ -1138,7 +1192,7 @@ modalVC<span class="class">.modalPresentationStyle</span> = <span class="class">
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/11/12/Swift-UITransition-iOS8/" data-id="cii4f2gl8000cnpi1rz7zlvs9" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/11/12/Swift-UITransition-iOS8/" data-id="cii69y3dc000cv4i1cvwit8wt" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Swift/">Swift</a></li></ul>
@@ -1298,7 +1352,7 @@ modalVC<span class="class">.modalPresentationStyle</span> = <span class="class">
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/11/05/Understand-Viper/" data-id="cii4f2gl40008npi14uji8y05" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/11/05/Understand-Viper/" data-id="cii69y3d50008v4i10xg195a7" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
@@ -1527,7 +1581,7 @@ objectPath.<span class="keyword">get</span>(obj, <span class="string">'a.\u1200'
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/11/05/Object-Path-Source-Code/" data-id="cii4f2gli000jnpi1hy2976ip" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/11/05/Object-Path-Source-Code/" data-id="cii69y3ds000mv4i1cbcm1cgd" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/JavaScript/">JavaScript</a></li></ul>
@@ -1590,222 +1644,10 @@ objectPath.<span class="keyword">get</span>(obj, <span class="string">'a.\u1200'
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/10/29/Learn-Android-Day-by-Day/" data-id="cii4f2glq000onpi1c0p6t7rn" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/10/29/Learn-Android-Day-by-Day/" data-id="cii69y3e3000rv4i1hfrysib1" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Android/">Android</a></li></ul>
-
-    </footer>
-  </div>
-  
-</article>
-
-
-  
-    <article id="post-Swift-Count-Down-Label" class="article article-type-post" itemscope itemprop="blogPost">
-  <div class="article-meta">
-    <a href="/2015/10/29/Swift-Count-Down-Label/" class="article-date">
-  <time datetime="2015-10-28T18:54:23.000Z" itemprop="datePublished">2015-10-29</time>
-</a>
-    
-  </div>
-  <div class="article-inner">
-    
-    
-      <header class="article-header">
-        
-  
-    <h1 itemprop="name">
-      <a class="article-title" href="/2015/10/29/Swift-Count-Down-Label/">Swift每日一练：重写UICountingLabel</a>
-    </h1>
-  
-
-      </header>
-    
-    <div class="article-entry" itemprop="articleBody">
-      
-        <p>今天Swift练习的是准备尝试把<a href="https://github.com/dataxpress/UICountingLabel/blob/master/UICountingLabel.m" target="_blank" rel="external">UICountingLabel</a>这个Github Star数超过500的库用Swift重写一遍。</p>
-<h3 id="UICountingLabel源码解析">UICountingLabel源码解析</h3><p>整个uICountingLabel的本质就是基于一个NSTimer来计算当前时间内应该显示什么值，</p>
-<pre><code>- (<span class="built_in">CGFloat</span>)currentValue {
-
-    <span class="keyword">if</span> (<span class="keyword">self</span><span class="variable">.progress</span> &gt;= <span class="keyword">self</span><span class="variable">.totalTime</span>) {
-        <span class="keyword">return</span> <span class="keyword">self</span><span class="variable">.destinationValue</span>;
-    }
-
-    <span class="built_in">CGFloat</span> percent = <span class="keyword">self</span><span class="variable">.progress</span> / <span class="keyword">self</span><span class="variable">.totalTime</span>;
-    <span class="built_in">CGFloat</span> updateVal = [<span class="keyword">self</span><span class="variable">.counter</span> update:percent];
-    <span class="keyword">return</span> <span class="keyword">self</span><span class="variable">.startingValue</span> + (updateVal * (<span class="keyword">self</span><span class="variable">.destinationValue</span> - <span class="keyword">self</span><span class="variable">.startingValue</span>));
-}
-</code></pre><p>这个值通过不同的插值方式得到，这个插值方式的具体实现时通过<strong>self.counter</strong>的不同子类进行实现。</p>
-<pre><code><span class="class"><span class="keyword">@implementation</span> <span class="title">UILabelCounterLinear</span></span>
-
--(<span class="built_in">CGFloat</span>)update:(<span class="built_in">CGFloat</span>)t
-{
-    <span class="keyword">return</span> t;
-}
-
-<span class="keyword">@end</span>
-
-<span class="class"><span class="keyword">@implementation</span> <span class="title">UILabelCounterEaseIn</span></span>
-
--(<span class="built_in">CGFloat</span>)update:(<span class="built_in">CGFloat</span>)t
-{
-    <span class="keyword">return</span> powf(t, k<span class="built_in">UILabelCounterRate</span>);
-}
-
-<span class="keyword">@end</span>
-
-<span class="class"><span class="keyword">@implementation</span> <span class="title">UILabelCounterEaseOut</span></span>
-
--(<span class="built_in">CGFloat</span>)update:(<span class="built_in">CGFloat</span>)t{
-    <span class="keyword">return</span> <span class="number">1.0</span>-powf((<span class="number">1.0</span>-t), k<span class="built_in">UILabelCounterRate</span>);
-}
-
-<span class="keyword">@end</span>
-
-<span class="class"><span class="keyword">@implementation</span> <span class="title">UILabelCounterEaseInOut</span></span>
-
--(<span class="built_in">CGFloat</span>) update: (<span class="built_in">CGFloat</span>) t
-{
-    <span class="keyword">int</span> sign =<span class="number">1</span>;
-    <span class="keyword">int</span> r = (<span class="keyword">int</span>) k<span class="built_in">UILabelCounterRate</span>;
-    <span class="keyword">if</span> (r % <span class="number">2</span> == <span class="number">0</span>)
-        sign = -<span class="number">1</span>;
-    t *= <span class="number">2</span>;
-    <span class="keyword">if</span> (t &lt; <span class="number">1</span>)
-        <span class="keyword">return</span> <span class="number">0.5</span>f * powf(t, k<span class="built_in">UILabelCounterRate</span>);
-    <span class="keyword">else</span>
-        <span class="keyword">return</span> sign * <span class="number">0.5</span>f * (powf(t-<span class="number">2</span>, k<span class="built_in">UILabelCounterRate</span>) + sign * <span class="number">2</span>);
-}
-</code></pre><p>这里用子类化这么说是不严谨的，因为这其实就类似于Java或者C#是面向了接口编程了而已，因为这里的每个类都只是实现了update这个函数接口而已。</p>
-<p>然后实现里相对比较直观，</p>
-<pre><code>-(<span class="keyword">void</span>)countFrom:(<span class="built_in">CGFloat</span>)startValue to:(<span class="built_in">CGFloat</span>)endValue withDuration:(<span class="built_in">NSTimeInterval</span>)duration {
-    <span class="keyword">if</span> (duration == <span class="number">0.0</span>) {
-        <span class="comment">// No animation</span>
-        [<span class="keyword">self</span> setTextValue:endValue];
-        [<span class="keyword">self</span> runCompletionBlock];
-        <span class="keyword">return</span>;
-    }
-
-    <span class="keyword">self</span><span class="variable">.lastUpdate</span> = [<span class="built_in">NSDate</span> timeIntervalSinceReferenceDate];
-
-    <span class="keyword">switch</span>(<span class="keyword">self</span><span class="variable">.method</span>)
-    {
-        <span class="keyword">case</span> <span class="built_in">UILabelCountingMethodLinear</span>:
-            <span class="keyword">self</span><span class="variable">.counter</span> = [[<span class="built_in">UILabelCounterLinear</span> alloc] init];
-            <span class="keyword">break</span>;
-        <span class="keyword">case</span> <span class="built_in">UILabelCountingMethodEaseIn</span>:
-            <span class="keyword">self</span><span class="variable">.counter</span> = [[<span class="built_in">UILabelCounterEaseIn</span> alloc] init];
-            <span class="keyword">break</span>;
-        <span class="keyword">case</span> <span class="built_in">UILabelCountingMethodEaseOut</span>:
-            <span class="keyword">self</span><span class="variable">.counter</span> = [[<span class="built_in">UILabelCounterEaseOut</span> alloc] init];
-            <span class="keyword">break</span>;
-        <span class="keyword">case</span> <span class="built_in">UILabelCountingMethodEaseInOut</span>:
-            <span class="keyword">self</span><span class="variable">.counter</span> = [[<span class="built_in">UILabelCounterEaseInOut</span> alloc] init];
-            <span class="keyword">break</span>;
-    }
-
-    <span class="built_in">NSTimer</span> *timer = [<span class="built_in">NSTimer</span> timerWithTimeInterval:(<span class="number">1.0</span>f/<span class="number">30.0</span>f) target:<span class="keyword">self</span> selector:<span class="keyword">@selector</span>(updateValue:) userInfo:<span class="literal">nil</span> repeats:<span class="literal">YES</span>];
-    [[<span class="built_in">NSRunLoop</span> mainRunLoop] addTimer:timer forMode:<span class="built_in">NSRunLoopCommonModes</span>];
-    [[<span class="built_in">NSRunLoop</span> mainRunLoop] addTimer:timer forMode:<span class="built_in">UITrackingRunLoopMode</span>];
-    <span class="keyword">self</span><span class="variable">.timer</span> = timer;
-}
-</code></pre><p>首先如果动画的时间是0，就默认直接回调。但是，我想说<b>duration == 0.0，浮点数这么判断，真的没问题吗？</b></p>
-<p>由于NSTimer无法得知确切得知道执行了多少，所以这里要记录上一步回调的lastUpdate。<br>根据不同的方法选择不同的Counter进行插值，然后创建NSTimer，这里我们要特别注意两句话：</p>
-<pre><code><span class="attr_selector">[[NSRunLoop mainRunLoop]</span> <span class="rule"><span class="attribute">addTimer</span>:<span class="value">timer forMode:NSRunLoopCommonModes]</span></span>;
-<span class="attr_selector">[[NSRunLoop mainRunLoop]</span> <span class="rule"><span class="attribute">addTimer</span>:<span class="value">timer forMode:UITrackingRunLoopMode]</span></span>;
-</code></pre><p>这表示NSTimer默认加入的是RunLoop的Default Mode，但是Default Mode在进入Tracking Mode的时候（也就是当用户滑动的时候）会被阻塞，影响动画的执行。因此要特别加入TrackingMode。</p>
-<p>但是我又想说了，<b>NSRunLoopCommonModes难道不是包含UITrackingRunLoopMode吗？天呐，还是我理解的不对，重复添加的意义呢！！！！</b></p>
-<p>然后在NSTimer的回调函数中,</p>
-<pre><code><span class="built_in">NSTimeInterval</span> now = [<span class="built_in">NSDate</span> timeIntervalSinceReferenceDate];
-<span class="keyword">self</span><span class="variable">.progress</span> += now - <span class="keyword">self</span><span class="variable">.lastUpdate</span>;
-<span class="keyword">self</span><span class="variable">.lastUpdate</span> = now;
-
-<span class="keyword">if</span> (<span class="keyword">self</span><span class="variable">.progress</span> &gt;= <span class="keyword">self</span><span class="variable">.totalTime</span>) {
-    [<span class="keyword">self</span><span class="variable">.timer</span> invalidate];
-    <span class="keyword">self</span><span class="variable">.timer</span> = <span class="literal">nil</span>;
-    <span class="keyword">self</span><span class="variable">.progress</span> = <span class="keyword">self</span><span class="variable">.totalTime</span>;
-}
-
-[<span class="keyword">self</span> setTextValue:[<span class="keyword">self</span> currentValue]];
-
-<span class="keyword">if</span> (<span class="keyword">self</span><span class="variable">.progress</span> == <span class="keyword">self</span><span class="variable">.totalTime</span>) {
-    [<span class="keyword">self</span> runCompletionBlock];
-}
-</code></pre><p>就是计算当前的progress进度，更新相应的值而已，没有难度。</p>
-<h3 id="Swift_重写">Swift 重写</h3><p>先来效果:</p>
-<p><img src="http://7lrzqz.com1.z0.glb.clouddn.com/CountDownLabel.gif"></p>
-<h4 id="CADisplayLink_vs_NSTimer">CADisplayLink vs NSTimer</h4><p>首先我们来回忆下Objective-C版本中的一些逻辑，使用NSTimer动态根据进度更新时间。但是我们知道，NSTimer有一个很大的问题就是他的“刷新率”不够准确。如果NSTimer设置了每两秒更新一次，那么如果RunLoop中有个耗时的任务，就会讲这个更新任务推迟，用时间轴来理解：</p>
-<pre><code><span class="number">0</span><span class="function"> -&gt;</span> <span class="number">2s</span> <span class="function"><span class="params">(NSTimer回调)</span> -&gt;</span> <span class="number">3s</span> （耗时的任务）<span class="function"> -&gt;</span> <span class="number">2s</span> (NSTimer回调)。
-</code></pre><p>那么这个会导致什么问题呢？NSTimer的回调和屏幕刷新不是同步的。因此，在Swift版本的重写中，我采用了CADisplayLink来改写，它的好处我们同样用时间轴来理解：</p>
-<pre><code><span class="number">0</span> -&gt; <span class="number">2</span>s（CADisplayLink回调） -&gt; <span class="number">3</span>s（耗时的任务） -&gt; <span class="number">1</span>s（空闲） -&gt; <span class="number">2</span>s（CADisplayLink回调）
-</code></pre><p>可以看出，CADisplayLink始终是保持和屏幕刷新率一样。</p>
-<p><b>这里强调一下，不论是NSTimer抑或是CADisplayLink，既然他们都是基于RunLoop的，就无法脱离被所处同一个RunLoop里的其他任务所影响的宿命，所以网上那些说CADisplayLink不会被阻塞的说法都是错误的。</b></p>
-<h4 id="Swift_面向接口编程">Swift 面向接口编程</h4><p>之前我们提过“子类化“这个说法是不准确的，因此，我们在Swift中，可以基于protocol-oriented进行编程。</p>
-<pre><code><span class="keyword">let</span> <span class="type">WZCountRate</span>:<span class="type">Float</span> = <span class="number">3.0</span>
-
-<span class="class"><span class="keyword">protocol</span> <span class="title">Interpolation</span> </span>{
-    <span class="func"><span class="keyword">func</span> <span class="title">update</span><span class="params">(val:Float)</span></span> -&gt; <span class="type">Float</span>;
-}
-
-<span class="class"><span class="keyword">struct</span> <span class="title">Linear</span>:<span class="title">Interpolation</span> </span>{
-    <span class="func"><span class="keyword">func</span> <span class="title">update</span><span class="params">(val: Float)</span></span> -&gt; <span class="type">Float</span> {
-        <span class="keyword">return</span> val
-    }
-}
-
-<span class="class"><span class="keyword">struct</span> <span class="title">EaseIn</span>:<span class="title">Interpolation</span> </span>{
-    <span class="func"><span class="keyword">func</span> <span class="title">update</span><span class="params">(val: Float)</span></span> -&gt; <span class="type">Float</span> {
-        <span class="keyword">return</span> powf(val, <span class="type">WZCountRate</span>)
-    }
-}
-
-<span class="class"><span class="keyword">struct</span> <span class="title">EaseOut</span>:<span class="title">Interpolation</span> </span>{
-    <span class="func"><span class="keyword">func</span> <span class="title">update</span><span class="params">(val: Float)</span></span> -&gt; <span class="type">Float</span> {
-        <span class="keyword">return</span> <span class="number">1</span> - powf((<span class="number">1</span> - val), <span class="type">WZCountRate</span>)
-    }
-}
-
-<span class="class"><span class="keyword">struct</span> <span class="title">EaseInOut</span>:<span class="title">Interpolation</span> </span>{
-    <span class="func"><span class="keyword">func</span> <span class="title">update</span><span class="params">(val: Float)</span></span> -&gt; <span class="type">Float</span> {
-        <span class="keyword">var</span> sign:<span class="type">Float</span> = <span class="number">1</span>
-        <span class="keyword">let</span> r = <span class="type">Int</span>(<span class="type">WZCountRate</span>)
-
-        <span class="keyword">if</span> (r % <span class="number">2</span> == <span class="number">0</span>) {
-           sign = -<span class="number">1</span>
-        }
-
-        <span class="keyword">var</span> t = val * <span class="number">2</span>
-        <span class="keyword">if</span> (t &lt; <span class="number">1</span>) {
-            <span class="keyword">return</span> <span class="number">0.5</span> * powf(t, <span class="type">WZCountRate</span>)
-        } <span class="keyword">else</span> {
-            <span class="keyword">return</span> <span class="number">0.5</span> * (powf(t - <span class="number">2.0</span>, <span class="type">WZCountRate</span>) + sign * <span class="number">2</span>) * sign
-        }
-    }
-}
-</code></pre><p>可以看到，我们用四个<b>Struct</b>结构体遵从了<b>Interpolation</b>这个接口，实现了四种不同的插值方法。</p>
-<p>别的方面没什么特别难的，</p>
-<h4 id="Access_Control_对Selector_Callback的影响">Access Control 对Selector Callback的影响</h4><p>我们都知道，Swift对类引入了Access Control这一机制，默认情况下是internal的权限。由于CADisplayLink还是基于Selector设置回调的，如下：</p>
-<pre><code><span class="keyword">let</span> displayLink = CADisplayLink(
-   target: <span class="built_in">self</span>,
-   <span class="keyword">select</span><span class="subst">or</span>: <span class="keyword">Select</span><span class="subst">or</span>(<span class="string">"displayTick:"</span>)
-)
-</code></pre><p>当这个displayTick函数处于<b>public或者internal</b>权限的时候，没有任何问题。而当你想声明如</p>
-<p><em>private func displayTick()</em></p>
-<p>的时候，就会产生doesn’t recognize selector的runtime error。</p>
-<p>原因如下：<br><b>基于Selector的回调方式还是采用了Objective-C传统的runtime 查函数表的方式，但是在Swift中声明为private的函数，对于Objective-C Runtime是不可见的。因此，如果你需要让私有函数可以被查询到，你需要添加@objc关键词。</b></p>
-<p>@objc private func displayTick()</p>
-<p>当然啦， 对于IBOutlets, IBActions 以及 Core Data 相关属性来说，默认是可以被Objective-C Runtime查询到的。</p>
-<p></p>
-<p>最后，附上<a href="https://github.com/SatanWoo/WZCountDownLabel" target="_blank" rel="external">项目地址</a></p>
-
-      
-    </div>
-    <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/10/29/Swift-Count-Down-Label/" data-id="cii4f2glb000fnpi1a232a1ie" class="article-share-link">Share</a>
-      
-      
-  <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Swift/">Swift</a></li></ul>
 
     </footer>
   </div>
@@ -1829,7 +1671,7 @@ objectPath.<span class="keyword">get</span>(obj, <span class="string">'a.\u1200'
   <div class="widget-wrap">
     <h3 class="widget-title">Tags</h3>
     <div class="widget">
-      <ul class="tag-list"><li class="tag-list-item"><a class="tag-list-link" href="/tags/Android/">Android</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/JavaScript/">JavaScript</a><span class="tag-list-count">2</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/R/">R</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Swift/">Swift</a><span class="tag-list-count">4</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/iOS/">iOS</a><span class="tag-list-count">8</span></li></ul>
+      <ul class="tag-list"><li class="tag-list-item"><a class="tag-list-link" href="/tags/Android/">Android</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/JavaScript/">JavaScript</a><span class="tag-list-count">2</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Math/">Math</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/R/">R</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Swift/">Swift</a><span class="tag-list-count">4</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/iOS/">iOS</a><span class="tag-list-count">8</span></li></ul>
     </div>
   </div>
 
@@ -1838,7 +1680,7 @@ objectPath.<span class="keyword">get</span>(obj, <span class="string">'a.\u1200'
   <div class="widget-wrap">
     <h3 class="widget-title">Tag Cloud</h3>
     <div class="widget tagcloud">
-      <a href="/tags/Android/" style="font-size: 10px;">Android</a> <a href="/tags/JavaScript/" style="font-size: 13.33px;">JavaScript</a> <a href="/tags/R/" style="font-size: 10px;">R</a> <a href="/tags/Swift/" style="font-size: 16.67px;">Swift</a> <a href="/tags/iOS/" style="font-size: 20px;">iOS</a>
+      <a href="/tags/Android/" style="font-size: 10px;">Android</a> <a href="/tags/JavaScript/" style="font-size: 13.33px;">JavaScript</a> <a href="/tags/Math/" style="font-size: 10px;">Math</a> <a href="/tags/R/" style="font-size: 10px;">R</a> <a href="/tags/Swift/" style="font-size: 16.67px;">Swift</a> <a href="/tags/iOS/" style="font-size: 20px;">iOS</a>
     </div>
   </div>
 
@@ -1847,7 +1689,7 @@ objectPath.<span class="keyword">get</span>(obj, <span class="string">'a.\u1200'
   <div class="widget-wrap">
     <h3 class="widget-title">Archives</h3>
     <div class="widget">
-      <ul class="archive-list"><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/12/">December 2015</a><span class="archive-list-count">3</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/11/">November 2015</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/10/">October 2015</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/09/">September 2015</a><span class="archive-list-count">4</span></li></ul>
+      <ul class="archive-list"><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/12/">December 2015</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/11/">November 2015</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/10/">October 2015</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/09/">September 2015</a><span class="archive-list-count">4</span></li></ul>
     </div>
   </div>
 
@@ -1857,6 +1699,10 @@ objectPath.<span class="keyword">get</span>(obj, <span class="string">'a.\u1200'
     <h3 class="widget-title">Recents</h3>
     <div class="widget">
       <ul>
+        
+          <li>
+            <a href="/2015/12/15/Regression-Model-1/">Regression Model</a>
+          </li>
         
           <li>
             <a href="/2015/12/13/Learn-R-1/">一步步学R（1）</a>
@@ -1872,10 +1718,6 @@ objectPath.<span class="keyword">get</span>(obj, <span class="string">'a.\u1200'
         
           <li>
             <a href="/2015/11/26/FDFullScreenPopGesture-Source-Code/">FDFullScreenPopGesture源码解析</a>
-          </li>
-        
-          <li>
-            <a href="/2015/11/17/Fun-of-CAReplicationLayer/">Swift每日一练：妙用CAReplicationLayer</a>
           </li>
         
       </ul>
