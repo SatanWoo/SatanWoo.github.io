@@ -38,8 +38,8 @@
     <link href="http://satanwoo.github.io/2015/12/20/Learn-R-2/"/>
     <id>http://satanwoo.github.io/2015/12/20/Learn-R-2/</id>
     <published>2015-12-20T08:43:31.000Z</published>
-    <updated>2015-12-26T17:09:24.000Z</updated>
-    <content type="html"><![CDATA[<h3 id="系列连载">系列连载</h3><p><a href="http://satanwoo.github.io/2015/12/13/Learn-R-1/">一步步学R（1）</a><br><a href="http://satanwoo.github.io/2015/12/13/Learn-R-1/">一步步学R（2）</a></p>
+    <updated>2015-12-26T17:14:13.000Z</updated>
+    <content type="html"><![CDATA[<h3 id="系列连载">系列连载</h3><p><a href="http://satanwoo.github.io/2015/12/13/Learn-R-1/">一步步学R（1）</a><br><a href="http://satanwoo.github.io/2015/12/20/Learn-R-2/">一步步学R（2）</a></p>
 <h3 id="If-Else">If-Else</h3><p>R 种的If-Else结构并没有比较特殊的地方，仍然支持两种结构：</p>
 <pre><code><span class="tag">if</span> (condition) {
     <span class="comment">// Do Something</span>
@@ -197,8 +197,9 @@
     <link href="http://satanwoo.github.io/2015/12/13/Learn-R-1/"/>
     <id>http://satanwoo.github.io/2015/12/13/Learn-R-1/</id>
     <published>2015-12-13T07:03:36.000Z</published>
-    <updated>2015-12-13T10:56:27.000Z</updated>
-    <content type="html"><![CDATA[<p>嘿嘿，作为一名天才，当然要掌握一定的数据分析能力啦，所以从今天起，我们来一步步学习R这门有意思的语言。</p>
+    <updated>2015-12-26T17:13:51.000Z</updated>
+    <content type="html"><![CDATA[<h3 id="系列连载">系列连载</h3><p><a href="http://satanwoo.github.io/2015/12/13/Learn-R-1/">一步步学R（1）</a><br><a href="http://satanwoo.github.io/2015/12/20/Learn-R-2/">一步步学R（2）</a></p>
+<p>嘿嘿，作为一名天才，当然要掌握一定的数据分析能力啦，所以从今天起，我们来一步步学习R这门有意思的语言。</p>
 <p>这一系列的文章的开发环境都是基于Mac的。</p>
 <h3 id="安装">安装</h3><ol>
 <li>首先你要安装R语言的环境 <a href="https://cran.r-project.org/" target="_blank" rel="external">安装点我</a></li>
@@ -304,10 +305,7 @@ $foo
 <p>因此，如果要计算两个Matrix的乘积，需要使用<code>%*%</code>，否则如果直接使用<code>*</code>就是对应位置的元素相乘而已。</p>
 ]]></content>
     <summary type="html">
-    <![CDATA[<p>嘿嘿，作为一名天才，当然要掌握一定的数据分析能力啦，所以从今天起，我们来一步步学习R这门有意思的语言。</p>
-<p>这一系列的文章的开发环境都是基于Mac的。</p>
-<h3 id="安装">安装</h3><ol>
-<li>首先你要安装R语言的环境 <a href="ht]]>
+    <![CDATA[<h3 id="系列连载">系列连载</h3><p><a href="http://satanwoo.github.io/2015/12/13/Learn-R-1/">一步步学R（1）</a><br><a href="http://satanwoo.github.io/2015/]]>
     </summary>
     
       <category term="R" scheme="http://satanwoo.github.io/tags/R/"/>
