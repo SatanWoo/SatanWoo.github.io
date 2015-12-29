@@ -62,6 +62,372 @@
       <div class="outer">
         <section id="main">
   
+    <article id="post-Swift-UITransition-iOS8" class="article article-type-post" itemscope itemprop="blogPost">
+  <div class="article-meta">
+    <a href="/2015/11/12/Swift-UITransition-iOS8/" class="article-date">
+  <time datetime="2015-11-11T18:33:50.000Z" itemprop="datePublished">2015-11-12</time>
+</a>
+    
+  </div>
+  <div class="article-inner">
+    
+    
+      <header class="article-header">
+        
+  
+    <h1 itemprop="name">
+      <a class="article-title" href="/2015/11/12/Swift-UITransition-iOS8/">Swift每日一练：自定义转场在iOS8中的那些坑</a>
+    </h1>
+  
+
+      </header>
+    
+    <div class="article-entry" itemprop="articleBody">
+      
+        <p>之前因为面试的缘故发现了自己在自定义转场这块有点欠缺，今天拿Swift练下手，实现一个自定义转场的效果。<em>没耐心的话请直接翻到最后吧，我前面都是铺垫呢。</em></p>
+<p>首先让我们先来看看最后实现的效果：<br><img src="http://7lrzqz.com1.z0.glb.clouddn.com/WZCustomTransition.gif"></p>
+<p>下面就让我们一步步来看看是如何实现这个效果的。</p>
+<h3 id="自定义转场">自定义转场</h3><p>要实现自定义转场动画，比较重要的就是三个部分。</p>
+<ul>
+<li><p>UIViewControllerContextTransition</p>
+<p>这个接口主要用来提供切换上下文给开发者使用，包含了从哪个VC到哪个VC等各类信息，一般不需要开发者自己实现。</p>
+<p>本文关注的包含了如下一些内容：</p>
+<pre><code><span class="number">1.</span> - (<span class="built_in">UIView</span> *)containerView; 
+<span class="comment">// VC切换所发生的view容器    </span>
+
+<span class="number">2.</span> - (<span class="built_in">UIViewController</span> *)viewControllerForKey:(<span class="built_in">NSString</span> *)key;
+<span class="comment">// 根据UITransitionContextFromViewControllerKey和UITransitionContextToViewControllerKey两种，分别返回将要切出和切入的ViewController。</span>
+
+<span class="number">3.</span> - (<span class="keyword">void</span>)completeTransition:(<span class="built_in">BOOL</span>)didComplete; 
+<span class="comment">// 报告切换已经完成。</span>
+</code></pre></li>
+<li><p>UIViewControllerAnimatedTransition</p>
+<p>这个接口主要用来定义如何完成转场动画，同时定义转场动画的持续时间。（在本文中我们不考虑交互式的转场）</p>
+<pre><code><span class="number">1.</span> - (<span class="built_in">NSTimeInterval</span>)transitionDuration:(<span class="keyword">id</span> &lt; <span class="built_in">UIViewControllerContextTransitioning</span> &gt;)transitionContext; 
+<span class="comment">// 返回转场动画持续的时间</span>
+
+<span class="number">2.</span> - (<span class="keyword">void</span>)animateTransition:(<span class="keyword">id</span> &lt; <span class="built_in">UIViewControllerContextTransitioning</span> &gt;)transitionContext; 
+<span class="comment">// 我们自定义的转场要在这里完成</span>
+</code></pre></li>
+<li><p>UIViewControllerTransitionDelegate    </p>
+<p>这个接口主要用于指定，我们希望采用哪种转场效果（比如你可以根据不同的状态，切换不同的自定义专场效果）</p>
+<pre><code><span class="number">1.</span> - (<span class="keyword">id</span>&lt; <span class="built_in">UIViewControllerAnimatedTransitioning</span> &gt;)animationControllerForPresentedController:(<span class="built_in">UIViewController</span> *)presented presentingController:(<span class="built_in">UIViewController</span> *)presenting sourceController:(<span class="built_in">UIViewController</span> *)source;
+<span class="comment">// 当弹出模态窗口的时候，使用什么转场效果</span>
+
+<span class="number">2.</span> - (<span class="keyword">id</span>&lt; <span class="built_in">UIViewControllerAnimatedTransitioning</span> &gt;)animationControllerForDismissedController:(<span class="built_in">UIViewController</span> *)dismissed;
+<span class="comment">// 当关闭模态窗口的时候，使用什么转场效果</span>
+</code></pre></li>
+</ul>
+<h3 id="实现">实现</h3><p>知道了转场动画需要的必要条件，我们可以很轻松分别实现三个部分。</p>
+<p>第一部分UIViewControllerContextTransition在本文中并没有特殊定制化的地方，直接完成。</p>
+<p>第二部分关于UIViewControllerAnimatedTransition的代码如下：</p>
+<pre><code>class SwipeAnimator: <span class="built_in">NSObject</span>, <span class="built_in">UIViewControllerAnimatedTransitioning</span> {
+    <span class="keyword">enum</span> SwipeTo {
+        <span class="keyword">case</span> Main
+        <span class="keyword">case</span> Modal
+    };
+
+    var transitonTo:SwipeTo = <span class="variable">.Main</span>
+
+    <span class="comment">// 0. 返回动画时间</span>
+    func transitionDuration(transitionContext: <span class="built_in">UIViewControllerContextTransitioning</span>) -&gt; <span class="built_in">NSTimeInterval</span> {
+        <span class="keyword">return</span> <span class="number">1.0</span>
+    }
+
+    func animateTransition(transitionContext: <span class="built_in">UIViewControllerContextTransitioning</span>) {
+        <span class="comment">// 1. 获取相关资源</span>
+        let fromVC = transitionContext<span class="variable">.viewControllerForKey</span>(<span class="built_in">UITransitionContextFromViewControllerKey</span>)!
+
+        let toView = transitionContext<span class="variable">.viewForKey</span>(<span class="built_in">UITransitionContextToViewKey</span>)
+
+        <span class="comment">// 2. 弹出模态</span>
+        <span class="keyword">if</span> (<span class="keyword">self</span><span class="variable">.transitonTo</span> == <span class="variable">.Modal</span>) {
+            <span class="keyword">if</span> toView != <span class="literal">nil</span> {
+                transitionContext<span class="variable">.containerView</span>()<span class="variable">.addSubview</span>(toView!)
+
+                toView!<span class="variable">.alpha</span> = <span class="number">0.0</span>
+
+                <span class="comment">// 2.1 以左上角为锚点旋转</span>
+                fromVC<span class="variable">.view</span><span class="variable">.layer</span><span class="variable">.anchorPoint</span> = <span class="built_in">CGPoint</span>(x: <span class="number">0</span>, y: <span class="number">0</span>)
+                fromVC<span class="variable">.view</span><span class="variable">.layer</span><span class="variable">.position</span> = <span class="built_in">CGPointMake</span>(<span class="number">0</span>, <span class="number">0</span>)
+
+                <span class="built_in">UIView</span><span class="variable">.animateWithDuration</span>(<span class="number">1.0</span>, animations: { () -&gt; Void <span class="keyword">in</span>
+                    fromVC<span class="variable">.view</span><span class="variable">.transform</span> = <span class="built_in">CGAffineTransformMakeRotation</span>(<span class="built_in">CGFloat</span>(-M_PI/<span class="number">2</span>))
+                    toView!<span class="variable">.alpha</span> = <span class="number">1.0</span>
+                }, completion: { (completion:Bool) -&gt; Void <span class="keyword">in</span>
+                    <span class="comment">// 2.2 报告转场动画完成</span>
+                    transitionContext<span class="variable">.completeTransition</span>(!transitionContext<span class="variable">.transitionWasCancelled</span>())
+                })
+            }
+        } <span class="keyword">else</span> {
+            <span class="comment">// 3. 关闭模态</span>
+            <span class="keyword">if</span> fromView != <span class="literal">nil</span> {
+                fromView!<span class="variable">.alpha</span> = <span class="number">1.0</span>
+                <span class="built_in">UIView</span><span class="variable">.animateWithDuration</span>(<span class="number">1.0</span>, animations: { () -&gt; Void <span class="keyword">in</span>
+                    toVC<span class="variable">.view</span><span class="variable">.transform</span> = <span class="built_in">CGAffineTransformMakeRotation</span>(<span class="number">0</span>)
+                    fromView!<span class="variable">.alpha</span> = <span class="number">0.0</span>
+                }, completion: { (completion:Bool) -&gt; Void <span class="keyword">in</span>
+                    transitionContext<span class="variable">.completeTransition</span>(!transitionContext<span class="variable">.transitionWasCancelled</span>())
+                })
+            }
+        }
+    }
+}
+</code></pre><p>实现非常简单，我们来一步步看下。</p>
+<ul>
+<li><ol>
+<li>根据UIViewControllerAnimatedTransition协议返回动画时间</li>
+</ol>
+</li>
+<li><ol>
+<li>根据UIViewControllerContextTransition获取我们需要操作的即将切出的ViewController(fromVC)以及即将切入的页面(toView)，<strong>为什么要用这种获取方式，稍微在重点分析会指出</strong></li>
+</ol>
+</li>
+<li><ol>
+<li>当遇到是弹出模态窗口转场的时候，我们首先将toView加入到转场过程提供的一个containView中，然后改变fromVC的锚点，进行旋转，同时我们对toView进行了一个淡入淡出。当转场动画完成以后，<strong>在回调的closure中报告转场动画已经完成</strong>。</li>
+</ol>
+</li>
+<li><ol>
+<li>当关闭模态转场的时候，这个时候转场的出和入就正好和弹出的时候截然相反。原先的fromVC成了现在的toVC，因此我们在这里将toVC旋转回原来的位置。当然别忘了我们的淡入淡出啦，原理是一样的，只要改变fromView的alpha即可。动画完成后，依然要报告我们的转场完成了。</li>
+</ol>
+</li>
+</ul>
+<p>第三部分，UIViewControllerTransitionDelegate的实现依然非常简单，我们仅仅需要告知转场发生时，我们具体要采用哪种转场效果就好了。</p>
+<pre><code><span class="func"><span class="keyword">func</span> <span class="title">animationControllerForPresentedController</span><span class="params">(presented: UIViewController, presentingController presenting: UIViewController, sourceController source: UIViewController)</span></span> -&gt; <span class="type">UIViewControllerAnimatedTransitioning</span>? {
+    <span class="keyword">self</span>.animator.transitonTo = .<span class="type">Modal</span>
+    <span class="keyword">return</span> <span class="keyword">self</span>.animator
+}
+
+<span class="func"><span class="keyword">func</span> <span class="title">animationControllerForDismissedController</span><span class="params">(dismissed: UIViewController)</span></span> -&gt; <span class="type">UIViewControllerAnimatedTransitioning</span>? {
+    <span class="keyword">self</span>.animator.transitonTo = .<span class="type">Main</span>
+    <span class="keyword">return</span> <span class="keyword">self</span>.animator
+}
+</code></pre><p>在这里，我们复用了同一个转场效果，通过不同的transitionTo参数进行控制。你当然也可以给两个转场分别生成对应不同的转场效果。</p>
+<h3 id="iOS8的坑">iOS8的坑</h3><p>嘿嘿，重头戏来了，千万别错过。</p>
+<p>一开始实现这个转场效果的时候，压根没想到这么复杂，但是，突然发现了一个很大的问题：</p>
+<p><strong>当弹出模态窗口的时候，转场效果正常，最后成功显示模态界面。但是当关闭模态窗口的时候，转场效果依然正确，但是转场结束后，整个屏幕都黑了。</strong></p>
+<p><em>What the F*ck!!!</em></p>
+<p>我以为是我自己实现有问题，但是我去Github上找了几个著名的转场效果跑了下，都存在这个问题，那我就百思不得其解了呀！！！</p>
+<h4 id="误打误撞">误打误撞</h4><p>从网上搜寻了很久之后，我还是没有头绪，于是我首先尝试将如下代码中</p>
+<pre><code><span class="tag">var</span> modalVC = <span class="function"><span class="title">UIStoryboard</span><span class="params">(name: <span class="string">"Main"</span>, bundle: nil)</span></span>.<span class="function"><span class="title">instantiateViewControllerWithIdentifier</span><span class="params">(<span class="string">"ModalViewController"</span>)</span></span> as! UIViewController
+modalVC<span class="class">.transitioningDelegate</span> = self
+modalVC<span class="class">.modalPresentationStyle</span> = <span class="class">.Custom</span>
+<span class="function"><span class="title">presentViewController</span><span class="params">(modalVC, animated: true, completion: nil)</span></span>
+</code></pre><p><strong>modalVC.modalPresentationStyle = .Custom</strong>中的.Custom改成了.FullScreen。<br>这一下子就给我整好了！</p>
+<p>所以，给大家提个醒，如果遇到相似的问题，解决方法很简单，就是.FullScreen即可。</p>
+<h4 id="深层原因">深层原因</h4><p>作为一个站在红旗下的三好学生，弄懂问题的深层原因才是最主要的，通过不过的debug，我终于弄懂了。</p>
+<p><strong>首先，我们要强调一个基本知识。一个UIView的superview最多只能由一个。当一个本身处于别的UIView下的subView被添加到另一个UIView上的时候，它就自动被从前一个UIView的Hierarchy中移除了。</strong></p>
+<p>还记得我们之前一个很奇怪的写法吗？<br>根据UIViewControllerContextTransition获取我们需要操作的即将切出的ViewController(fromVC)以及即将切入的页面(toView)</p>
+<p>我们这么写的原因就是因为我们刚刚强调的基本知识，别急，让我们一步步来解析。</p>
+<p>在iOS8中，苹果提供了一个新的API：</p>
+<pre><code><span class="constant">@availability</span>(iOS, introduced=<span class="number">8.0</span>)
+<span class="function"><span class="keyword">func</span> <span class="title">viewForKey</span><span class="params">(key: String)</span> -&gt; <span class="title">UIView</span>?</span>
+</code></pre><p>并且在文档中明确强调了一点：</p>
+<pre><code><span class="comment">// Currently only two keys are defined by the</span>
+<span class="comment">// system - UITransitionContextToViewControllerKey, and</span>
+<span class="comment">// UITransitionContextFromViewControllerKey. </span>
+<span class="comment">// Animators should not directly manipulate a view controller's views and should</span>
+<span class="comment">// use viewForKey: to get views instead.</span>
+<span class="func"><span class="keyword">func</span> <span class="title">viewControllerForKey</span><span class="params">(key: String)</span></span> -&gt; <span class="type">UIViewController</span>?
+</code></pre><p>什么意思呢？<br>之前在iOS7中，开发者需要通过<strong>viewControllerForKey</strong>这个方法获取切入切出的ViewController，并直接操作ViewController对应的View来编写转场动画。而在iOS8以后，苹果规定必须使用<strong>viewForKey</strong>来获取fromView和toView来进行转场动画的操作。</p>
+<p>那这个API的更改和黑屏有什么关联呢？</p>
+<ul>
+<li>在整个转场过程中，我们都依赖于转场上下文transitonContext提供的containerView容器进行view动画的操作。这是因为在转场完成前，即将<strong>切入</strong>的viewcontroller都不存在于当前的可视界面的视图层级内(View Hierarchy)。因此，苹果提供了一个过渡的容器给我们使用（如果大家debug下的话，就会发现在转场过程之中，UIWindow上多了一个UITransitionView，就是切换上下文的containerView）。</li>
+<li>在iOS7的实现中，我们需要将fromVC.view和toVC.view都通过addSubView的方式添加到容器View上进行动画展示。<strong>由于是直接操作了ViewController的view，因此，fromVC的view会被从当前的视图层级中移除</strong></li>
+<li><strong>但是，iOS7中，会在转场动画完成后，自动将fromVC的view添加回原先fromVC从属的父视图中</strong></li>
+<li>iOS8中不会</li>
+<li>在本文的初版实现中，在转场过程中当判断transitionTo == .Main的时候，将此时toViewController.view (也就是原先的主窗口) 添加到了containerView上。因此，当转场结束的时候，containerView从window可见视图层级中移除了，因此就变得不可见，从而变成黑屏了。</li>
+</ul>
+<p>那么为什么模态窗口在转场过程后可见呢？</p>
+<ul>
+<li>因为这个特性依然正确。</li>
+</ul>
+<p>containerView到底是啥?</p>
+<ul>
+<li>就是一个过渡的UITransitionView，一个转场效果对应生成一个（会复用）。</li>
+<li>在转场结束后自动从视图层级中移除，因此不需要大家手动进行removeFromSuperView。</li>
+</ul>
+<p>那么viewForKey和viewControlelrForKey直接操纵view的区别呢？</p>
+<ul>
+<li>viewForKey很可能返回的是一个完全克隆VC的view的对象。</li>
+</ul>
+<p>到这，相信大家都弄懂了吧，我真是太佩服我自己了。</p>
+
+      
+    </div>
+    <footer class="article-footer">
+      <a data-url="http://satanwoo.github.io/2015/11/12/Swift-UITransition-iOS8/" data-id="ciirmomvd000cmji1wr3kky21" class="article-share-link">Share</a>
+      
+      
+  <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Swift/">Swift</a></li></ul>
+
+    </footer>
+  </div>
+  
+</article>
+
+
+  
+    <article id="post-Understand-Viper" class="article article-type-post" itemscope itemprop="blogPost">
+  <div class="article-meta">
+    <a href="/2015/11/05/Understand-Viper/" class="article-date">
+  <time datetime="2015-11-04T17:01:51.000Z" itemprop="datePublished">2015-11-05</time>
+</a>
+    
+  </div>
+  <div class="article-inner">
+    
+    
+      <header class="article-header">
+        
+  
+    <h1 itemprop="name">
+      <a class="article-title" href="/2015/11/05/Understand-Viper/">浅入浅出VIPER设计架构(1)</a>
+    </h1>
+  
+
+      </header>
+    
+    <div class="article-entry" itemprop="articleBody">
+      
+        <p>之前和豌豆荚的同学聊天，发现他们的App从MVVM切换到VIPER设计架构，于是这两天花了点时间研读了一下 相关资料，浅谈一下。</p>
+<h3 id="VIPER是什么">VIPER是什么</h3><p>VIPER是<b>View, Interactor, Presenter, Entity, Routing</b>5个词语的缩写，这5个词语也是VIPER架构的核心。</p>
+<p>View - 视图，接收传递的内容，然后进行内容展示。</p>
+<p>Presenter - 视图逻辑控制器，这个模块只用来执行和UI相关的逻辑。什么叫和UI相关的逻辑呢？比如：接收用户交互、将展示的内容分发给不同的UI界面进行展示。</p>
+<p>Interactor - <b>纯业务逻辑控制器</b>，这个模块完全脱离于UI，只用来做业务相关的逻辑控制。举例来说，比如下载逻辑、计算逻辑等等可以划分为单一Use Case的逻辑。</p>
+<p>Entity - 基础的数据模型，比方说大家经常定义的XXXModel之类的，但是，这里的XXXModel可以认为基本就是<b>纯数据结构了</b>，不包含轻量级业务处理逻辑</p>
+<p>Routing - 路由器，视图切换的逻辑。比如包含如何从一个界面切换到另一个界面，切换的顺序是如何等等。</p>
+<p>除了五大核心之外，我们还经常使用了<strong>Data Store</strong>这个模块。因为我们之前提过，我们的Entity基本就是纯数据结构，不包含轻量级的业务逻辑，因此，Entity进行持久化这个职责是要单独划分出来，而这个职能就落到了Data Store身上。</p>
+<p>下面是网上一张比较经典的架构设计图：</p>
+<p><img src="https://www.objc.io/images/issue-13/2014-06-07-viper-wireframe-76305b6d.png"></p>
+<h3 id="为什么要用VIPER">为什么要用VIPER</h3><p><strong>在软件工程领域，有一个很重要的观点，就是测试、测试、测试。（重要的话说三遍！）</strong></p>
+<p>之前在BMW Group实习的时候从事Java开发，每一个函数都要经过JUnit的测试，也就是我们所谓的Test-Driven Development。但是iOS开发由于其逻辑和视图的强耦合关系，常常导致业务逻辑不能完全独立于界面，进行单元测试十分困难。比如，臭名昭著的”Massive View Controller” 就是因为将大量的业务逻辑和视图逻辑耦合进了Controller，导致Controller非常臃肿，也不容易剥离进行测试。</p>
+<p>而VIPER架构引入了Interactor和Presentator两个概念，将业务逻辑和视图逻辑独立开来，从而可以单独测试业务逻辑的代码。</p>
+<h3 id="例子分析">例子分析</h3><p>说了好多虚的概念，有些人一定已经被弄晕了，还是赶紧看两个典型的例子看深入了解下吧.</p>
+<h4 id="1-_Counter">1. Counter</h4><p>第一个例子来源于<a href="https://github.com/mutualmobile/Counter" target="_blank" rel="external">Counter</a>，是一个非常简单了计数应用。麻雀虽小，却五脏俱全。</p>
+<p>打开项目，我们可以快速的过一下项目结构：</p>
+<pre><code>-<span class="ruby">- <span class="constant">CNTAppDelegate</span>.h/.m
+</span>-<span class="ruby">- <span class="constant">CNTCountInteractorIO</span>.h
+</span>-<span class="ruby">- <span class="constant">CNTCountInteractor</span>.h/.m
+</span>-<span class="ruby">- <span class="constant">CNTCountPresenter</span>.h/.m
+</span>-<span class="ruby">- <span class="constant">CNTCountView</span>.h
+</span>-<span class="ruby">- <span class="constant">CNTCountViewController</span>.h/.m/.xib</span>
+</code></pre><p>首先我们来看一下最简单的模块：CNTCountView</p>
+<pre><code><span class="comment">// CNTCountView.h</span>
+<span class="class"><span class="keyword">@protocol</span> <span class="title">CNTCountView</span> &lt;<span class="title">NSObject</span>&gt;</span>
+- (<span class="keyword">void</span>)setCountText:(<span class="built_in">NSString</span>*)countText;
+- (<span class="keyword">void</span>)setDecrementEnabled:(<span class="built_in">BOOL</span>)enabled;
+<span class="keyword">@end</span>
+</code></pre><p>咦？为什么这个View只包含一个Protocol呢？说好的View用来接收传递的内容然后进行内容展示呢？</p>
+<p>原因是这样：在iOS应用中，一个无法避免的模块就是ViewController（<strong>无论如何每个应用都必须存在一个RootViewController</strong>）。每个ViewController包含一个根View用来进行视图展示。因此，在将VIPER架构应用到iOS领域的过程中，实际上起到View作用的是ViewController！(<b>当然，ViewController不仅仅起到了视图展示的作用</b>)</p>
+<p><em>题外话：我个人认为这个例子的取名不太好，让人迷惑，如果换个名字，如CNTCountViewOperation就没有这个问题了</em></p>
+<p>既然如此，让我们赶快去看看相关的ViewController：CNTCountViewController中的实现。</p>
+<pre><code><span class="comment">// CNTCountViewController.h</span>
+<span class="class"><span class="keyword">@interface</span> <span class="title">CNTCountViewController</span> : <span class="title">UIViewController</span> &lt;<span class="title">CNTCountView</span>&gt;</span>
+<span class="keyword">@property</span> (<span class="keyword">nonatomic</span>, <span class="keyword">weak</span>) <span class="keyword">IBOutlet</span>    <span class="built_in">UILabel</span>*    countLabel;
+<span class="keyword">@property</span> (<span class="keyword">nonatomic</span>, <span class="keyword">weak</span>) <span class="keyword">IBOutlet</span>    <span class="built_in">UIButton</span>*   decrementButton;
+<span class="keyword">@property</span> (<span class="keyword">nonatomic</span>, <span class="keyword">weak</span>) <span class="keyword">IBOutlet</span>    <span class="built_in">UIButton</span>*   incrementButton;
+
+<span class="keyword">@property</span> (<span class="keyword">nonatomic</span>, <span class="keyword">strong</span>)   CNTCountPresenter*  presenter;
+<span class="keyword">@end</span>
+</code></pre><p>在上述CNTCountViewController的头文件中，我们可以看到该类遵从了CNTCountView协议。其次，他包含了真正的View：两个UIButton和一个UILabel。说明这和我们之前说的ViewController起到了真正的视图展示作用是吻合的。</p>
+<p>同时，我们还看到了一个非常显眼的类：<strong>CNTCountPresenter</strong>。如果这个类的命名没错，那这个类就是所谓的Presenter了，用来进行界面逻辑控制的类。那么是不是这样呢？我们<em>Command + 左击</em>这个类一探究竟！</p>
+<pre><code><span class="comment">// CNTCountPresenter.h</span>
+<span class="class"><span class="keyword">@interface</span> <span class="title">CNTCountPresenter</span> : <span class="title">NSObject</span> &lt;<span class="title">CNTCountInteractorOutput</span>&gt;</span>
+<span class="keyword">@property</span> (<span class="keyword">nonatomic</span>, <span class="keyword">weak</span>)     <span class="keyword">id</span>&lt;CNTCountView&gt;            view;
+<span class="keyword">@property</span> (<span class="keyword">nonatomic</span>, <span class="keyword">strong</span>)   <span class="keyword">id</span>&lt;CNTCountInteractorInput&gt; interactor;
+
+- (<span class="keyword">void</span>)updateView;
+- (<span class="keyword">void</span>)increment;
+- (<span class="keyword">void</span>)decrement;
+<span class="keyword">@end</span>
+</code></pre><p>从CNTCountPresenter的头文件中，我们能看出很多逻辑关系。Presenter包含了一个View和一个Interactor。这和文首我们对于VIPER的介绍相吻合：Presenter从Interactor获取数据，经过界面逻辑处理后，将数据发送给View进行展示。</p>
+<p>从Interactor请求获取数据的部分代码如下：</p>
+<pre><code><span class="comment">// CNTCountPresenter.m</span>
+<span class="tag">-</span> (void)<span class="tag">updateView</span>
+{
+    <span class="attr_selector">[self.interactor requestCount]</span>;
+}
+
+<span class="tag">-</span> (void)<span class="tag">increment</span>
+{
+    <span class="attr_selector">[self.interactor increment]</span>;
+}
+
+<span class="tag">-</span> (void)<span class="tag">decrement</span>
+{
+    <span class="attr_selector">[self.interactor decrement]</span>;
+}
+</code></pre><p>由于Presenter从Interactor获取数据，那么势必Presenter是Interactor的一个输出，而Interactor是Presenter的一个输入。</p>
+<pre><code><span class="comment">// CNTCountInteractorIO.h</span>
+<span class="class"><span class="keyword">@protocol</span> <span class="title">CNTCountInteractorInput</span> &lt;<span class="title">NSObject</span>&gt;</span>
+- (<span class="keyword">void</span>)requestCount;
+- (<span class="keyword">void</span>)increment;
+- (<span class="keyword">void</span>)decrement;
+<span class="keyword">@end</span>
+
+<span class="class"><span class="keyword">@protocol</span> <span class="title">CNTCountInteractorOutput</span> &lt;<span class="title">NSObject</span>&gt;</span>
+- (<span class="keyword">void</span>)updateCount:(<span class="built_in">NSUInteger</span>)count;
+<span class="keyword">@end</span>
+</code></pre><p><em><b>这里各位可以先不关注Protocol协议的设计本身，只要理解逻辑关系即可。</b></em></p>
+<p>通过这样的职责划分，落入到Interactor类中的职责就是最基本的业务逻辑：计数的增加和减少。</p>
+<pre><code><span class="comment">// CNTCountInteractor.h</span>
+- (<span class="keyword">void</span>)requestCount
+{
+    [<span class="keyword">self</span> sendCount];
+}
+
+- (<span class="keyword">void</span>)increment
+{
+    ++<span class="keyword">self</span><span class="variable">.count</span>;
+    [<span class="keyword">self</span> sendCount];
+}
+
+- (<span class="keyword">void</span>)decrement
+{
+    <span class="keyword">if</span> ([<span class="keyword">self</span> canDecrement])
+    {
+        --<span class="keyword">self</span><span class="variable">.count</span>;
+        [<span class="keyword">self</span> sendCount];
+    }
+}
+</code></pre><p>至此，我们可以将Counter的项目架构进行如下表示：</p>
+<p>Interactor &lt;——–&gt; Presenter</p>
+<ul>
+<li><strong>Interactor</strong> 是 <strong>Presenter</strong>  的 <b>输入</b></li>
+<li><strong>Presenter</strong>  是 <strong>Interactor</strong> 的 <b>输出</b></li>
+<li><strong>Presenter</strong> 通过某些事件触发，去向其输入<strong>Interactor</strong>请求数据</li>
+</ul>
+<p>Presenter &lt;——–&gt; View(ViewController)</p>
+<ul>
+<li><strong>View</strong>       是 <strong>Presenter</strong>  的 <b>输出</b></li>
+<li><strong>ViewController</strong> 触发了 <strong>Presenter</strong> 去<strong>Interactor</strong>中请求新的业务结果，从而更新<strong>View</strong></li>
+</ul>
+<p>Presenter更新View的代码如下：</p>
+<pre><code><span class="comment">// CNTCountPresenter.m</span>
+<span class="tag">-</span> (void)<span class="tag">updateCount</span>:(NSUInteger)<span class="tag">count</span>
+{
+    <span class="attr_selector">[self.view setCountText:[self formattedCount:count]</span>];
+    <span class="attr_selector">[self.view setDecrementEnabled:[self canDecrementCount:count]</span>];
+}
+</code></pre><p>到这里，Counter这个例子的解读基本就完成了。细心的读者一定会发现，<strong>Entity</strong>和<strong>Route</strong>到哪里去了？</p>
+<p>是的，这个例子由于过于简单，压根不需要Entity。并且由于它是单视图应用，压根不涉及到页面切换，因此也无须Route功能。不过我们在后续的浅入浅出VIPER架构（2）中解读一个更细致更负责的例子，敬请期待！</p>
+
+      
+    </div>
+    <footer class="article-footer">
+      <a data-url="http://satanwoo.github.io/2015/11/05/Understand-Viper/" data-id="ciirmomv80008mji1475z3xbs" class="article-share-link">Share</a>
+      
+      
+  <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
+
+    </footer>
+  </div>
+  
+</article>
+
+
+  
     <article id="post-Object-Path-Source-Code" class="article article-type-post" itemscope itemprop="blogPost">
   <div class="article-meta">
     <a href="/2015/11/05/Object-Path-Source-Code/" class="article-date">
@@ -279,7 +645,7 @@ objectPath.<span class="keyword">get</span>(obj, <span class="string">'a.\u1200'
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/11/05/Object-Path-Source-Code/" data-id="ciinda3v8000mmki1i81x1mj6" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/11/05/Object-Path-Source-Code/" data-id="ciirmomvv000omji13i4wvbzn" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/JavaScript/">JavaScript</a></li></ul>
@@ -342,7 +708,7 @@ objectPath.<span class="keyword">get</span>(obj, <span class="string">'a.\u1200'
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/10/29/Learn-Android-Day-by-Day/" data-id="ciinda3vk000tmki13akcft0p" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/10/29/Learn-Android-Day-by-Day/" data-id="ciirmomw8000wmji19zwd0xo2" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Android/">Android</a></li></ul>
@@ -554,7 +920,7 @@ objectPath.<span class="keyword">get</span>(obj, <span class="string">'a.\u1200'
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/10/29/Swift-Count-Down-Label/" data-id="ciinda3v0000fmki18drq9hru" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/10/29/Swift-Count-Down-Label/" data-id="ciirmomvf000fmji1beshvl01" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Swift/">Swift</a></li></ul>
@@ -685,7 +1051,7 @@ func computeAngle(p1:<span class="type">CGPoint</span> , p2:<span class="type">C
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/10/27/Swift-Circle-Slider/" data-id="ciinda3v3000hmki1jdnlkobb" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/10/27/Swift-Circle-Slider/" data-id="ciirmomvj000hmji18qkpbyh8" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Swift/">Swift</a></li></ul>
@@ -907,7 +1273,7 @@ func computeAngle(p1:<span class="type">CGPoint</span> , p2:<span class="type">C
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/10/14/GLCalendarView/" data-id="ciinda3vs0010mki1wcatv6fk" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/10/14/GLCalendarView/" data-id="ciirmomwg0013mji13fx907ad" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
@@ -1128,7 +1494,7 @@ func computeAngle(p1:<span class="type">CGPoint</span> , p2:<span class="type">C
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/09/30/Debounce-and-Throttle-in-iOS/" data-id="ciinda3vz0016mki1get162vz" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/09/30/Debounce-and-Throttle-in-iOS/" data-id="ciirmomwm0019mji12twttnzl" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
@@ -1429,7 +1795,7 @@ func computeAngle(p1:<span class="type">CGPoint</span> , p2:<span class="type">C
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/09/23/flux-js-part-one/" data-id="ciinda3uf0003mki166pi6odl" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/09/23/flux-js-part-one/" data-id="ciirmomug0003mji12vqvh5qu" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/JavaScript/">JavaScript</a></li></ul>
@@ -2101,55 +2467,7 @@ CountryModel<span class="keyword">*</span> country = [[CountryModel alloc] initW
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/09/17/code-of-JSONModel/" data-id="ciinda3ur0006mki1n070z0i1" class="article-share-link">Share</a>
-      
-      
-  <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
-
-    </footer>
-  </div>
-  
-</article>
-
-
-  
-    <article id="post-A-New-Start" class="article article-type-post" itemscope itemprop="blogPost">
-  <div class="article-meta">
-    <a href="/2015/09/11/A-New-Start/" class="article-date">
-  <time datetime="2015-09-11T04:15:55.000Z" itemprop="datePublished">2015-09-11</time>
-</a>
-    
-  </div>
-  <div class="article-inner">
-    
-    
-      <header class="article-header">
-        
-  
-    <h1 itemprop="name">
-      <a class="article-title" href="/2015/09/11/A-New-Start/">iOS下载模块的实现</a>
-    </h1>
-  
-
-      </header>
-    
-    <div class="article-entry" itemprop="articleBody">
-      
-        <p>这是我在实习的时候对于一个下载模块的实现，在这里记录一下心得体会。这个模块完全独立实现，且不依赖于公司任何的代码，不会涉及任何隐私。</p>
-<h3 id="下载模块的需求">下载模块的需求</h3><p>在实现一个新模块之前，我们需要理清楚这个模块需要支持最小的功能集，并逐步扩展。并且由于下载模块是存在潜在的可能性被多个模块调用，因此，我们特别要注意模块的封装。</p>
-<h4 id="功能需求">功能需求</h4><h5 id="支持下载">支持下载</h5><p>   下载模块最基本的自然就是可以正确的将需要下载的东西下载到指定路径，这里下载的东西包括但是不局限于图片、文本文档、压缩文件等等。因此，这些下载东西的大小是不等的，在设计功能的时候，需要讲这点考虑进去。</p>
-<h5 id="支持取消下载">支持取消下载</h5><p>   处于控制角度的考虑，甚至是出于当流量和资源节省的角度考虑，我们都已经对下载任务有控制权。可以随时根据我们业务处于的状态，对下载任务进行暂停或者完整的停止取消。</p>
-<h5 id="支持并发下载">支持并发下载</h5><p>   下载任务的个数肯定不会只有一个，而是可能同时存在多个。因此，我们就需要考虑如何去支持多个下载任务同时并发的下载。其外，我们还要考虑到潜在的任务之间的关联性和依赖性（比如B下载任务需要依赖于A下载任务的完成）</p>
-<p>初步的任务我们可以认为就是如上三个就可以（<b>初期设计模块真的不要考虑过多功能，先开始做起来，一点点看着自己造的轮子可以运转起来，成就感会促使你会不停的去完善。当然，你的代码一定要写的整洁易读！</b>）</p>
-        
-          <p class="article-more-link">
-            <a href="/2015/09/11/A-New-Start/#more">Read More</a>
-          </p>
-        
-      
-    </div>
-    <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/09/11/A-New-Start/" data-id="ciinda3tj0000mki10kxh3r4z" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/09/17/code-of-JSONModel/" data-id="ciirmomv50006mji1c7bspa1o" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
@@ -2163,7 +2481,7 @@ CountryModel<span class="keyword">*</span> country = [[CountryModel alloc] initW
   
   
     <nav id="page-nav">
-      <a class="extend prev" rel="prev" href="/">&laquo; Prev</a><a class="page-number" href="/">1</a><span class="page-number current">2</span>
+      <a class="extend prev" rel="prev" href="/">&laquo; Prev</a><a class="page-number" href="/">1</a><span class="page-number current">2</span><a class="page-number" href="/page/3/">3</a><a class="extend next" rel="next" href="/page/3/">Next &raquo;</a>
     </nav>
   
 </section>
@@ -2176,7 +2494,7 @@ CountryModel<span class="keyword">*</span> country = [[CountryModel alloc] initW
   <div class="widget-wrap">
     <h3 class="widget-title">Tags</h3>
     <div class="widget">
-      <ul class="tag-list"><li class="tag-list-item"><a class="tag-list-link" href="/tags/Android/">Android</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/JavaScript/">JavaScript</a><span class="tag-list-count">2</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Math/">Math</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/R/">R</a><span class="tag-list-count">2</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Swift/">Swift</a><span class="tag-list-count">4</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/iOS/">iOS</a><span class="tag-list-count">9</span></li></ul>
+      <ul class="tag-list"><li class="tag-list-item"><a class="tag-list-link" href="/tags/Android/">Android</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/JavaScript/">JavaScript</a><span class="tag-list-count">2</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Math/">Math</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/R/">R</a><span class="tag-list-count">2</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Swift/">Swift</a><span class="tag-list-count">4</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/iOS/">iOS</a><span class="tag-list-count">10</span></li></ul>
     </div>
   </div>
 
@@ -2194,7 +2512,7 @@ CountryModel<span class="keyword">*</span> country = [[CountryModel alloc] initW
   <div class="widget-wrap">
     <h3 class="widget-title">Archives</h3>
     <div class="widget">
-      <ul class="archive-list"><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/12/">December 2015</a><span class="archive-list-count">6</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/11/">November 2015</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/10/">October 2015</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/09/">September 2015</a><span class="archive-list-count">4</span></li></ul>
+      <ul class="archive-list"><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/12/">December 2015</a><span class="archive-list-count">8</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/11/">November 2015</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/10/">October 2015</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/09/">September 2015</a><span class="archive-list-count">4</span></li></ul>
     </div>
   </div>
 
@@ -2206,6 +2524,14 @@ CountryModel<span class="keyword">*</span> country = [[CountryModel alloc] initW
       <ul>
         
           <li>
+            <a href="/2015/12/30/Refactor-Mega-ViewController/">重构你的ViewController</a>
+          </li>
+        
+          <li>
+            <a href="/2015/12/27/Learn-R-3/">Learn-R-3</a>
+          </li>
+        
+          <li>
             <a href="/2015/12/20/LLDB-2/">浅出浅出LLDB（2）</a>
           </li>
         
@@ -2215,14 +2541,6 @@ CountryModel<span class="keyword">*</span> country = [[CountryModel alloc] initW
         
           <li>
             <a href="/2015/12/15/Regression-Model-1/">Regression Model</a>
-          </li>
-        
-          <li>
-            <a href="/2015/12/13/Learn-R-1/">一步步学R（1）</a>
-          </li>
-        
-          <li>
-            <a href="/2015/12/11/LLDB-1/">浅入浅出LLDB（1）</a>
           </li>
         
       </ul>

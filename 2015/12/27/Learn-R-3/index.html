@@ -3,17 +3,33 @@
 <head>
   <meta charset="utf-8">
   
-  <title>Tag: Math | Hexo</title>
+  <title>Learn-R-3 | Hexo</title>
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
-  <meta name="description">
-<meta property="og:type" content="website">
-<meta property="og:title" content="Hexo">
-<meta property="og:url" content="http://satanwoo.github.io/tags/Math/index.html">
+  <meta name="description" content="系列连载一步步学R（1）一步步学R（2）
+Loop FunctionLoop Function是指不显示调用for循环的方式来进行一个集合的迭代。在R中，主要有以下几种Loop Function
+
+lapply 对于一个集合中的每个元素通过一个自定义的函数来进行处理，返回的结果一定是个list
+
+sapply 和lapply相同，但是对于结果会进行简化。如果返回的结果是个list，并且list里面">
+<meta property="og:type" content="article">
+<meta property="og:title" content="Learn-R-3">
+<meta property="og:url" content="http://satanwoo.github.io/2015/12/27/Learn-R-3/index.html">
 <meta property="og:site_name" content="Hexo">
-<meta property="og:description">
+<meta property="og:description" content="系列连载一步步学R（1）一步步学R（2）
+Loop FunctionLoop Function是指不显示调用for循环的方式来进行一个集合的迭代。在R中，主要有以下几种Loop Function
+
+lapply 对于一个集合中的每个元素通过一个自定义的函数来进行处理，返回的结果一定是个list
+
+sapply 和lapply相同，但是对于结果会进行简化。如果返回的结果是个list，并且list里面">
+<meta property="og:updated_time" content="2015-12-27T06:54:20.000Z">
 <meta name="twitter:card" content="summary">
-<meta name="twitter:title" content="Hexo">
-<meta name="twitter:description">
+<meta name="twitter:title" content="Learn-R-3">
+<meta name="twitter:description" content="系列连载一步步学R（1）一步步学R（2）
+Loop FunctionLoop Function是指不显示调用for循环的方式来进行一个集合的迭代。在R中，主要有以下几种Loop Function
+
+lapply 对于一个集合中的每个元素通过一个自定义的函数来进行处理，返回的结果一定是个list
+
+sapply 和lapply相同，但是对于结果会进行简化。如果返回的结果是个list，并且list里面">
   
     <link rel="alternative" href="/atom.xml" title="Hexo" type="application/atom+xml">
   
@@ -60,39 +76,92 @@
   </div>
 </header>
       <div class="outer">
-        <section id="main">
-  
-  
-    
-    
-      
-      
-      <section class="archives-wrap">
-        <div class="archive-year-wrap">
-          <a href="/archives/2015" class="archive-year">2015</a>
-        </div>
-        <div class="archives">
-    
-    <article class="archive-article archive-type-post">
-  <div class="archive-article-inner">
-    <header class="archive-article-header">
-      <a href="/2015/12/15/Regression-Model-1/" class="archive-article-date">
-  <time datetime="2015-12-14T16:31:35.000Z" itemprop="datePublished">Dec 15</time>
+        <section id="main"><article id="post-Learn-R-3" class="article article-type-post" itemscope itemprop="blogPost">
+  <div class="article-meta">
+    <a href="/2015/12/27/Learn-R-3/" class="article-date">
+  <time datetime="2015-12-26T17:15:17.000Z" itemprop="datePublished">2015-12-27</time>
 </a>
-      
+    
+  </div>
+  <div class="article-inner">
+    
+    
+      <header class="article-header">
+        
   
-    <h1 itemprop="name">
-      <a class="archive-article-title" href="/2015/12/15/Regression-Model-1/">Regression Model</a>
+    <h1 class="article-title" itemprop="name">
+      Learn-R-3
     </h1>
   
 
-    </header>
+      </header>
+    
+    <div class="article-entry" itemprop="articleBody">
+      
+        <h3 id="系列连载">系列连载</h3><p><a href="http://satanwoo.github.io/2015/12/13/Learn-R-1/">一步步学R（1）</a><br><a href="http://satanwoo.github.io/2015/12/20/Learn-R-2/">一步步学R（2）</a></p>
+<h3 id="Loop_Function">Loop Function</h3><p>Loop Function是指不<strong>显示</strong>调用<code>for</code>循环的方式来进行一个集合的迭代。<br>在R中，主要有以下几种Loop Function</p>
+<ul>
+<li><p>lapply 对于一个集合中的每个元素通过一个自定义的函数来进行处理，返回的结果<strong>一定是个<code>list</code></strong></p>
+</li>
+<li><p>sapply 和lapply相同，但是对于结果会进行简化。如果返回的结果是个list，并且list里面的元素长度都为<strong>1，那就直接合并成一个vector</strong>返回；而如果返回的list里的元素长度<strong>相同且都大于1，就合并成Matrix</strong>返回；如果不能正确合并，那就返回默认的list。</p>
+</li>
+<li><p>apply，</p>
+</li>
+<li>tapply，</li>
+<li>mapply，</li>
+</ul>
+
+      
+    </div>
+    <footer class="article-footer">
+      <a data-url="http://satanwoo.github.io/2015/12/27/Learn-R-3/" data-id="ciirmomw0000qmji1moapf42j" class="article-share-link">Share</a>
+      
+      
+    </footer>
   </div>
+  
+    
+<nav id="article-nav">
+  
+    <a href="/2015/12/30/Refactor-Mega-ViewController/" id="article-nav-newer" class="article-nav-link-wrap">
+      <strong class="article-nav-caption">Newer</strong>
+      <div class="article-nav-title">
+        
+          重构你的ViewController
+        
+      </div>
+    </a>
+  
+  
+    <a href="/2015/12/20/LLDB-2/" id="article-nav-older" class="article-nav-link-wrap">
+      <strong class="article-nav-caption">Older</strong>
+      <div class="article-nav-title">浅出浅出LLDB（2）</div>
+    </a>
+  
+</nav>
+
+  
 </article>
-  
-  
-    </div></section>
-  
+
+
+<section id="comments">
+  <!-- 多说评论框 start -->
+  <div class="ds-thread" data-thread-key="post-Learn-R-3" data-title="Learn-R-3" data-url="http://satanwoo.github.io/2015/12/27/Learn-R-3/"></div>
+  <!-- 多说评论框 end -->
+  <!-- 多说公共JS代码 start (一个网页只需插入一次) -->
+  <script type="text/javascript">
+  var duoshuoQuery = {short_name:'satanwoo'};
+    (function() {
+      var ds = document.createElement('script');
+      ds.type = 'text/javascript';ds.async = true;
+      ds.src = (document.location.protocol == 'https:' ? 'https:' : 'http:') + '//static.duoshuo.com/embed.js';
+      ds.charset = 'UTF-8';
+      (document.getElementsByTagName('head')[0] 
+       || document.getElementsByTagName('body')[0]).appendChild(ds);
+    })();
+    </script>
+  <!-- 多说公共JS代码 end -->
+</section>
 </section>
         
           <aside id="sidebar">

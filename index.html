@@ -62,6 +62,380 @@
       <div class="outer">
         <section id="main">
   
+    <article id="post-Refactor-Mega-ViewController" class="article article-type-post" itemscope itemprop="blogPost">
+  <div class="article-meta">
+    <a href="/2015/12/30/Refactor-Mega-ViewController/" class="article-date">
+  <time datetime="2015-12-29T16:37:56.000Z" itemprop="datePublished">2015-12-30</time>
+</a>
+    
+  </div>
+  <div class="article-inner">
+    
+    
+      <header class="article-header">
+        
+  
+    <h1 itemprop="name">
+      <a class="article-title" href="/2015/12/30/Refactor-Mega-ViewController/">重构你的ViewController</a>
+    </h1>
+  
+
+      </header>
+    
+    <div class="article-entry" itemprop="articleBody">
+      
+        <p>这篇文章来自阅读<a href="https://realm.io/news/andy-matuschak-refactor-mega-controller/" target="_blank" rel="external">Let’s Play: Refactor the Mega Controller!</a></p>
+<p>在该文中，作者阐述了如何使用Swift重构一个臭名昭著的Massive View Controller。从中，我们可以一窥Swift诸多优秀的特性以及如何利用这些特性将ViewController的职责进行解耦。</p>
+<p>但是作者由于时间有限，并没有讲述完全，因此本文是我阅读<a href="https://github.com/andymatuschak/refactor-the-mega-controller" target="_blank" rel="external">源码</a>后的理解。</p>
+<p><strong>建议大家在阅读本文之前，能够先去看看链接中的视频。</strong></p>
+<h3 id="Let’s_get_started">Let’s get started</h3><p>首先我们下载源码，可以看到如下文件：</p>
+<pre><code>-<span class="ruby"> <span class="constant">NavigationController</span>.swift
+</span>-<span class="ruby"> <span class="constant">ViewController</span>.swift
+</span>-<span class="ruby"> <span class="constant">AddViewController</span>.swift</span>
+</code></pre><p>其中，<code>ViewController.swift</code>是项目的核心，代码行数超过<strong>246</strong>行。在这里我要强调一下，并不是代码行数多不好，而是要看你这个职责是不是相关。如果246行都是在实现一个数据结构或者算法，当然可行。但是如果246行里面包含了逻辑业务、网络请求、数据持久化，那必然是可以分离一部分职责出去。</p>
+<p>在本文的<code>ViewController.swift</code>，这个类在初始状态下包含了<code>UITableViewDataSource</code>, <code>UITableViewDelegate</code>, <code>UIViewControllerTransitioningDelegate</code>, <code>UIViewControllerAnimatedTransitioning</code>, <code>NSFetchedResultsController</code>以及一系类跟UI显示相关的代码。</p>
+<h4 id="1-_干掉UINavigationBar相关的内容">1. 干掉UINavigationBar相关的内容</h4><p>作者在app中构建了可变化的NavigationBar，因此bar的样式是根据不同状态进行改变的。原来的逻辑整体写在了<code>ViewController.swift</code>中，如下所示：</p>
+<pre><code> func updateNavigationBar() {
+        <span class="keyword">switch</span> fetchedResultsController!<span class="variable">.fetchedObjects</span>!<span class="variable">.count</span> {
+        <span class="keyword">case</span> <span class="number">0.</span>.<span class="number">.3</span>:
+            navigationController!<span class="variable">.navigationBar</span><span class="variable">.barTintColor</span> = <span class="literal">nil</span>
+            navigationController!<span class="variable">.navigationBar</span><span class="variable">.titleTextAttributes</span> = <span class="literal">nil</span>
+            navigationController!<span class="variable">.navigationBar</span><span class="variable">.tintColor</span> = <span class="literal">nil</span>
+        <span class="keyword">case</span> <span class="number">4.</span>.<span class="number">.9</span>:
+            navigationController!<span class="variable">.navigationBar</span><span class="variable">.barTintColor</span> = <span class="built_in">UIColor</span>(red: <span class="number">235</span>/<span class="number">255</span>, green: <span class="number">156</span>/<span class="number">255</span>, blue: <span class="number">77</span>/<span class="number">255</span>, alpha: <span class="number">1.0</span>)
+            navigationController!<span class="variable">.navigationBar</span><span class="variable">.titleTextAttributes</span> = [<span class="built_in">NSForegroundColorAttributeName</span>: <span class="built_in">UIColor</span><span class="variable">.whiteColor</span>()]
+            navigationController!<span class="variable">.navigationBar</span><span class="variable">.tintColor</span> = <span class="built_in">UIColor</span><span class="variable">.whiteColor</span>()
+        <span class="keyword">default</span>:
+            navigationController!<span class="variable">.navigationBar</span><span class="variable">.barTintColor</span> = <span class="built_in">UIColor</span>(red: <span class="number">248</span>/<span class="number">255</span>, green: <span class="number">73</span>/<span class="number">255</span>, blue: <span class="number">68</span>/<span class="number">255</span>, alpha: <span class="number">1.0</span>)
+            navigationController!<span class="variable">.navigationBar</span><span class="variable">.titleTextAttributes</span> = [<span class="built_in">NSForegroundColorAttributeName</span>: <span class="built_in">UIColor</span><span class="variable">.whiteColor</span>()]
+            navigationController!<span class="variable">.navigationBar</span><span class="variable">.tintColor</span> = <span class="built_in">UIColor</span><span class="variable">.whiteColor</span>()
+        }
+    }
+
+override func preferredStatusBarStyle() -&gt; <span class="built_in">UIStatusBarStyle</span> {
+    <span class="keyword">switch</span> fetchedResultsController?<span class="variable">.fetchedObjects</span>!<span class="variable">.count</span> {
+    <span class="keyword">case</span> <span class="variable">.Some</span>(<span class="number">0.</span>.<span class="number">.3</span>), <span class="variable">.None</span>:
+        <span class="keyword">return</span> <span class="variable">.Default</span>
+    <span class="keyword">case</span> <span class="variable">.Some</span>(_):
+        <span class="keyword">return</span> <span class="variable">.LightContent</span>
+    }
+}
+</code></pre><p>同时，还在几个事件回调的地方，如Core Data的<code>controllerDidChange</code>，调用了<code>setNeedsStatusBarAppearanceUpdate()</code>。</p>
+<p>这个想法粗略想想并没什么问题，因为我们需要根据一系列的事件变化来改变我们的界面样式，这是很明显的业务逻辑。而我们都很清楚，ViewController就是用来写业务逻辑的地方。</p>
+<p>先抛开ViewController是否是应该写业务逻辑的地方这一个有待商榷的论点之外，我们先看看，我们可以如何重构现有代码。</p>
+<p><strong>首先</strong>，<code>updateNavigationBar</code>中多个case中的代码有了重复，因此我们可以将其重构成一个函数，接受三个关于样式的参数，如下：</p>
+<pre><code>func applyTheme(<span class="string">barTintColor:</span>newBarTintColor, <span class="string">tintColor:</span>newTintColor, <span class="string">titleTextAttributes:</span>newTextAttributes) {
+    barTintColor = <span class="string">barTintColor:</span>newBarTintColor
+    tintColor = <span class="string">tintColor:</span>newTintColor
+    titleTextAttributes = <span class="string">titleTextAttributes:</span>newTextAttributes
+}
+</code></pre><p>重构完函数以后，我们发现在多个样式中用到了switch case进行业务逻辑参数转换样式参数的过程。<strong>这说明什么，我们可以将转换逻辑和switch case一起通过Enum进行重构（这里说的东西都是基于你懂Enum）</strong></p>
+<pre><code><span class="keyword">enum</span> NavigationTheme {
+    <span class="keyword">case</span> Normal
+    <span class="keyword">case</span> Warning
+    <span class="keyword">case</span> Doomed
+
+    var statusBarStyle: <span class="built_in">UIStatusBarStyle</span> {
+        <span class="keyword">switch</span> <span class="keyword">self</span> {
+        <span class="keyword">case</span> <span class="variable">.Normal</span>: <span class="keyword">return</span> <span class="variable">.Default</span>
+        <span class="keyword">case</span> <span class="variable">.Warning</span>, <span class="variable">.Doomed</span>: <span class="keyword">return</span> <span class="variable">.LightContent</span>
+        }
+    }
+
+    var barTintColor: <span class="built_in">UIColor</span>? {
+        <span class="keyword">switch</span> <span class="keyword">self</span> {
+        <span class="keyword">case</span> <span class="variable">.Normal</span>:
+            <span class="keyword">return</span> <span class="literal">nil</span>
+        <span class="keyword">case</span> <span class="variable">.Warning</span>:
+            <span class="keyword">return</span> <span class="built_in">UIColor</span>(red: <span class="number">235</span>/<span class="number">255</span>, green: <span class="number">156</span>/<span class="number">255</span>, blue: <span class="number">77</span>/<span class="number">255</span>, alpha: <span class="number">1.0</span>)
+        <span class="keyword">case</span> <span class="variable">.Doomed</span>:
+            <span class="keyword">return</span> <span class="built_in">UIColor</span>(red: <span class="number">248</span>/<span class="number">255</span>, green: <span class="number">73</span>/<span class="number">255</span>, blue: <span class="number">68</span>/<span class="number">255</span>, alpha: <span class="number">1.0</span>)
+        }
+    }
+
+    var titleTextAttributes: [String: <span class="built_in">NSObject</span>]? {
+        <span class="keyword">switch</span> <span class="keyword">self</span> {
+        <span class="keyword">case</span> <span class="variable">.Normal</span>:
+            <span class="keyword">return</span> <span class="literal">nil</span>
+        <span class="keyword">case</span> <span class="variable">.Warning</span>, <span class="variable">.Doomed</span>:
+            <span class="keyword">return</span> [<span class="built_in">NSForegroundColorAttributeName</span>: <span class="built_in">UIColor</span><span class="variable">.whiteColor</span>()]
+        }
+    }
+
+    var tintColor: <span class="built_in">UIColor</span>? {
+        <span class="keyword">switch</span> <span class="keyword">self</span> {
+        <span class="keyword">case</span> <span class="variable">.Normal</span>:
+            <span class="keyword">return</span> <span class="literal">nil</span>
+        <span class="keyword">case</span> <span class="variable">.Warning</span>, <span class="variable">.Doomed</span>:
+            <span class="keyword">return</span> <span class="built_in">UIColor</span><span class="variable">.whiteColor</span>()
+        }
+    }
+}
+
+extension NavigationTheme {
+    init(numberOfImminentTasks: Int) {
+        <span class="keyword">switch</span> numberOfImminentTasks {
+        <span class="keyword">case</span> -Int<span class="variable">.max</span> ... <span class="number">3</span>:
+            <span class="keyword">self</span> = <span class="variable">.Normal</span>
+        <span class="keyword">case</span> <span class="number">4.</span>.<span class="number">.9</span>:
+            <span class="keyword">self</span> = <span class="variable">.Warning</span>
+        <span class="keyword">default</span>:
+            <span class="keyword">self</span> = <span class="variable">.Doomed</span>
+        }
+    }
+}    
+</code></pre><p>由于Enum在swift中是一等公民，因此可以可以在其中构建大量的<strong>Computed Properties</strong>，这些计算变量依赖于当前enum的状态。不仅如此，我们还将之前分散的三种样式，组合成了一个<strong>紧凑的结构体</strong>，大大简化了变量传输。</p>
+<p>重构结束后，我们在<code>Viewcontroller.swift</code>中设置一个计算变量<code>navigationTheme</code>，其的构造函数是之前的<code>fetchedResultsController?.fetchedObjects?.count</code>。</p>
+<p>最后是在相应的事件后触发更新UINavigationBar即可，在本文的视线中，是采用了closure的形式完成：</p>
+<pre><code>navigationThemeDidChangeHandler = { [<span class="keyword">weak</span> <span class="keyword">self</span>] theme <span class="keyword">in</span>
+            <span class="keyword">if</span> <span class="keyword">let</span> navigationController = <span class="keyword">self</span>?.navigationController {
+                navigationController.navigationBar.applyTheme(theme)
+                navigationController.statusBarStyle = theme.statusBarStyle
+            }
+        }
+</code></pre><h3 id="2-_干掉时间相关的转换逻辑">2. 干掉时间相关的转换逻辑</h3><p>相信很多人做app的时候遇到过，服务器返回的是一系列标准时间参数，而你需要将其转换成界面需要的生日、星座、年龄等等，这又是一大堆的业务逻辑。为了解决这种逻辑代码和ViewController的耦合，很多人提出了<code>ViewModel</code>，将部分弱业务逻辑代码剥离出来，单独写在一个地方。</p>
+<p><strong>但是，我需要强调一点，这种形式的剥离，并不能叫ViewModal，而是一个简单的adapter而已。</strong></p>
+<p>在本文中，列表Cell里面需要根据日期距离当前时间的差距显示成昨天、今天、明天等等。因此，其构建了一个单独的的DateFormatter，根据传入的两个Date进行转换，代码如下：</p>
+<pre><code><span class="class"><span class="keyword">struct</span> <span class="title">RelativeTimeDateFormatter</span> </span>{
+    <span class="keyword">let</span> calendar: <span class="type">NSCalendar</span>
+
+    <span class="keyword">init</span>(calendar: <span class="type">NSCalendar</span> = <span class="type">NSCalendar</span>.autoupdatingCurrentCalendar()) {
+        <span class="keyword">self</span>.calendar = calendar
+    }
+
+    <span class="func"><span class="keyword">func</span> <span class="title">stringForDate</span><span class="params">(date: NSDate, relativeToDate baseDate: NSDate)</span></span> -&gt; <span class="type">String</span> {
+        <span class="keyword">var</span> beginningOfDate: <span class="type">NSDate</span>? = <span class="literal">nil</span>
+        <span class="keyword">var</span> beginningOfBaseDate: <span class="type">NSDate</span>? = <span class="literal">nil</span>
+
+        calendar.rangeOfUnit(.<span class="type">Day</span>, startDate: &amp;beginningOfDate, interval: <span class="literal">nil</span>, forDate: date)
+        calendar.rangeOfUnit(.<span class="type">Day</span>, startDate: &amp;beginningOfBaseDate, interval: <span class="literal">nil</span>, forDate: baseDate)
+        <span class="keyword">let</span> numberOfCalendarDaysBetweenDates = calendar.components(<span class="type">NSCalendarUnit</span>.<span class="type">Day</span>, fromDate: beginningOfBaseDate!, toDate: beginningOfDate!, options: <span class="type">NSCalendarOptions</span>()).day
+
+        <span class="keyword">switch</span> numberOfCalendarDaysBetweenDates {
+        <span class="keyword">case</span> -<span class="type">Int</span>.<span class="built_in">max</span> ... -<span class="number">2</span>:
+            <span class="keyword">return</span> <span class="string">"<span class="subst">\(<span class="built_in">abs</span>(numberOfCalendarDaysBetweenDates)</span>) days ago"</span>
+        <span class="keyword">case</span> -<span class="number">1</span>:
+            <span class="keyword">return</span> <span class="string">"Yesterday"</span>
+        <span class="keyword">case</span> <span class="number">0</span>:
+            <span class="keyword">return</span> <span class="string">"Today"</span>
+        <span class="keyword">case</span> <span class="number">1</span>:
+            <span class="keyword">return</span> <span class="string">"Tomorrow"</span>
+        <span class="keyword">default</span>:
+            <span class="keyword">return</span> <span class="string">"In <span class="subst">\(numberOfCalendarDaysBetweenDates)</span> days"</span>
+        }
+    }
+}
+</code></pre><p><strong>这里需要注意的是，NSCalendar的初始化非常耗时，过去在Objective-C时代常常使用dispatch_once构建单例传输，在这里通过结构体中的成员变量维护了一份，作用是同样的。</strong></p>
+<h3 id="3-_干掉NSPredicate">3. 干掉NSPredicate</h3><p>对于NSPredicate，有些人可能还不熟悉，他就是类似于SQLite中的查询语句，只不过其应用范围是CoreData。咦，查询语句还能重构？</p>
+<p>其实在本文中，对于NSPredicate的使用只有原先这一句  <code>fetchRequest.predicate = NSPredicate(format: &quot;dueDate &lt;= %@&quot;, argumentArray: [NSCalendar.currentCalendar().dateByAddingUnit(.Day, value: 10, toDate: NSDate(), options: NSCalendarOptions())!])</code></p>
+<p>这段代码从重复性上来说是不需要重构的。但是，我们可以看到，在这里的构造参数里面，我们还是进行了一定的业务逻辑转换。所以，和DateFormatter一样，我们也可以将这部分所谓为的”弱业务逻辑”代码进行剥离：</p>
+<pre><code>extension NSPredicate {
+    convenience init(forTasksWithinNumberOfDays <span class="string">numberOfDays:</span> Int, ofDate <span class="string">date:</span> NSDate, <span class="string">calendar:</span> NSCalendar = NSCalendar.currentCalendar()) {
+        self.init(<span class="string">format:</span> <span class="string">"dueDate &lt;= %@"</span>, <span class="string">argumentArray:</span> [calendar.dateByAddingUnit(.Day, <span class="string">value:</span> numberOfDays, <span class="string">toDate:</span> date, <span class="string">options:</span> NSCalendarOptions())!])
+    }
+}
+</code></pre><p><strong>除了业务逻辑剥离之外，其实我们也可以看到，在这个NSPredicate的新构造参数，可以接受一个<code>calendar</code>，这对于测试用例编写的依赖注入是非常有好处的。</strong></p>
+<h3 id="4-_Core_Data_Stack">4. Core Data Stack</h3><p>用过Core Data的人都知道，Core Data的使用非常麻烦，需要配置大量的选项，照着苹果源码写的经历相信大家都有过，那恶心的200-300行配置代码，真是么么哒了。</p>
+<p><strong>但是，这几百行代码又是无法省略的</strong>，那该怎么办呢？</p>
+<p>一个比较好的解决方案就<code>Core Data Stack</code>    。意为将CoreData的初始化以及多个NSManagerObjectContext封装进<code>CoreDataStack</code> 维护。 </p>
+<p>在本文中，因为只是使用了一个主线程的NSManagerObjectContext，所以可能读者在阅读源码的时候可能觉得这个重构只是将CoreData配置从View剥离了。但是实际上，使用CoreDataStack可以做到更多，建议大家阅读Github上相关项目。</p>
+<h3 id="5-_干掉NSFetchedResultsControllerDelegate">5. 干掉NSFetchedResultsControllerDelegate</h3><p>NSFetchedResultsController大家可以简单理解为获取CoreData数据的一个中介层。根据传输进入的谓语NSPredicate进行查询，查询结束后通过相应的Delegate事件回调。</p>
+<p>在作者的代码中，作者通过构建<code>manager</code>的方式剥离了NSFetchedResultsController的职责，将NSFetchedResultsController的初始化、回调封装进了<code>UpcomingTaskDataManager.swift</code>中。</p>
+<p><strong>不过值得注意的一点是，尽管作者封装的NSFetchedResultsControllerDelegate的回调，但是为了让调用者可以自定义处理事件，实际上作者还是需要暴露一些的Delegate，当然，新的回调相对来说进行了一定的简化，同时在数据回调时经过了业务转化。</strong></p>
+<pre><code><span class="class"><span class="keyword">protocol</span> <span class="title">UpcomingTaskDataManagerDelegate</span> </span>{
+    <span class="func"><span class="keyword">func</span> <span class="title">dataManagerWillChangeContent</span><span class="params">(dataManager: UpcomingTaskDataManager)</span></span>
+    <span class="func"><span class="keyword">func</span> <span class="title">dataManagerDidChangeContent</span><span class="params">(dataManager: UpcomingTaskDataManager)</span></span>
+    <span class="func"><span class="keyword">func</span> <span class="title">dataManager</span><span class="params">(dataManager: UpcomingTaskDataManager, didInsertRowAtIndexPath indexPath: NSIndexPath)</span></span>
+    <span class="func"><span class="keyword">func</span> <span class="title">dataManager</span><span class="params">(dataManager: UpcomingTaskDataManager, didDeleteRowAtIndexPath indexPath: NSIndexPath)</span></span>
+}
+</code></pre><h3 id="6-_CoreDataModel_&lt;=&gt;_Model">6. CoreDataModel &lt;=&gt; Model</h3><p>这一步是将从Core Data中获取的NSManagedObject Model 转换成业务中使用的Model。为什么要这么做呢？原因有三个：  </p>
+<ul>
+<li>CoreData中的属性一更改，就会触发NSFetchedResultsController，这会很影响性能。</li>
+<li>CoreData中的属性存在很多bug</li>
+<li>NSManagedObject不是一个struct类型，很有可能<strong>误伤</strong></li>
+</ul>
+<pre>
+import CoreData  
+import Foundation
+
+struct Task: Equatable {
+    var id: String
+    var title: String
+    var dueDate: NSDate
+}
+
+func ==(lhs: Task, rhs: Task) -> Bool {
+    return lhs.id == rhs.id && lhs.title == rhs.title && lhs.dueDate == rhs.dueDate
+}
+
+extension Task {
+    init(managedTask: NSManagedObject) {
+        self.id = managedTask.valueForKey("id") as! String
+        self.title = managedTask.valueForKey("title") as! String
+        self.dueDate = managedTask.valueForKey("dueDate") as! NSDate
+    }
+}
+</pre>
+
+<p>作者用以上的Task类型替换了CoreData中的ManagedObject，可以有效的避免以上问题。</p>
+<h3 id="7-封装数据结构">7.封装数据结构</h3><p>在这一步里，我将作者自定义<code>TaskTableViewCell</code>和构建<code>AddCompletionSegue</code>合并到了一块说。</p>
+<p>这两步的重构，看似简单，但是其实也蕴含了一个思想：<strong>类型越确定，编程越容易，运行越安全</strong></p>
+<p>在原文的实现，一开始作者都是通过采用基础的数据结构UITableViewCell和UISegue。这样带来的坏处就是类型不明确导致的职责不明确。对于基础的数据结构，我们常常还要进行类型判断和转换，容易犯错。</p>
+<h3 id="8-干掉UITableViewDelegate和UITableViewDataSource">8.干掉UITableViewDelegate和UITableViewDataSource</h3><p>这一步想必大家都很熟悉了，微博上整天热传了<em>用ViewModel重构你的ViewController</em>经常提及的就是干掉UITableViewDelegate和UITableViewDataSource。</p>
+<p>那说了那么多，我们来看看究竟如何干掉它。</p>
+<p>毫无以为，我们首先要构建一个类型，来实现UITableViewDelegate和DataSource，如下所示：</p>
+<pre><code><span class="comment">// 1. </span>
+<span class="class"><span class="keyword">class</span> <span class="title">UpcomingTaskDataManagerTableViewAdapter</span>&lt;<span class="title">CellType</span>: <span class="title">UITableViewCell</span>&gt;: <span class="title">NSObject</span>, <span class="title">UITableViewDataSource</span>, <span class="title">UpcomingTaskDataManagerDelegate</span> </span>{
+    private <span class="keyword">let</span> tableView: <span class="type">UITableView</span>
+    private <span class="keyword">let</span> upcomingTaskDataManager: <span class="type">UpcomingTaskDataManager</span>
+    private <span class="keyword">let</span> cellReuseIdentifier: <span class="type">String</span>
+    private <span class="keyword">let</span> cellConfigurationHandler: (<span class="type">CellType</span>, <span class="type">Task</span>) -&gt; ()
+    private <span class="keyword">let</span> didChangeHandler: () -&gt; <span class="type">Void</span>
+
+<span class="comment">// .2</span>
+    <span class="keyword">init</span>(tableView: <span class="type">UITableView</span>, upcomingTaskDataManager: <span class="type">UpcomingTaskDataManager</span>, cellReuseIdentifier: <span class="type">String</span>, cellConfigurationHandler: (<span class="type">CellType</span>, <span class="type">Task</span>) -&gt; (), didChangeHandler: () -&gt; <span class="type">Void</span>) {
+        <span class="keyword">self</span>.tableView = tableView
+        <span class="keyword">self</span>.upcomingTaskDataManager = upcomingTaskDataManager
+        <span class="keyword">self</span>.cellReuseIdentifier = cellReuseIdentifier
+        <span class="keyword">self</span>.cellConfigurationHandler = cellConfigurationHandler
+        <span class="keyword">self</span>.didChangeHandler = didChangeHandler
+
+        <span class="keyword">super</span>.<span class="keyword">init</span>()
+    }
+
+<span class="comment">// 3.</span>
+    <span class="func"><span class="keyword">func</span> <span class="title">tableView</span><span class="params">(tableView: UITableView, commitEditingStyle editingStyle: UITableViewCellEditingStyle, forRowAtIndexPath indexPath: NSIndexPath)</span></span> {
+        upcomingTaskDataManager.deleteTask(upcomingTaskDataManager.taskSections[indexPath.section].items[indexPath.row])
+    }
+
+    <span class="func"><span class="keyword">func</span> <span class="title">numberOfSectionsInTableView</span><span class="params">(tableView: UITableView)</span></span> -&gt; <span class="type">Int</span> {
+        <span class="keyword">return</span> upcomingTaskDataManager.taskSections.<span class="built_in">count</span>
+    }
+
+    <span class="func"><span class="keyword">func</span> <span class="title">tableView</span><span class="params">(tableView: UITableView, titleForHeaderInSection section: Int)</span></span> -&gt; <span class="type">String</span>? {
+        <span class="keyword">return</span> upcomingTaskDataManager.taskSections[section].title
+    }
+
+    <span class="func"><span class="keyword">func</span> <span class="title">tableView</span><span class="params">(tableView: UITableView, numberOfRowsInSection section: Int)</span></span> -&gt; <span class="type">Int</span> {
+        <span class="keyword">return</span> upcomingTaskDataManager.taskSections[section].items.<span class="built_in">count</span>
+    }
+
+    <span class="func"><span class="keyword">func</span> <span class="title">tableView</span><span class="params">(tableView: UITableView, cellForRowAtIndexPath indexPath: NSIndexPath)</span></span> -&gt; <span class="type">UITableViewCell</span> {
+        <span class="keyword">let</span> task = upcomingTaskDataManager.taskSections[indexPath.section].items[indexPath.row]
+        <span class="keyword">let</span> cell = tableView.dequeueReusableCellWithIdentifier(cellReuseIdentifier, forIndexPath: indexPath) <span class="keyword">as</span>! <span class="type">CellType</span>
+        cellConfigurationHandler(cell, task)
+        <span class="keyword">return</span> cell
+    }
+</code></pre><ol>
+<li>这个<code>UpcomingTaskDataManagerTableViewAdapter</code>通过传入一个CellType支持泛型。  </li>
+<li>通过接受几个closure来进行自定义的配置，包括cell的样式配置以及tableview数据更新后的回调。  </li>
+<li>实现的UITableViewDataSource</li>
+</ol>
+<p>同样，由于职责的重新分配，我们要将跟<code>TaskManager</code>（包括NSFetchedResultsController）相关的划入到这个adapter中。</p>
+<h3 id="大结局">大结局</h3><p>最后重构后的ViewController，只有<strong>37</strong>代码，效果如下：</p>
+<pre><code><span class="class"><span class="keyword">class</span> <span class="title">ViewController</span>: <span class="title">UITableViewController</span> </span>{
+    <span class="keyword">var</span> navigationThemeDidChangeHandler: ((<span class="type">NavigationTheme</span>) -&gt; <span class="type">Void</span>)?
+    <span class="keyword">var</span> navigationTheme: <span class="type">NavigationTheme</span> {
+        <span class="keyword">return</span> <span class="type">NavigationTheme</span>(numberOfImminentTasks: upcomingTaskDataManager.totalNumberOfTasks)
+    }
+
+    private <span class="keyword">let</span> upcomingTaskDataManager = <span class="type">UpcomingTaskDataManager</span>()
+    private <span class="keyword">var</span> upcomingTaskDataManagerTableViewAdapter: <span class="type">UpcomingTaskDataManagerTableViewAdapter</span>&lt;<span class="type">TaskTableViewCell</span>&gt;!
+
+    <span class="keyword">override</span> <span class="func"><span class="keyword">func</span> <span class="title">viewDidLoad</span><span class="params">()</span></span> {
+        <span class="keyword">super</span>.viewDidLoad()
+
+        upcomingTaskDataManagerTableViewAdapter = <span class="type">UpcomingTaskDataManagerTableViewAdapter</span>(
+            tableView: tableView,
+            upcomingTaskDataManager: upcomingTaskDataManager,
+            cellReuseIdentifier: <span class="string">"Cell"</span>,
+            cellConfigurationHandler: { cell, task <span class="keyword">in</span>
+                cell.viewData = <span class="type">TaskTableViewCell</span>.<span class="type">ViewData</span>(task: task, relativeToDate: <span class="type">NSDate</span>())
+            },
+            didChangeHandler: { [<span class="keyword">weak</span> <span class="keyword">self</span>] <span class="keyword">in</span> <span class="keyword">self</span>?.updateNavigationBar() }
+        )
+        upcomingTaskDataManager.delegate = upcomingTaskDataManagerTableViewAdapter
+        tableView.dataSource = upcomingTaskDataManagerTableViewAdapter
+
+        updateNavigationBar()
+    }
+
+    <span class="keyword">override</span> <span class="func"><span class="keyword">func</span> <span class="title">tableView</span><span class="params">(tableView: UITableView, canEditRowAtIndexPath indexPath: NSIndexPath)</span></span> -&gt; <span class="type">Bool</span> {
+        <span class="keyword">return</span> <span class="literal">true</span>
+    }
+
+    <span class="func"><span class="keyword">func</span> <span class="title">updateNavigationBar</span><span class="params">()</span></span> {
+        navigationThemeDidChangeHandler?(navigationTheme)
+    }
+
+    <span class="preprocessor">@IBAction</span> <span class="func"><span class="keyword">func</span> <span class="title">unwindFromAddController</span><span class="params">(segue: AddCompletionSegue)</span></span> {
+        upcomingTaskDataManager.createTaskWithTitle(segue.taskTitle, dueDate: segue.taskDueDate)
+    }
+}
+</code></pre>
+      
+    </div>
+    <footer class="article-footer">
+      <a data-url="http://satanwoo.github.io/2015/12/30/Refactor-Mega-ViewController/" data-id="ciirmomvq000mmji1i0wttm7p" class="article-share-link">Share</a>
+      
+      
+  <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
+
+    </footer>
+  </div>
+  
+</article>
+
+
+  
+    <article id="post-Learn-R-3" class="article article-type-post" itemscope itemprop="blogPost">
+  <div class="article-meta">
+    <a href="/2015/12/27/Learn-R-3/" class="article-date">
+  <time datetime="2015-12-26T17:15:17.000Z" itemprop="datePublished">2015-12-27</time>
+</a>
+    
+  </div>
+  <div class="article-inner">
+    
+    
+      <header class="article-header">
+        
+  
+    <h1 itemprop="name">
+      <a class="article-title" href="/2015/12/27/Learn-R-3/">Learn-R-3</a>
+    </h1>
+  
+
+      </header>
+    
+    <div class="article-entry" itemprop="articleBody">
+      
+        <h3 id="系列连载">系列连载</h3><p><a href="http://satanwoo.github.io/2015/12/13/Learn-R-1/">一步步学R（1）</a><br><a href="http://satanwoo.github.io/2015/12/20/Learn-R-2/">一步步学R（2）</a></p>
+<h3 id="Loop_Function">Loop Function</h3><p>Loop Function是指不<strong>显示</strong>调用<code>for</code>循环的方式来进行一个集合的迭代。<br>在R中，主要有以下几种Loop Function</p>
+<ul>
+<li><p>lapply 对于一个集合中的每个元素通过一个自定义的函数来进行处理，返回的结果<strong>一定是个<code>list</code></strong></p>
+</li>
+<li><p>sapply 和lapply相同，但是对于结果会进行简化。如果返回的结果是个list，并且list里面的元素长度都为<strong>1，那就直接合并成一个vector</strong>返回；而如果返回的list里的元素长度<strong>相同且都大于1，就合并成Matrix</strong>返回；如果不能正确合并，那就返回默认的list。</p>
+</li>
+<li><p>apply，</p>
+</li>
+<li>tapply，</li>
+<li>mapply，</li>
+</ul>
+
+      
+    </div>
+    <footer class="article-footer">
+      <a data-url="http://satanwoo.github.io/2015/12/27/Learn-R-3/" data-id="ciirmomw0000qmji1moapf42j" class="article-share-link">Share</a>
+      
+      
+    </footer>
+  </div>
+  
+</article>
+
+
+  
     <article id="post-LLDB-2" class="article article-type-post" itemscope itemprop="blogPost">
   <div class="article-meta">
     <a href="/2015/12/20/LLDB-2/" class="article-date">
@@ -92,7 +466,7 @@
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/12/20/LLDB-2/" data-id="ciinda3vn000wmki1kn69vj7w" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/12/20/LLDB-2/" data-id="ciirmomwb000zmji1pvi938zt" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
@@ -243,7 +617,7 @@
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/12/20/Learn-R-2/" data-id="ciinda3vd000omki1lnos6h2h" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/12/20/Learn-R-2/" data-id="ciirmomw3000rmji15w8tnrfh" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/R/">R</a></li></ul>
@@ -297,7 +671,7 @@
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/12/15/Regression-Model-1/" data-id="ciinda3v5000jmki1rpbqptq7" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/12/15/Regression-Model-1/" data-id="ciirmomvl000jmji1mm4a22v9" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Math/">Math</a></li></ul>
@@ -440,7 +814,7 @@ $foo
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/12/13/Learn-R-1/" data-id="ciinda3vg000rmki19fw2gxag" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/12/13/Learn-R-1/" data-id="ciirmomw6000umji1r8wxhwhm" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/R/">R</a></li></ul>
@@ -546,7 +920,7 @@ frame <span class="preprocessor">#<span class="number">20</span>: libdyld.dylib`
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/12/11/LLDB-1/" data-id="ciinda3vq000ymki1itcvgkdn" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/12/11/LLDB-1/" data-id="ciirmomwd0011mji1vqenf959" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
@@ -845,7 +1219,7 @@ TBBoundingBox TBBoundingBoxMake(<span class="built_in">double</span> x0, <span c
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/12/11/TBAnnotationClustering/" data-id="ciinda3uw000amki1gc9o3qko" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/12/11/TBAnnotationClustering/" data-id="ciirmomva000amji1vtrltebw" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
@@ -1070,7 +1444,7 @@ BOOL success = class_addMethod(<span class="keyword">class</span>, originalSelec
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/11/26/FDFullScreenPopGesture-Source-Code/" data-id="ciinda3vx0014mki1p9ekr0ob" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/11/26/FDFullScreenPopGesture-Source-Code/" data-id="ciirmomwk0017mji11l2jyj1t" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
@@ -1180,376 +1554,10 @@ replicationLayer.instanceDelay = <span class="number">0.3</span>
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/11/17/Fun-of-CAReplicationLayer/" data-id="ciinda3vu0012mki1a9f99pj7" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/11/17/Fun-of-CAReplicationLayer/" data-id="ciirmomwi0015mji1x0khi061" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Swift/">Swift</a></li></ul>
-
-    </footer>
-  </div>
-  
-</article>
-
-
-  
-    <article id="post-Swift-UITransition-iOS8" class="article article-type-post" itemscope itemprop="blogPost">
-  <div class="article-meta">
-    <a href="/2015/11/12/Swift-UITransition-iOS8/" class="article-date">
-  <time datetime="2015-11-11T18:33:50.000Z" itemprop="datePublished">2015-11-12</time>
-</a>
-    
-  </div>
-  <div class="article-inner">
-    
-    
-      <header class="article-header">
-        
-  
-    <h1 itemprop="name">
-      <a class="article-title" href="/2015/11/12/Swift-UITransition-iOS8/">Swift每日一练：自定义转场在iOS8中的那些坑</a>
-    </h1>
-  
-
-      </header>
-    
-    <div class="article-entry" itemprop="articleBody">
-      
-        <p>之前因为面试的缘故发现了自己在自定义转场这块有点欠缺，今天拿Swift练下手，实现一个自定义转场的效果。<em>没耐心的话请直接翻到最后吧，我前面都是铺垫呢。</em></p>
-<p>首先让我们先来看看最后实现的效果：<br><img src="http://7lrzqz.com1.z0.glb.clouddn.com/WZCustomTransition.gif"></p>
-<p>下面就让我们一步步来看看是如何实现这个效果的。</p>
-<h3 id="自定义转场">自定义转场</h3><p>要实现自定义转场动画，比较重要的就是三个部分。</p>
-<ul>
-<li><p>UIViewControllerContextTransition</p>
-<p>这个接口主要用来提供切换上下文给开发者使用，包含了从哪个VC到哪个VC等各类信息，一般不需要开发者自己实现。</p>
-<p>本文关注的包含了如下一些内容：</p>
-<pre><code><span class="number">1.</span> - (<span class="built_in">UIView</span> *)containerView; 
-<span class="comment">// VC切换所发生的view容器    </span>
-
-<span class="number">2.</span> - (<span class="built_in">UIViewController</span> *)viewControllerForKey:(<span class="built_in">NSString</span> *)key;
-<span class="comment">// 根据UITransitionContextFromViewControllerKey和UITransitionContextToViewControllerKey两种，分别返回将要切出和切入的ViewController。</span>
-
-<span class="number">3.</span> - (<span class="keyword">void</span>)completeTransition:(<span class="built_in">BOOL</span>)didComplete; 
-<span class="comment">// 报告切换已经完成。</span>
-</code></pre></li>
-<li><p>UIViewControllerAnimatedTransition</p>
-<p>这个接口主要用来定义如何完成转场动画，同时定义转场动画的持续时间。（在本文中我们不考虑交互式的转场）</p>
-<pre><code><span class="number">1.</span> - (<span class="built_in">NSTimeInterval</span>)transitionDuration:(<span class="keyword">id</span> &lt; <span class="built_in">UIViewControllerContextTransitioning</span> &gt;)transitionContext; 
-<span class="comment">// 返回转场动画持续的时间</span>
-
-<span class="number">2.</span> - (<span class="keyword">void</span>)animateTransition:(<span class="keyword">id</span> &lt; <span class="built_in">UIViewControllerContextTransitioning</span> &gt;)transitionContext; 
-<span class="comment">// 我们自定义的转场要在这里完成</span>
-</code></pre></li>
-<li><p>UIViewControllerTransitionDelegate    </p>
-<p>这个接口主要用于指定，我们希望采用哪种转场效果（比如你可以根据不同的状态，切换不同的自定义专场效果）</p>
-<pre><code><span class="number">1.</span> - (<span class="keyword">id</span>&lt; <span class="built_in">UIViewControllerAnimatedTransitioning</span> &gt;)animationControllerForPresentedController:(<span class="built_in">UIViewController</span> *)presented presentingController:(<span class="built_in">UIViewController</span> *)presenting sourceController:(<span class="built_in">UIViewController</span> *)source;
-<span class="comment">// 当弹出模态窗口的时候，使用什么转场效果</span>
-
-<span class="number">2.</span> - (<span class="keyword">id</span>&lt; <span class="built_in">UIViewControllerAnimatedTransitioning</span> &gt;)animationControllerForDismissedController:(<span class="built_in">UIViewController</span> *)dismissed;
-<span class="comment">// 当关闭模态窗口的时候，使用什么转场效果</span>
-</code></pre></li>
-</ul>
-<h3 id="实现">实现</h3><p>知道了转场动画需要的必要条件，我们可以很轻松分别实现三个部分。</p>
-<p>第一部分UIViewControllerContextTransition在本文中并没有特殊定制化的地方，直接完成。</p>
-<p>第二部分关于UIViewControllerAnimatedTransition的代码如下：</p>
-<pre><code>class SwipeAnimator: <span class="built_in">NSObject</span>, <span class="built_in">UIViewControllerAnimatedTransitioning</span> {
-    <span class="keyword">enum</span> SwipeTo {
-        <span class="keyword">case</span> Main
-        <span class="keyword">case</span> Modal
-    };
-
-    var transitonTo:SwipeTo = <span class="variable">.Main</span>
-
-    <span class="comment">// 0. 返回动画时间</span>
-    func transitionDuration(transitionContext: <span class="built_in">UIViewControllerContextTransitioning</span>) -&gt; <span class="built_in">NSTimeInterval</span> {
-        <span class="keyword">return</span> <span class="number">1.0</span>
-    }
-
-    func animateTransition(transitionContext: <span class="built_in">UIViewControllerContextTransitioning</span>) {
-        <span class="comment">// 1. 获取相关资源</span>
-        let fromVC = transitionContext<span class="variable">.viewControllerForKey</span>(<span class="built_in">UITransitionContextFromViewControllerKey</span>)!
-
-        let toView = transitionContext<span class="variable">.viewForKey</span>(<span class="built_in">UITransitionContextToViewKey</span>)
-
-        <span class="comment">// 2. 弹出模态</span>
-        <span class="keyword">if</span> (<span class="keyword">self</span><span class="variable">.transitonTo</span> == <span class="variable">.Modal</span>) {
-            <span class="keyword">if</span> toView != <span class="literal">nil</span> {
-                transitionContext<span class="variable">.containerView</span>()<span class="variable">.addSubview</span>(toView!)
-
-                toView!<span class="variable">.alpha</span> = <span class="number">0.0</span>
-
-                <span class="comment">// 2.1 以左上角为锚点旋转</span>
-                fromVC<span class="variable">.view</span><span class="variable">.layer</span><span class="variable">.anchorPoint</span> = <span class="built_in">CGPoint</span>(x: <span class="number">0</span>, y: <span class="number">0</span>)
-                fromVC<span class="variable">.view</span><span class="variable">.layer</span><span class="variable">.position</span> = <span class="built_in">CGPointMake</span>(<span class="number">0</span>, <span class="number">0</span>)
-
-                <span class="built_in">UIView</span><span class="variable">.animateWithDuration</span>(<span class="number">1.0</span>, animations: { () -&gt; Void <span class="keyword">in</span>
-                    fromVC<span class="variable">.view</span><span class="variable">.transform</span> = <span class="built_in">CGAffineTransformMakeRotation</span>(<span class="built_in">CGFloat</span>(-M_PI/<span class="number">2</span>))
-                    toView!<span class="variable">.alpha</span> = <span class="number">1.0</span>
-                }, completion: { (completion:Bool) -&gt; Void <span class="keyword">in</span>
-                    <span class="comment">// 2.2 报告转场动画完成</span>
-                    transitionContext<span class="variable">.completeTransition</span>(!transitionContext<span class="variable">.transitionWasCancelled</span>())
-                })
-            }
-        } <span class="keyword">else</span> {
-            <span class="comment">// 3. 关闭模态</span>
-            <span class="keyword">if</span> fromView != <span class="literal">nil</span> {
-                fromView!<span class="variable">.alpha</span> = <span class="number">1.0</span>
-                <span class="built_in">UIView</span><span class="variable">.animateWithDuration</span>(<span class="number">1.0</span>, animations: { () -&gt; Void <span class="keyword">in</span>
-                    toVC<span class="variable">.view</span><span class="variable">.transform</span> = <span class="built_in">CGAffineTransformMakeRotation</span>(<span class="number">0</span>)
-                    fromView!<span class="variable">.alpha</span> = <span class="number">0.0</span>
-                }, completion: { (completion:Bool) -&gt; Void <span class="keyword">in</span>
-                    transitionContext<span class="variable">.completeTransition</span>(!transitionContext<span class="variable">.transitionWasCancelled</span>())
-                })
-            }
-        }
-    }
-}
-</code></pre><p>实现非常简单，我们来一步步看下。</p>
-<ul>
-<li><ol>
-<li>根据UIViewControllerAnimatedTransition协议返回动画时间</li>
-</ol>
-</li>
-<li><ol>
-<li>根据UIViewControllerContextTransition获取我们需要操作的即将切出的ViewController(fromVC)以及即将切入的页面(toView)，<strong>为什么要用这种获取方式，稍微在重点分析会指出</strong></li>
-</ol>
-</li>
-<li><ol>
-<li>当遇到是弹出模态窗口转场的时候，我们首先将toView加入到转场过程提供的一个containView中，然后改变fromVC的锚点，进行旋转，同时我们对toView进行了一个淡入淡出。当转场动画完成以后，<strong>在回调的closure中报告转场动画已经完成</strong>。</li>
-</ol>
-</li>
-<li><ol>
-<li>当关闭模态转场的时候，这个时候转场的出和入就正好和弹出的时候截然相反。原先的fromVC成了现在的toVC，因此我们在这里将toVC旋转回原来的位置。当然别忘了我们的淡入淡出啦，原理是一样的，只要改变fromView的alpha即可。动画完成后，依然要报告我们的转场完成了。</li>
-</ol>
-</li>
-</ul>
-<p>第三部分，UIViewControllerTransitionDelegate的实现依然非常简单，我们仅仅需要告知转场发生时，我们具体要采用哪种转场效果就好了。</p>
-<pre><code><span class="func"><span class="keyword">func</span> <span class="title">animationControllerForPresentedController</span><span class="params">(presented: UIViewController, presentingController presenting: UIViewController, sourceController source: UIViewController)</span></span> -&gt; <span class="type">UIViewControllerAnimatedTransitioning</span>? {
-    <span class="keyword">self</span>.animator.transitonTo = .<span class="type">Modal</span>
-    <span class="keyword">return</span> <span class="keyword">self</span>.animator
-}
-
-<span class="func"><span class="keyword">func</span> <span class="title">animationControllerForDismissedController</span><span class="params">(dismissed: UIViewController)</span></span> -&gt; <span class="type">UIViewControllerAnimatedTransitioning</span>? {
-    <span class="keyword">self</span>.animator.transitonTo = .<span class="type">Main</span>
-    <span class="keyword">return</span> <span class="keyword">self</span>.animator
-}
-</code></pre><p>在这里，我们复用了同一个转场效果，通过不同的transitionTo参数进行控制。你当然也可以给两个转场分别生成对应不同的转场效果。</p>
-<h3 id="iOS8的坑">iOS8的坑</h3><p>嘿嘿，重头戏来了，千万别错过。</p>
-<p>一开始实现这个转场效果的时候，压根没想到这么复杂，但是，突然发现了一个很大的问题：</p>
-<p><strong>当弹出模态窗口的时候，转场效果正常，最后成功显示模态界面。但是当关闭模态窗口的时候，转场效果依然正确，但是转场结束后，整个屏幕都黑了。</strong></p>
-<p><em>What the F*ck!!!</em></p>
-<p>我以为是我自己实现有问题，但是我去Github上找了几个著名的转场效果跑了下，都存在这个问题，那我就百思不得其解了呀！！！</p>
-<h4 id="误打误撞">误打误撞</h4><p>从网上搜寻了很久之后，我还是没有头绪，于是我首先尝试将如下代码中</p>
-<pre><code><span class="tag">var</span> modalVC = <span class="function"><span class="title">UIStoryboard</span><span class="params">(name: <span class="string">"Main"</span>, bundle: nil)</span></span>.<span class="function"><span class="title">instantiateViewControllerWithIdentifier</span><span class="params">(<span class="string">"ModalViewController"</span>)</span></span> as! UIViewController
-modalVC<span class="class">.transitioningDelegate</span> = self
-modalVC<span class="class">.modalPresentationStyle</span> = <span class="class">.Custom</span>
-<span class="function"><span class="title">presentViewController</span><span class="params">(modalVC, animated: true, completion: nil)</span></span>
-</code></pre><p><strong>modalVC.modalPresentationStyle = .Custom</strong>中的.Custom改成了.FullScreen。<br>这一下子就给我整好了！</p>
-<p>所以，给大家提个醒，如果遇到相似的问题，解决方法很简单，就是.FullScreen即可。</p>
-<h4 id="深层原因">深层原因</h4><p>作为一个站在红旗下的三好学生，弄懂问题的深层原因才是最主要的，通过不过的debug，我终于弄懂了。</p>
-<p><strong>首先，我们要强调一个基本知识。一个UIView的superview最多只能由一个。当一个本身处于别的UIView下的subView被添加到另一个UIView上的时候，它就自动被从前一个UIView的Hierarchy中移除了。</strong></p>
-<p>还记得我们之前一个很奇怪的写法吗？<br>根据UIViewControllerContextTransition获取我们需要操作的即将切出的ViewController(fromVC)以及即将切入的页面(toView)</p>
-<p>我们这么写的原因就是因为我们刚刚强调的基本知识，别急，让我们一步步来解析。</p>
-<p>在iOS8中，苹果提供了一个新的API：</p>
-<pre><code><span class="constant">@availability</span>(iOS, introduced=<span class="number">8.0</span>)
-<span class="function"><span class="keyword">func</span> <span class="title">viewForKey</span><span class="params">(key: String)</span> -&gt; <span class="title">UIView</span>?</span>
-</code></pre><p>并且在文档中明确强调了一点：</p>
-<pre><code><span class="comment">// Currently only two keys are defined by the</span>
-<span class="comment">// system - UITransitionContextToViewControllerKey, and</span>
-<span class="comment">// UITransitionContextFromViewControllerKey. </span>
-<span class="comment">// Animators should not directly manipulate a view controller's views and should</span>
-<span class="comment">// use viewForKey: to get views instead.</span>
-<span class="func"><span class="keyword">func</span> <span class="title">viewControllerForKey</span><span class="params">(key: String)</span></span> -&gt; <span class="type">UIViewController</span>?
-</code></pre><p>什么意思呢？<br>之前在iOS7中，开发者需要通过<strong>viewControllerForKey</strong>这个方法获取切入切出的ViewController，并直接操作ViewController对应的View来编写转场动画。而在iOS8以后，苹果规定必须使用<strong>viewForKey</strong>来获取fromView和toView来进行转场动画的操作。</p>
-<p>那这个API的更改和黑屏有什么关联呢？</p>
-<ul>
-<li>在整个转场过程中，我们都依赖于转场上下文transitonContext提供的containerView容器进行view动画的操作。这是因为在转场完成前，即将<strong>切入</strong>的viewcontroller都不存在于当前的可视界面的视图层级内(View Hierarchy)。因此，苹果提供了一个过渡的容器给我们使用（如果大家debug下的话，就会发现在转场过程之中，UIWindow上多了一个UITransitionView，就是切换上下文的containerView）。</li>
-<li>在iOS7的实现中，我们需要将fromVC.view和toVC.view都通过addSubView的方式添加到容器View上进行动画展示。<strong>由于是直接操作了ViewController的view，因此，fromVC的view会被从当前的视图层级中移除</strong></li>
-<li><strong>但是，iOS7中，会在转场动画完成后，自动将fromVC的view添加回原先fromVC从属的父视图中</strong></li>
-<li>iOS8中不会</li>
-<li>在本文的初版实现中，在转场过程中当判断transitionTo == .Main的时候，将此时toViewController.view (也就是原先的主窗口) 添加到了containerView上。因此，当转场结束的时候，containerView从window可见视图层级中移除了，因此就变得不可见，从而变成黑屏了。</li>
-</ul>
-<p>那么为什么模态窗口在转场过程后可见呢？</p>
-<ul>
-<li>因为这个特性依然正确。</li>
-</ul>
-<p>containerView到底是啥?</p>
-<ul>
-<li>就是一个过渡的UITransitionView，一个转场效果对应生成一个（会复用）。</li>
-<li>在转场结束后自动从视图层级中移除，因此不需要大家手动进行removeFromSuperView。</li>
-</ul>
-<p>那么viewForKey和viewControlelrForKey直接操纵view的区别呢？</p>
-<ul>
-<li>viewForKey很可能返回的是一个完全克隆VC的view的对象。</li>
-</ul>
-<p>到这，相信大家都弄懂了吧，我真是太佩服我自己了。</p>
-
-      
-    </div>
-    <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/11/12/Swift-UITransition-iOS8/" data-id="ciinda3uy000cmki12k50u9y7" class="article-share-link">Share</a>
-      
-      
-  <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Swift/">Swift</a></li></ul>
-
-    </footer>
-  </div>
-  
-</article>
-
-
-  
-    <article id="post-Understand-Viper" class="article article-type-post" itemscope itemprop="blogPost">
-  <div class="article-meta">
-    <a href="/2015/11/05/Understand-Viper/" class="article-date">
-  <time datetime="2015-11-04T17:01:51.000Z" itemprop="datePublished">2015-11-05</time>
-</a>
-    
-  </div>
-  <div class="article-inner">
-    
-    
-      <header class="article-header">
-        
-  
-    <h1 itemprop="name">
-      <a class="article-title" href="/2015/11/05/Understand-Viper/">浅入浅出VIPER设计架构(1)</a>
-    </h1>
-  
-
-      </header>
-    
-    <div class="article-entry" itemprop="articleBody">
-      
-        <p>之前和豌豆荚的同学聊天，发现他们的App从MVVM切换到VIPER设计架构，于是这两天花了点时间研读了一下 相关资料，浅谈一下。</p>
-<h3 id="VIPER是什么">VIPER是什么</h3><p>VIPER是<b>View, Interactor, Presenter, Entity, Routing</b>5个词语的缩写，这5个词语也是VIPER架构的核心。</p>
-<p>View - 视图，接收传递的内容，然后进行内容展示。</p>
-<p>Presenter - 视图逻辑控制器，这个模块只用来执行和UI相关的逻辑。什么叫和UI相关的逻辑呢？比如：接收用户交互、将展示的内容分发给不同的UI界面进行展示。</p>
-<p>Interactor - <b>纯业务逻辑控制器</b>，这个模块完全脱离于UI，只用来做业务相关的逻辑控制。举例来说，比如下载逻辑、计算逻辑等等可以划分为单一Use Case的逻辑。</p>
-<p>Entity - 基础的数据模型，比方说大家经常定义的XXXModel之类的，但是，这里的XXXModel可以认为基本就是<b>纯数据结构了</b>，不包含轻量级业务处理逻辑</p>
-<p>Routing - 路由器，视图切换的逻辑。比如包含如何从一个界面切换到另一个界面，切换的顺序是如何等等。</p>
-<p>除了五大核心之外，我们还经常使用了<strong>Data Store</strong>这个模块。因为我们之前提过，我们的Entity基本就是纯数据结构，不包含轻量级的业务逻辑，因此，Entity进行持久化这个职责是要单独划分出来，而这个职能就落到了Data Store身上。</p>
-<p>下面是网上一张比较经典的架构设计图：</p>
-<p><img src="https://www.objc.io/images/issue-13/2014-06-07-viper-wireframe-76305b6d.png"></p>
-<h3 id="为什么要用VIPER">为什么要用VIPER</h3><p><strong>在软件工程领域，有一个很重要的观点，就是测试、测试、测试。（重要的话说三遍！）</strong></p>
-<p>之前在BMW Group实习的时候从事Java开发，每一个函数都要经过JUnit的测试，也就是我们所谓的Test-Driven Development。但是iOS开发由于其逻辑和视图的强耦合关系，常常导致业务逻辑不能完全独立于界面，进行单元测试十分困难。比如，臭名昭著的”Massive View Controller” 就是因为将大量的业务逻辑和视图逻辑耦合进了Controller，导致Controller非常臃肿，也不容易剥离进行测试。</p>
-<p>而VIPER架构引入了Interactor和Presentator两个概念，将业务逻辑和视图逻辑独立开来，从而可以单独测试业务逻辑的代码。</p>
-<h3 id="例子分析">例子分析</h3><p>说了好多虚的概念，有些人一定已经被弄晕了，还是赶紧看两个典型的例子看深入了解下吧.</p>
-<h4 id="1-_Counter">1. Counter</h4><p>第一个例子来源于<a href="https://github.com/mutualmobile/Counter" target="_blank" rel="external">Counter</a>，是一个非常简单了计数应用。麻雀虽小，却五脏俱全。</p>
-<p>打开项目，我们可以快速的过一下项目结构：</p>
-<pre><code>-<span class="ruby">- <span class="constant">CNTAppDelegate</span>.h/.m
-</span>-<span class="ruby">- <span class="constant">CNTCountInteractorIO</span>.h
-</span>-<span class="ruby">- <span class="constant">CNTCountInteractor</span>.h/.m
-</span>-<span class="ruby">- <span class="constant">CNTCountPresenter</span>.h/.m
-</span>-<span class="ruby">- <span class="constant">CNTCountView</span>.h
-</span>-<span class="ruby">- <span class="constant">CNTCountViewController</span>.h/.m/.xib</span>
-</code></pre><p>首先我们来看一下最简单的模块：CNTCountView</p>
-<pre><code><span class="comment">// CNTCountView.h</span>
-<span class="class"><span class="keyword">@protocol</span> <span class="title">CNTCountView</span> &lt;<span class="title">NSObject</span>&gt;</span>
-- (<span class="keyword">void</span>)setCountText:(<span class="built_in">NSString</span>*)countText;
-- (<span class="keyword">void</span>)setDecrementEnabled:(<span class="built_in">BOOL</span>)enabled;
-<span class="keyword">@end</span>
-</code></pre><p>咦？为什么这个View只包含一个Protocol呢？说好的View用来接收传递的内容然后进行内容展示呢？</p>
-<p>原因是这样：在iOS应用中，一个无法避免的模块就是ViewController（<strong>无论如何每个应用都必须存在一个RootViewController</strong>）。每个ViewController包含一个根View用来进行视图展示。因此，在将VIPER架构应用到iOS领域的过程中，实际上起到View作用的是ViewController！(<b>当然，ViewController不仅仅起到了视图展示的作用</b>)</p>
-<p><em>题外话：我个人认为这个例子的取名不太好，让人迷惑，如果换个名字，如CNTCountViewOperation就没有这个问题了</em></p>
-<p>既然如此，让我们赶快去看看相关的ViewController：CNTCountViewController中的实现。</p>
-<pre><code><span class="comment">// CNTCountViewController.h</span>
-<span class="class"><span class="keyword">@interface</span> <span class="title">CNTCountViewController</span> : <span class="title">UIViewController</span> &lt;<span class="title">CNTCountView</span>&gt;</span>
-<span class="keyword">@property</span> (<span class="keyword">nonatomic</span>, <span class="keyword">weak</span>) <span class="keyword">IBOutlet</span>    <span class="built_in">UILabel</span>*    countLabel;
-<span class="keyword">@property</span> (<span class="keyword">nonatomic</span>, <span class="keyword">weak</span>) <span class="keyword">IBOutlet</span>    <span class="built_in">UIButton</span>*   decrementButton;
-<span class="keyword">@property</span> (<span class="keyword">nonatomic</span>, <span class="keyword">weak</span>) <span class="keyword">IBOutlet</span>    <span class="built_in">UIButton</span>*   incrementButton;
-
-<span class="keyword">@property</span> (<span class="keyword">nonatomic</span>, <span class="keyword">strong</span>)   CNTCountPresenter*  presenter;
-<span class="keyword">@end</span>
-</code></pre><p>在上述CNTCountViewController的头文件中，我们可以看到该类遵从了CNTCountView协议。其次，他包含了真正的View：两个UIButton和一个UILabel。说明这和我们之前说的ViewController起到了真正的视图展示作用是吻合的。</p>
-<p>同时，我们还看到了一个非常显眼的类：<strong>CNTCountPresenter</strong>。如果这个类的命名没错，那这个类就是所谓的Presenter了，用来进行界面逻辑控制的类。那么是不是这样呢？我们<em>Command + 左击</em>这个类一探究竟！</p>
-<pre><code><span class="comment">// CNTCountPresenter.h</span>
-<span class="class"><span class="keyword">@interface</span> <span class="title">CNTCountPresenter</span> : <span class="title">NSObject</span> &lt;<span class="title">CNTCountInteractorOutput</span>&gt;</span>
-<span class="keyword">@property</span> (<span class="keyword">nonatomic</span>, <span class="keyword">weak</span>)     <span class="keyword">id</span>&lt;CNTCountView&gt;            view;
-<span class="keyword">@property</span> (<span class="keyword">nonatomic</span>, <span class="keyword">strong</span>)   <span class="keyword">id</span>&lt;CNTCountInteractorInput&gt; interactor;
-
-- (<span class="keyword">void</span>)updateView;
-- (<span class="keyword">void</span>)increment;
-- (<span class="keyword">void</span>)decrement;
-<span class="keyword">@end</span>
-</code></pre><p>从CNTCountPresenter的头文件中，我们能看出很多逻辑关系。Presenter包含了一个View和一个Interactor。这和文首我们对于VIPER的介绍相吻合：Presenter从Interactor获取数据，经过界面逻辑处理后，将数据发送给View进行展示。</p>
-<p>从Interactor请求获取数据的部分代码如下：</p>
-<pre><code><span class="comment">// CNTCountPresenter.m</span>
-<span class="tag">-</span> (void)<span class="tag">updateView</span>
-{
-    <span class="attr_selector">[self.interactor requestCount]</span>;
-}
-
-<span class="tag">-</span> (void)<span class="tag">increment</span>
-{
-    <span class="attr_selector">[self.interactor increment]</span>;
-}
-
-<span class="tag">-</span> (void)<span class="tag">decrement</span>
-{
-    <span class="attr_selector">[self.interactor decrement]</span>;
-}
-</code></pre><p>由于Presenter从Interactor获取数据，那么势必Presenter是Interactor的一个输出，而Interactor是Presenter的一个输入。</p>
-<pre><code><span class="comment">// CNTCountInteractorIO.h</span>
-<span class="class"><span class="keyword">@protocol</span> <span class="title">CNTCountInteractorInput</span> &lt;<span class="title">NSObject</span>&gt;</span>
-- (<span class="keyword">void</span>)requestCount;
-- (<span class="keyword">void</span>)increment;
-- (<span class="keyword">void</span>)decrement;
-<span class="keyword">@end</span>
-
-<span class="class"><span class="keyword">@protocol</span> <span class="title">CNTCountInteractorOutput</span> &lt;<span class="title">NSObject</span>&gt;</span>
-- (<span class="keyword">void</span>)updateCount:(<span class="built_in">NSUInteger</span>)count;
-<span class="keyword">@end</span>
-</code></pre><p><em><b>这里各位可以先不关注Protocol协议的设计本身，只要理解逻辑关系即可。</b></em></p>
-<p>通过这样的职责划分，落入到Interactor类中的职责就是最基本的业务逻辑：计数的增加和减少。</p>
-<pre><code><span class="comment">// CNTCountInteractor.h</span>
-- (<span class="keyword">void</span>)requestCount
-{
-    [<span class="keyword">self</span> sendCount];
-}
-
-- (<span class="keyword">void</span>)increment
-{
-    ++<span class="keyword">self</span><span class="variable">.count</span>;
-    [<span class="keyword">self</span> sendCount];
-}
-
-- (<span class="keyword">void</span>)decrement
-{
-    <span class="keyword">if</span> ([<span class="keyword">self</span> canDecrement])
-    {
-        --<span class="keyword">self</span><span class="variable">.count</span>;
-        [<span class="keyword">self</span> sendCount];
-    }
-}
-</code></pre><p>至此，我们可以将Counter的项目架构进行如下表示：</p>
-<p>Interactor &lt;——–&gt; Presenter</p>
-<ul>
-<li><strong>Interactor</strong> 是 <strong>Presenter</strong>  的 <b>输入</b></li>
-<li><strong>Presenter</strong>  是 <strong>Interactor</strong> 的 <b>输出</b></li>
-<li><strong>Presenter</strong> 通过某些事件触发，去向其输入<strong>Interactor</strong>请求数据</li>
-</ul>
-<p>Presenter &lt;——–&gt; View(ViewController)</p>
-<ul>
-<li><strong>View</strong>       是 <strong>Presenter</strong>  的 <b>输出</b></li>
-<li><strong>ViewController</strong> 触发了 <strong>Presenter</strong> 去<strong>Interactor</strong>中请求新的业务结果，从而更新<strong>View</strong></li>
-</ul>
-<p>Presenter更新View的代码如下：</p>
-<pre><code><span class="comment">// CNTCountPresenter.m</span>
-<span class="tag">-</span> (void)<span class="tag">updateCount</span>:(NSUInteger)<span class="tag">count</span>
-{
-    <span class="attr_selector">[self.view setCountText:[self formattedCount:count]</span>];
-    <span class="attr_selector">[self.view setDecrementEnabled:[self canDecrementCount:count]</span>];
-}
-</code></pre><p>到这里，Counter这个例子的解读基本就完成了。细心的读者一定会发现，<strong>Entity</strong>和<strong>Route</strong>到哪里去了？</p>
-<p>是的，这个例子由于过于简单，压根不需要Entity。并且由于它是单视图应用，压根不涉及到页面切换，因此也无须Route功能。不过我们在后续的浅入浅出VIPER架构（2）中解读一个更细致更负责的例子，敬请期待！</p>
-
-      
-    </div>
-    <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/11/05/Understand-Viper/" data-id="ciinda3uu0008mki1uod114wm" class="article-share-link">Share</a>
-      
-      
-  <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
 
     </footer>
   </div>
@@ -1560,7 +1568,7 @@ modalVC<span class="class">.modalPresentationStyle</span> = <span class="class">
   
   
     <nav id="page-nav">
-      <span class="page-number current">1</span><a class="page-number" href="/page/2/">2</a><a class="extend next" rel="next" href="/page/2/">Next &raquo;</a>
+      <span class="page-number current">1</span><a class="page-number" href="/page/2/">2</a><a class="page-number" href="/page/3/">3</a><a class="extend next" rel="next" href="/page/2/">Next &raquo;</a>
     </nav>
   
 </section>
@@ -1573,7 +1581,7 @@ modalVC<span class="class">.modalPresentationStyle</span> = <span class="class">
   <div class="widget-wrap">
     <h3 class="widget-title">Tags</h3>
     <div class="widget">
-      <ul class="tag-list"><li class="tag-list-item"><a class="tag-list-link" href="/tags/Android/">Android</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/JavaScript/">JavaScript</a><span class="tag-list-count">2</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Math/">Math</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/R/">R</a><span class="tag-list-count">2</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Swift/">Swift</a><span class="tag-list-count">4</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/iOS/">iOS</a><span class="tag-list-count">9</span></li></ul>
+      <ul class="tag-list"><li class="tag-list-item"><a class="tag-list-link" href="/tags/Android/">Android</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/JavaScript/">JavaScript</a><span class="tag-list-count">2</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Math/">Math</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/R/">R</a><span class="tag-list-count">2</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Swift/">Swift</a><span class="tag-list-count">4</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/iOS/">iOS</a><span class="tag-list-count">10</span></li></ul>
     </div>
   </div>
 
@@ -1591,7 +1599,7 @@ modalVC<span class="class">.modalPresentationStyle</span> = <span class="class">
   <div class="widget-wrap">
     <h3 class="widget-title">Archives</h3>
     <div class="widget">
-      <ul class="archive-list"><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/12/">December 2015</a><span class="archive-list-count">6</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/11/">November 2015</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/10/">October 2015</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/09/">September 2015</a><span class="archive-list-count">4</span></li></ul>
+      <ul class="archive-list"><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/12/">December 2015</a><span class="archive-list-count">8</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/11/">November 2015</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/10/">October 2015</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/09/">September 2015</a><span class="archive-list-count">4</span></li></ul>
     </div>
   </div>
 
@@ -1603,6 +1611,14 @@ modalVC<span class="class">.modalPresentationStyle</span> = <span class="class">
       <ul>
         
           <li>
+            <a href="/2015/12/30/Refactor-Mega-ViewController/">重构你的ViewController</a>
+          </li>
+        
+          <li>
+            <a href="/2015/12/27/Learn-R-3/">Learn-R-3</a>
+          </li>
+        
+          <li>
             <a href="/2015/12/20/LLDB-2/">浅出浅出LLDB（2）</a>
           </li>
         
@@ -1612,14 +1628,6 @@ modalVC<span class="class">.modalPresentationStyle</span> = <span class="class">
         
           <li>
             <a href="/2015/12/15/Regression-Model-1/">Regression Model</a>
-          </li>
-        
-          <li>
-            <a href="/2015/12/13/Learn-R-1/">一步步学R（1）</a>
-          </li>
-        
-          <li>
-            <a href="/2015/12/11/LLDB-1/">浅入浅出LLDB（1）</a>
           </li>
         
       </ul>

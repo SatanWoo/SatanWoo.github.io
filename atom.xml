@@ -4,7 +4,7 @@
   
   <link href="/atom.xml" rel="self"/>
   <link href="http://satanwoo.github.io/"/>
-  <updated>2015-12-21T14:24:35.000Z</updated>
+  <updated>2015-12-29T16:48:37.000Z</updated>
   <id>http://satanwoo.github.io/</id>
   
   <author>
@@ -13,6 +13,334 @@
   </author>
   
   <generator uri="http://hexo.io/">Hexo</generator>
+  
+  <entry>
+    <title><![CDATA[重构你的ViewController]]></title>
+    <link href="http://satanwoo.github.io/2015/12/30/Refactor-Mega-ViewController/"/>
+    <id>http://satanwoo.github.io/2015/12/30/Refactor-Mega-ViewController/</id>
+    <published>2015-12-29T16:37:56.000Z</published>
+    <updated>2015-12-29T16:48:37.000Z</updated>
+    <content type="html"><![CDATA[<p>这篇文章来自阅读<a href="https://realm.io/news/andy-matuschak-refactor-mega-controller/" target="_blank" rel="external">Let’s Play: Refactor the Mega Controller!</a></p>
+<p>在该文中，作者阐述了如何使用Swift重构一个臭名昭著的Massive View Controller。从中，我们可以一窥Swift诸多优秀的特性以及如何利用这些特性将ViewController的职责进行解耦。</p>
+<p>但是作者由于时间有限，并没有讲述完全，因此本文是我阅读<a href="https://github.com/andymatuschak/refactor-the-mega-controller" target="_blank" rel="external">源码</a>后的理解。</p>
+<p><strong>建议大家在阅读本文之前，能够先去看看链接中的视频。</strong></p>
+<h3 id="Let’s_get_started">Let’s get started</h3><p>首先我们下载源码，可以看到如下文件：</p>
+<pre><code>-<span class="ruby"> <span class="constant">NavigationController</span>.swift
+</span>-<span class="ruby"> <span class="constant">ViewController</span>.swift
+</span>-<span class="ruby"> <span class="constant">AddViewController</span>.swift</span>
+</code></pre><p>其中，<code>ViewController.swift</code>是项目的核心，代码行数超过<strong>246</strong>行。在这里我要强调一下，并不是代码行数多不好，而是要看你这个职责是不是相关。如果246行都是在实现一个数据结构或者算法，当然可行。但是如果246行里面包含了逻辑业务、网络请求、数据持久化，那必然是可以分离一部分职责出去。</p>
+<p>在本文的<code>ViewController.swift</code>，这个类在初始状态下包含了<code>UITableViewDataSource</code>, <code>UITableViewDelegate</code>, <code>UIViewControllerTransitioningDelegate</code>, <code>UIViewControllerAnimatedTransitioning</code>, <code>NSFetchedResultsController</code>以及一系类跟UI显示相关的代码。</p>
+<h4 id="1-_干掉UINavigationBar相关的内容">1. 干掉UINavigationBar相关的内容</h4><p>作者在app中构建了可变化的NavigationBar，因此bar的样式是根据不同状态进行改变的。原来的逻辑整体写在了<code>ViewController.swift</code>中，如下所示：</p>
+<pre><code> func updateNavigationBar() {
+        <span class="keyword">switch</span> fetchedResultsController!<span class="variable">.fetchedObjects</span>!<span class="variable">.count</span> {
+        <span class="keyword">case</span> <span class="number">0.</span>.<span class="number">.3</span>:
+            navigationController!<span class="variable">.navigationBar</span><span class="variable">.barTintColor</span> = <span class="literal">nil</span>
+            navigationController!<span class="variable">.navigationBar</span><span class="variable">.titleTextAttributes</span> = <span class="literal">nil</span>
+            navigationController!<span class="variable">.navigationBar</span><span class="variable">.tintColor</span> = <span class="literal">nil</span>
+        <span class="keyword">case</span> <span class="number">4.</span>.<span class="number">.9</span>:
+            navigationController!<span class="variable">.navigationBar</span><span class="variable">.barTintColor</span> = <span class="built_in">UIColor</span>(red: <span class="number">235</span>/<span class="number">255</span>, green: <span class="number">156</span>/<span class="number">255</span>, blue: <span class="number">77</span>/<span class="number">255</span>, alpha: <span class="number">1.0</span>)
+            navigationController!<span class="variable">.navigationBar</span><span class="variable">.titleTextAttributes</span> = [<span class="built_in">NSForegroundColorAttributeName</span>: <span class="built_in">UIColor</span><span class="variable">.whiteColor</span>()]
+            navigationController!<span class="variable">.navigationBar</span><span class="variable">.tintColor</span> = <span class="built_in">UIColor</span><span class="variable">.whiteColor</span>()
+        <span class="keyword">default</span>:
+            navigationController!<span class="variable">.navigationBar</span><span class="variable">.barTintColor</span> = <span class="built_in">UIColor</span>(red: <span class="number">248</span>/<span class="number">255</span>, green: <span class="number">73</span>/<span class="number">255</span>, blue: <span class="number">68</span>/<span class="number">255</span>, alpha: <span class="number">1.0</span>)
+            navigationController!<span class="variable">.navigationBar</span><span class="variable">.titleTextAttributes</span> = [<span class="built_in">NSForegroundColorAttributeName</span>: <span class="built_in">UIColor</span><span class="variable">.whiteColor</span>()]
+            navigationController!<span class="variable">.navigationBar</span><span class="variable">.tintColor</span> = <span class="built_in">UIColor</span><span class="variable">.whiteColor</span>()
+        }
+    }
+
+override func preferredStatusBarStyle() -&gt; <span class="built_in">UIStatusBarStyle</span> {
+    <span class="keyword">switch</span> fetchedResultsController?<span class="variable">.fetchedObjects</span>!<span class="variable">.count</span> {
+    <span class="keyword">case</span> <span class="variable">.Some</span>(<span class="number">0.</span>.<span class="number">.3</span>), <span class="variable">.None</span>:
+        <span class="keyword">return</span> <span class="variable">.Default</span>
+    <span class="keyword">case</span> <span class="variable">.Some</span>(_):
+        <span class="keyword">return</span> <span class="variable">.LightContent</span>
+    }
+}
+</code></pre><p>同时，还在几个事件回调的地方，如Core Data的<code>controllerDidChange</code>，调用了<code>setNeedsStatusBarAppearanceUpdate()</code>。</p>
+<p>这个想法粗略想想并没什么问题，因为我们需要根据一系列的事件变化来改变我们的界面样式，这是很明显的业务逻辑。而我们都很清楚，ViewController就是用来写业务逻辑的地方。</p>
+<p>先抛开ViewController是否是应该写业务逻辑的地方这一个有待商榷的论点之外，我们先看看，我们可以如何重构现有代码。</p>
+<p><strong>首先</strong>，<code>updateNavigationBar</code>中多个case中的代码有了重复，因此我们可以将其重构成一个函数，接受三个关于样式的参数，如下：</p>
+<pre><code>func applyTheme(<span class="string">barTintColor:</span>newBarTintColor, <span class="string">tintColor:</span>newTintColor, <span class="string">titleTextAttributes:</span>newTextAttributes) {
+    barTintColor = <span class="string">barTintColor:</span>newBarTintColor
+    tintColor = <span class="string">tintColor:</span>newTintColor
+    titleTextAttributes = <span class="string">titleTextAttributes:</span>newTextAttributes
+}
+</code></pre><p>重构完函数以后，我们发现在多个样式中用到了switch case进行业务逻辑参数转换样式参数的过程。<strong>这说明什么，我们可以将转换逻辑和switch case一起通过Enum进行重构（这里说的东西都是基于你懂Enum）</strong></p>
+<pre><code><span class="keyword">enum</span> NavigationTheme {
+    <span class="keyword">case</span> Normal
+    <span class="keyword">case</span> Warning
+    <span class="keyword">case</span> Doomed
+
+    var statusBarStyle: <span class="built_in">UIStatusBarStyle</span> {
+        <span class="keyword">switch</span> <span class="keyword">self</span> {
+        <span class="keyword">case</span> <span class="variable">.Normal</span>: <span class="keyword">return</span> <span class="variable">.Default</span>
+        <span class="keyword">case</span> <span class="variable">.Warning</span>, <span class="variable">.Doomed</span>: <span class="keyword">return</span> <span class="variable">.LightContent</span>
+        }
+    }
+
+    var barTintColor: <span class="built_in">UIColor</span>? {
+        <span class="keyword">switch</span> <span class="keyword">self</span> {
+        <span class="keyword">case</span> <span class="variable">.Normal</span>:
+            <span class="keyword">return</span> <span class="literal">nil</span>
+        <span class="keyword">case</span> <span class="variable">.Warning</span>:
+            <span class="keyword">return</span> <span class="built_in">UIColor</span>(red: <span class="number">235</span>/<span class="number">255</span>, green: <span class="number">156</span>/<span class="number">255</span>, blue: <span class="number">77</span>/<span class="number">255</span>, alpha: <span class="number">1.0</span>)
+        <span class="keyword">case</span> <span class="variable">.Doomed</span>:
+            <span class="keyword">return</span> <span class="built_in">UIColor</span>(red: <span class="number">248</span>/<span class="number">255</span>, green: <span class="number">73</span>/<span class="number">255</span>, blue: <span class="number">68</span>/<span class="number">255</span>, alpha: <span class="number">1.0</span>)
+        }
+    }
+
+    var titleTextAttributes: [String: <span class="built_in">NSObject</span>]? {
+        <span class="keyword">switch</span> <span class="keyword">self</span> {
+        <span class="keyword">case</span> <span class="variable">.Normal</span>:
+            <span class="keyword">return</span> <span class="literal">nil</span>
+        <span class="keyword">case</span> <span class="variable">.Warning</span>, <span class="variable">.Doomed</span>:
+            <span class="keyword">return</span> [<span class="built_in">NSForegroundColorAttributeName</span>: <span class="built_in">UIColor</span><span class="variable">.whiteColor</span>()]
+        }
+    }
+
+    var tintColor: <span class="built_in">UIColor</span>? {
+        <span class="keyword">switch</span> <span class="keyword">self</span> {
+        <span class="keyword">case</span> <span class="variable">.Normal</span>:
+            <span class="keyword">return</span> <span class="literal">nil</span>
+        <span class="keyword">case</span> <span class="variable">.Warning</span>, <span class="variable">.Doomed</span>:
+            <span class="keyword">return</span> <span class="built_in">UIColor</span><span class="variable">.whiteColor</span>()
+        }
+    }
+}
+
+extension NavigationTheme {
+    init(numberOfImminentTasks: Int) {
+        <span class="keyword">switch</span> numberOfImminentTasks {
+        <span class="keyword">case</span> -Int<span class="variable">.max</span> ... <span class="number">3</span>:
+            <span class="keyword">self</span> = <span class="variable">.Normal</span>
+        <span class="keyword">case</span> <span class="number">4.</span>.<span class="number">.9</span>:
+            <span class="keyword">self</span> = <span class="variable">.Warning</span>
+        <span class="keyword">default</span>:
+            <span class="keyword">self</span> = <span class="variable">.Doomed</span>
+        }
+    }
+}    
+</code></pre><p>由于Enum在swift中是一等公民，因此可以可以在其中构建大量的<strong>Computed Properties</strong>，这些计算变量依赖于当前enum的状态。不仅如此，我们还将之前分散的三种样式，组合成了一个<strong>紧凑的结构体</strong>，大大简化了变量传输。</p>
+<p>重构结束后，我们在<code>Viewcontroller.swift</code>中设置一个计算变量<code>navigationTheme</code>，其的构造函数是之前的<code>fetchedResultsController?.fetchedObjects?.count</code>。</p>
+<p>最后是在相应的事件后触发更新UINavigationBar即可，在本文的视线中，是采用了closure的形式完成：</p>
+<pre><code>navigationThemeDidChangeHandler = { [<span class="keyword">weak</span> <span class="keyword">self</span>] theme <span class="keyword">in</span>
+            <span class="keyword">if</span> <span class="keyword">let</span> navigationController = <span class="keyword">self</span>?.navigationController {
+                navigationController.navigationBar.applyTheme(theme)
+                navigationController.statusBarStyle = theme.statusBarStyle
+            }
+        }
+</code></pre><h3 id="2-_干掉时间相关的转换逻辑">2. 干掉时间相关的转换逻辑</h3><p>相信很多人做app的时候遇到过，服务器返回的是一系列标准时间参数，而你需要将其转换成界面需要的生日、星座、年龄等等，这又是一大堆的业务逻辑。为了解决这种逻辑代码和ViewController的耦合，很多人提出了<code>ViewModel</code>，将部分弱业务逻辑代码剥离出来，单独写在一个地方。</p>
+<p><strong>但是，我需要强调一点，这种形式的剥离，并不能叫ViewModal，而是一个简单的adapter而已。</strong></p>
+<p>在本文中，列表Cell里面需要根据日期距离当前时间的差距显示成昨天、今天、明天等等。因此，其构建了一个单独的的DateFormatter，根据传入的两个Date进行转换，代码如下：</p>
+<pre><code><span class="class"><span class="keyword">struct</span> <span class="title">RelativeTimeDateFormatter</span> </span>{
+    <span class="keyword">let</span> calendar: <span class="type">NSCalendar</span>
+
+    <span class="keyword">init</span>(calendar: <span class="type">NSCalendar</span> = <span class="type">NSCalendar</span>.autoupdatingCurrentCalendar()) {
+        <span class="keyword">self</span>.calendar = calendar
+    }
+
+    <span class="func"><span class="keyword">func</span> <span class="title">stringForDate</span><span class="params">(date: NSDate, relativeToDate baseDate: NSDate)</span></span> -&gt; <span class="type">String</span> {
+        <span class="keyword">var</span> beginningOfDate: <span class="type">NSDate</span>? = <span class="literal">nil</span>
+        <span class="keyword">var</span> beginningOfBaseDate: <span class="type">NSDate</span>? = <span class="literal">nil</span>
+
+        calendar.rangeOfUnit(.<span class="type">Day</span>, startDate: &amp;beginningOfDate, interval: <span class="literal">nil</span>, forDate: date)
+        calendar.rangeOfUnit(.<span class="type">Day</span>, startDate: &amp;beginningOfBaseDate, interval: <span class="literal">nil</span>, forDate: baseDate)
+        <span class="keyword">let</span> numberOfCalendarDaysBetweenDates = calendar.components(<span class="type">NSCalendarUnit</span>.<span class="type">Day</span>, fromDate: beginningOfBaseDate!, toDate: beginningOfDate!, options: <span class="type">NSCalendarOptions</span>()).day
+
+        <span class="keyword">switch</span> numberOfCalendarDaysBetweenDates {
+        <span class="keyword">case</span> -<span class="type">Int</span>.<span class="built_in">max</span> ... -<span class="number">2</span>:
+            <span class="keyword">return</span> <span class="string">"<span class="subst">\(<span class="built_in">abs</span>(numberOfCalendarDaysBetweenDates)</span>) days ago"</span>
+        <span class="keyword">case</span> -<span class="number">1</span>:
+            <span class="keyword">return</span> <span class="string">"Yesterday"</span>
+        <span class="keyword">case</span> <span class="number">0</span>:
+            <span class="keyword">return</span> <span class="string">"Today"</span>
+        <span class="keyword">case</span> <span class="number">1</span>:
+            <span class="keyword">return</span> <span class="string">"Tomorrow"</span>
+        <span class="keyword">default</span>:
+            <span class="keyword">return</span> <span class="string">"In <span class="subst">\(numberOfCalendarDaysBetweenDates)</span> days"</span>
+        }
+    }
+}
+</code></pre><p><strong>这里需要注意的是，NSCalendar的初始化非常耗时，过去在Objective-C时代常常使用dispatch_once构建单例传输，在这里通过结构体中的成员变量维护了一份，作用是同样的。</strong></p>
+<h3 id="3-_干掉NSPredicate">3. 干掉NSPredicate</h3><p>对于NSPredicate，有些人可能还不熟悉，他就是类似于SQLite中的查询语句，只不过其应用范围是CoreData。咦，查询语句还能重构？</p>
+<p>其实在本文中，对于NSPredicate的使用只有原先这一句  <code>fetchRequest.predicate = NSPredicate(format: &quot;dueDate &lt;= %@&quot;, argumentArray: [NSCalendar.currentCalendar().dateByAddingUnit(.Day, value: 10, toDate: NSDate(), options: NSCalendarOptions())!])</code></p>
+<p>这段代码从重复性上来说是不需要重构的。但是，我们可以看到，在这里的构造参数里面，我们还是进行了一定的业务逻辑转换。所以，和DateFormatter一样，我们也可以将这部分所谓为的”弱业务逻辑”代码进行剥离：</p>
+<pre><code>extension NSPredicate {
+    convenience init(forTasksWithinNumberOfDays <span class="string">numberOfDays:</span> Int, ofDate <span class="string">date:</span> NSDate, <span class="string">calendar:</span> NSCalendar = NSCalendar.currentCalendar()) {
+        self.init(<span class="string">format:</span> <span class="string">"dueDate &lt;= %@"</span>, <span class="string">argumentArray:</span> [calendar.dateByAddingUnit(.Day, <span class="string">value:</span> numberOfDays, <span class="string">toDate:</span> date, <span class="string">options:</span> NSCalendarOptions())!])
+    }
+}
+</code></pre><p><strong>除了业务逻辑剥离之外，其实我们也可以看到，在这个NSPredicate的新构造参数，可以接受一个<code>calendar</code>，这对于测试用例编写的依赖注入是非常有好处的。</strong></p>
+<h3 id="4-_Core_Data_Stack">4. Core Data Stack</h3><p>用过Core Data的人都知道，Core Data的使用非常麻烦，需要配置大量的选项，照着苹果源码写的经历相信大家都有过，那恶心的200-300行配置代码，真是么么哒了。</p>
+<p><strong>但是，这几百行代码又是无法省略的</strong>，那该怎么办呢？</p>
+<p>一个比较好的解决方案就<code>Core Data Stack</code>    。意为将CoreData的初始化以及多个NSManagerObjectContext封装进<code>CoreDataStack</code> 维护。 </p>
+<p>在本文中，因为只是使用了一个主线程的NSManagerObjectContext，所以可能读者在阅读源码的时候可能觉得这个重构只是将CoreData配置从View剥离了。但是实际上，使用CoreDataStack可以做到更多，建议大家阅读Github上相关项目。</p>
+<h3 id="5-_干掉NSFetchedResultsControllerDelegate">5. 干掉NSFetchedResultsControllerDelegate</h3><p>NSFetchedResultsController大家可以简单理解为获取CoreData数据的一个中介层。根据传输进入的谓语NSPredicate进行查询，查询结束后通过相应的Delegate事件回调。</p>
+<p>在作者的代码中，作者通过构建<code>manager</code>的方式剥离了NSFetchedResultsController的职责，将NSFetchedResultsController的初始化、回调封装进了<code>UpcomingTaskDataManager.swift</code>中。</p>
+<p><strong>不过值得注意的一点是，尽管作者封装的NSFetchedResultsControllerDelegate的回调，但是为了让调用者可以自定义处理事件，实际上作者还是需要暴露一些的Delegate，当然，新的回调相对来说进行了一定的简化，同时在数据回调时经过了业务转化。</strong></p>
+<pre><code><span class="class"><span class="keyword">protocol</span> <span class="title">UpcomingTaskDataManagerDelegate</span> </span>{
+    <span class="func"><span class="keyword">func</span> <span class="title">dataManagerWillChangeContent</span><span class="params">(dataManager: UpcomingTaskDataManager)</span></span>
+    <span class="func"><span class="keyword">func</span> <span class="title">dataManagerDidChangeContent</span><span class="params">(dataManager: UpcomingTaskDataManager)</span></span>
+    <span class="func"><span class="keyword">func</span> <span class="title">dataManager</span><span class="params">(dataManager: UpcomingTaskDataManager, didInsertRowAtIndexPath indexPath: NSIndexPath)</span></span>
+    <span class="func"><span class="keyword">func</span> <span class="title">dataManager</span><span class="params">(dataManager: UpcomingTaskDataManager, didDeleteRowAtIndexPath indexPath: NSIndexPath)</span></span>
+}
+</code></pre><h3 id="6-_CoreDataModel_&lt;=&gt;_Model">6. CoreDataModel &lt;=&gt; Model</h3><p>这一步是将从Core Data中获取的NSManagedObject Model 转换成业务中使用的Model。为什么要这么做呢？原因有三个：  </p>
+<ul>
+<li>CoreData中的属性一更改，就会触发NSFetchedResultsController，这会很影响性能。</li>
+<li>CoreData中的属性存在很多bug</li>
+<li>NSManagedObject不是一个struct类型，很有可能<strong>误伤</strong></li>
+</ul>
+<pre>
+import CoreData  
+import Foundation
+
+struct Task: Equatable {
+    var id: String
+    var title: String
+    var dueDate: NSDate
+}
+
+func ==(lhs: Task, rhs: Task) -> Bool {
+    return lhs.id == rhs.id && lhs.title == rhs.title && lhs.dueDate == rhs.dueDate
+}
+
+extension Task {
+    init(managedTask: NSManagedObject) {
+        self.id = managedTask.valueForKey("id") as! String
+        self.title = managedTask.valueForKey("title") as! String
+        self.dueDate = managedTask.valueForKey("dueDate") as! NSDate
+    }
+}
+</pre>
+
+<p>作者用以上的Task类型替换了CoreData中的ManagedObject，可以有效的避免以上问题。</p>
+<h3 id="7-封装数据结构">7.封装数据结构</h3><p>在这一步里，我将作者自定义<code>TaskTableViewCell</code>和构建<code>AddCompletionSegue</code>合并到了一块说。</p>
+<p>这两步的重构，看似简单，但是其实也蕴含了一个思想：<strong>类型越确定，编程越容易，运行越安全</strong></p>
+<p>在原文的实现，一开始作者都是通过采用基础的数据结构UITableViewCell和UISegue。这样带来的坏处就是类型不明确导致的职责不明确。对于基础的数据结构，我们常常还要进行类型判断和转换，容易犯错。</p>
+<h3 id="8-干掉UITableViewDelegate和UITableViewDataSource">8.干掉UITableViewDelegate和UITableViewDataSource</h3><p>这一步想必大家都很熟悉了，微博上整天热传了<em>用ViewModel重构你的ViewController</em>经常提及的就是干掉UITableViewDelegate和UITableViewDataSource。</p>
+<p>那说了那么多，我们来看看究竟如何干掉它。</p>
+<p>毫无以为，我们首先要构建一个类型，来实现UITableViewDelegate和DataSource，如下所示：</p>
+<pre><code><span class="comment">// 1. </span>
+<span class="class"><span class="keyword">class</span> <span class="title">UpcomingTaskDataManagerTableViewAdapter</span>&lt;<span class="title">CellType</span>: <span class="title">UITableViewCell</span>&gt;: <span class="title">NSObject</span>, <span class="title">UITableViewDataSource</span>, <span class="title">UpcomingTaskDataManagerDelegate</span> </span>{
+    private <span class="keyword">let</span> tableView: <span class="type">UITableView</span>
+    private <span class="keyword">let</span> upcomingTaskDataManager: <span class="type">UpcomingTaskDataManager</span>
+    private <span class="keyword">let</span> cellReuseIdentifier: <span class="type">String</span>
+    private <span class="keyword">let</span> cellConfigurationHandler: (<span class="type">CellType</span>, <span class="type">Task</span>) -&gt; ()
+    private <span class="keyword">let</span> didChangeHandler: () -&gt; <span class="type">Void</span>
+
+<span class="comment">// .2</span>
+    <span class="keyword">init</span>(tableView: <span class="type">UITableView</span>, upcomingTaskDataManager: <span class="type">UpcomingTaskDataManager</span>, cellReuseIdentifier: <span class="type">String</span>, cellConfigurationHandler: (<span class="type">CellType</span>, <span class="type">Task</span>) -&gt; (), didChangeHandler: () -&gt; <span class="type">Void</span>) {
+        <span class="keyword">self</span>.tableView = tableView
+        <span class="keyword">self</span>.upcomingTaskDataManager = upcomingTaskDataManager
+        <span class="keyword">self</span>.cellReuseIdentifier = cellReuseIdentifier
+        <span class="keyword">self</span>.cellConfigurationHandler = cellConfigurationHandler
+        <span class="keyword">self</span>.didChangeHandler = didChangeHandler
+
+        <span class="keyword">super</span>.<span class="keyword">init</span>()
+    }
+
+<span class="comment">// 3.</span>
+    <span class="func"><span class="keyword">func</span> <span class="title">tableView</span><span class="params">(tableView: UITableView, commitEditingStyle editingStyle: UITableViewCellEditingStyle, forRowAtIndexPath indexPath: NSIndexPath)</span></span> {
+        upcomingTaskDataManager.deleteTask(upcomingTaskDataManager.taskSections[indexPath.section].items[indexPath.row])
+    }
+
+    <span class="func"><span class="keyword">func</span> <span class="title">numberOfSectionsInTableView</span><span class="params">(tableView: UITableView)</span></span> -&gt; <span class="type">Int</span> {
+        <span class="keyword">return</span> upcomingTaskDataManager.taskSections.<span class="built_in">count</span>
+    }
+
+    <span class="func"><span class="keyword">func</span> <span class="title">tableView</span><span class="params">(tableView: UITableView, titleForHeaderInSection section: Int)</span></span> -&gt; <span class="type">String</span>? {
+        <span class="keyword">return</span> upcomingTaskDataManager.taskSections[section].title
+    }
+
+    <span class="func"><span class="keyword">func</span> <span class="title">tableView</span><span class="params">(tableView: UITableView, numberOfRowsInSection section: Int)</span></span> -&gt; <span class="type">Int</span> {
+        <span class="keyword">return</span> upcomingTaskDataManager.taskSections[section].items.<span class="built_in">count</span>
+    }
+
+    <span class="func"><span class="keyword">func</span> <span class="title">tableView</span><span class="params">(tableView: UITableView, cellForRowAtIndexPath indexPath: NSIndexPath)</span></span> -&gt; <span class="type">UITableViewCell</span> {
+        <span class="keyword">let</span> task = upcomingTaskDataManager.taskSections[indexPath.section].items[indexPath.row]
+        <span class="keyword">let</span> cell = tableView.dequeueReusableCellWithIdentifier(cellReuseIdentifier, forIndexPath: indexPath) <span class="keyword">as</span>! <span class="type">CellType</span>
+        cellConfigurationHandler(cell, task)
+        <span class="keyword">return</span> cell
+    }
+</code></pre><ol>
+<li>这个<code>UpcomingTaskDataManagerTableViewAdapter</code>通过传入一个CellType支持泛型。  </li>
+<li>通过接受几个closure来进行自定义的配置，包括cell的样式配置以及tableview数据更新后的回调。  </li>
+<li>实现的UITableViewDataSource</li>
+</ol>
+<p>同样，由于职责的重新分配，我们要将跟<code>TaskManager</code>（包括NSFetchedResultsController）相关的划入到这个adapter中。</p>
+<h3 id="大结局">大结局</h3><p>最后重构后的ViewController，只有<strong>37</strong>代码，效果如下：</p>
+<pre><code><span class="class"><span class="keyword">class</span> <span class="title">ViewController</span>: <span class="title">UITableViewController</span> </span>{
+    <span class="keyword">var</span> navigationThemeDidChangeHandler: ((<span class="type">NavigationTheme</span>) -&gt; <span class="type">Void</span>)?
+    <span class="keyword">var</span> navigationTheme: <span class="type">NavigationTheme</span> {
+        <span class="keyword">return</span> <span class="type">NavigationTheme</span>(numberOfImminentTasks: upcomingTaskDataManager.totalNumberOfTasks)
+    }
+
+    private <span class="keyword">let</span> upcomingTaskDataManager = <span class="type">UpcomingTaskDataManager</span>()
+    private <span class="keyword">var</span> upcomingTaskDataManagerTableViewAdapter: <span class="type">UpcomingTaskDataManagerTableViewAdapter</span>&lt;<span class="type">TaskTableViewCell</span>&gt;!
+
+    <span class="keyword">override</span> <span class="func"><span class="keyword">func</span> <span class="title">viewDidLoad</span><span class="params">()</span></span> {
+        <span class="keyword">super</span>.viewDidLoad()
+
+        upcomingTaskDataManagerTableViewAdapter = <span class="type">UpcomingTaskDataManagerTableViewAdapter</span>(
+            tableView: tableView,
+            upcomingTaskDataManager: upcomingTaskDataManager,
+            cellReuseIdentifier: <span class="string">"Cell"</span>,
+            cellConfigurationHandler: { cell, task <span class="keyword">in</span>
+                cell.viewData = <span class="type">TaskTableViewCell</span>.<span class="type">ViewData</span>(task: task, relativeToDate: <span class="type">NSDate</span>())
+            },
+            didChangeHandler: { [<span class="keyword">weak</span> <span class="keyword">self</span>] <span class="keyword">in</span> <span class="keyword">self</span>?.updateNavigationBar() }
+        )
+        upcomingTaskDataManager.delegate = upcomingTaskDataManagerTableViewAdapter
+        tableView.dataSource = upcomingTaskDataManagerTableViewAdapter
+
+        updateNavigationBar()
+    }
+
+    <span class="keyword">override</span> <span class="func"><span class="keyword">func</span> <span class="title">tableView</span><span class="params">(tableView: UITableView, canEditRowAtIndexPath indexPath: NSIndexPath)</span></span> -&gt; <span class="type">Bool</span> {
+        <span class="keyword">return</span> <span class="literal">true</span>
+    }
+
+    <span class="func"><span class="keyword">func</span> <span class="title">updateNavigationBar</span><span class="params">()</span></span> {
+        navigationThemeDidChangeHandler?(navigationTheme)
+    }
+
+    <span class="preprocessor">@IBAction</span> <span class="func"><span class="keyword">func</span> <span class="title">unwindFromAddController</span><span class="params">(segue: AddCompletionSegue)</span></span> {
+        upcomingTaskDataManager.createTaskWithTitle(segue.taskTitle, dueDate: segue.taskDueDate)
+    }
+}
+</code></pre>]]></content>
+    <summary type="html">
+    <![CDATA[<p>这篇文章来自阅读<a href="https://realm.io/news/andy-matuschak-refactor-mega-controller/" target="_blank" rel="external">Let’s Play: Refactor the ]]>
+    </summary>
+    
+      <category term="iOS" scheme="http://satanwoo.github.io/tags/iOS/"/>
+    
+  </entry>
+  
+  <entry>
+    <title><![CDATA[Learn-R-3]]></title>
+    <link href="http://satanwoo.github.io/2015/12/27/Learn-R-3/"/>
+    <id>http://satanwoo.github.io/2015/12/27/Learn-R-3/</id>
+    <published>2015-12-26T17:15:17.000Z</published>
+    <updated>2015-12-27T06:54:20.000Z</updated>
+    <content type="html"><![CDATA[<h3 id="系列连载">系列连载</h3><p><a href="http://satanwoo.github.io/2015/12/13/Learn-R-1/">一步步学R（1）</a><br><a href="http://satanwoo.github.io/2015/12/20/Learn-R-2/">一步步学R（2）</a></p>
+<h3 id="Loop_Function">Loop Function</h3><p>Loop Function是指不<strong>显示</strong>调用<code>for</code>循环的方式来进行一个集合的迭代。<br>在R中，主要有以下几种Loop Function</p>
+<ul>
+<li><p>lapply 对于一个集合中的每个元素通过一个自定义的函数来进行处理，返回的结果<strong>一定是个<code>list</code></strong></p>
+</li>
+<li><p>sapply 和lapply相同，但是对于结果会进行简化。如果返回的结果是个list，并且list里面的元素长度都为<strong>1，那就直接合并成一个vector</strong>返回；而如果返回的list里的元素长度<strong>相同且都大于1，就合并成Matrix</strong>返回；如果不能正确合并，那就返回默认的list。</p>
+</li>
+<li><p>apply，</p>
+</li>
+<li>tapply，</li>
+<li>mapply，</li>
+</ul>
+]]></content>
+    <summary type="html">
+    <![CDATA[<h3 id="系列连载">系列连载</h3><p><a href="http://satanwoo.github.io/2015/12/13/Learn-R-1/">一步步学R（1）</a><br><a href="http://satanwoo.github.io/2015/]]>
+    </summary>
+    
+  </entry>
   
   <entry>
     <title><![CDATA[浅出浅出LLDB（2）]]></title>
@@ -3156,122 +3484,6 @@ CountryModel<span class="keyword">*</span> country = [[CountryModel alloc] initW
 ]]></content>
     <summary type="html">
     <![CDATA[<h3 id="背景介绍">背景介绍</h3><p>现在的移动App基本上免不了和网络传输打交道，我们经常需要和服务器进行数据的传输，常用的数据格式无外乎XML或者JSON。这也就引出了一个新的话题，如何将获得的数据实际应用到我们的App中？答案很简单，建立Model。我们拿到的]]>
-    </summary>
-    
-      <category term="iOS" scheme="http://satanwoo.github.io/tags/iOS/"/>
-    
-  </entry>
-  
-  <entry>
-    <title><![CDATA[iOS下载模块的实现]]></title>
-    <link href="http://satanwoo.github.io/2015/09/11/A-New-Start/"/>
-    <id>http://satanwoo.github.io/2015/09/11/A-New-Start/</id>
-    <published>2015-09-11T04:15:55.000Z</published>
-    <updated>2015-09-17T12:55:17.000Z</updated>
-    <content type="html"><![CDATA[<p>这是我在实习的时候对于一个下载模块的实现，在这里记录一下心得体会。这个模块完全独立实现，且不依赖于公司任何的代码，不会涉及任何隐私。</p>
-<h3 id="下载模块的需求">下载模块的需求</h3><p>在实现一个新模块之前，我们需要理清楚这个模块需要支持最小的功能集，并逐步扩展。并且由于下载模块是存在潜在的可能性被多个模块调用，因此，我们特别要注意模块的封装。</p>
-<h4 id="功能需求">功能需求</h4><h5 id="支持下载">支持下载</h5><p>   下载模块最基本的自然就是可以正确的将需要下载的东西下载到指定路径，这里下载的东西包括但是不局限于图片、文本文档、压缩文件等等。因此，这些下载东西的大小是不等的，在设计功能的时候，需要讲这点考虑进去。</p>
-<h5 id="支持取消下载">支持取消下载</h5><p>   处于控制角度的考虑，甚至是出于当流量和资源节省的角度考虑，我们都已经对下载任务有控制权。可以随时根据我们业务处于的状态，对下载任务进行暂停或者完整的停止取消。</p>
-<h5 id="支持并发下载">支持并发下载</h5><p>   下载任务的个数肯定不会只有一个，而是可能同时存在多个。因此，我们就需要考虑如何去支持多个下载任务同时并发的下载。其外，我们还要考虑到潜在的任务之间的关联性和依赖性（比如B下载任务需要依赖于A下载任务的完成）</p>
-<p>初步的任务我们可以认为就是如上三个就可以（<b>初期设计模块真的不要考虑过多功能，先开始做起来，一点点看着自己造的轮子可以运转起来，成就感会促使你会不停的去完善。当然，你的代码一定要写的整洁易读！</b>）</p>
-<a id="more"></a>
-<h3 id="实现下载">实现下载</h3><p>谈到实现下载，很多人会联想到向服务器请求数据，比如我们会使用<b>AFNetworkong</b>或者<b>ASIHttpRequest</b>这两个大名鼎鼎的开源库。两者对HTTP应用层协议进行了良好的封装，支持多种HTTP操作。我们平时也经常使用这两个库经常服务器数据请求和传输，看起来好像我们只要用这两个库，这个任务就自然而然的解决了。但是我们要考虑到，我们的下载模块是一个可能经常被别的模块甚至是应用拿来应用的功能模块，我们如果还耦合于第三库，无疑降低了这个模块的使用价值。因此，我们采用苹果原生的函数来实现，并且考虑到兼容性，我们还是采用了NSURLConnection而不是NSURLSession。</p>
-<h4 id="下载任务建模">下载任务建模</h4><p>首先我们需要思考，将下载任务对应成一个实际存在的类，这些类应该包括下载文件所在URL，下载任务目前的状态，比如未开始，进行中还是已结束。当然，我们也可以包含一个自定义参数等等进行下载任务的配置，当然，这是可选的。那是不是我们直接建立一个基于<b>NSObject</b>的子类就是最理想的建模呢？构建一个基于NSOperation的子类化operation更适合我们的场景（具体下文会说）。因此，初步的<b>XXXDownloadOperation</b>结果如下：</p>
-<pre><code><span class="class"><span class="keyword">@interface</span> <span class="title">XXXDownloadOperation</span> : <span class="title">NSOperation</span></span>
-
-<span class="keyword">@property</span> (<span class="keyword">nonatomic</span>, <span class="keyword">assign</span>, <span class="keyword">readonly</span>) XXXDownloadStatus status;
-<span class="keyword">@property</span> (<span class="keyword">nonatomic</span>, <span class="keyword">strong</span>, <span class="keyword">readonly</span>) <span class="built_in">NSURL</span> *fileURL;
-<span class="keyword">@property</span> (<span class="keyword">nonatomic</span>, <span class="keyword">strong</span>)           <span class="keyword">id</span> userInfo;
-
-- (instancetype)initWithURL:(<span class="built_in">NSURL</span> *)fileURL
-- (<span class="keyword">void</span>)cancelDownload;
-<span class="keyword">@end</span>
-</code></pre><h5 id="下载任务的状态">下载任务的状态</h5><p>在XXXDownloadOperation中，我们可以看到包含了一个只读字段的<em>XXXDownloadStatus</em>的字段，这个字段就是为了反应当前下载任务的状态，它包含如下几种：</p>
-<pre><code><span class="function"><span class="keyword">typedef</span> <span class="title">NS_ENUM</span><span class="params">(NSUInteger, XXXDownloadStatus)</span> </span>{
-    XXXDownloadStatusReady = <span class="number">0</span>,
-    XXXDownloadStatusFailed = <span class="number">1</span>,
-    XXXDownloadStatusDownloading = <span class="number">2</span>,
-    XXXDownloadStatusCancelled = <span class="number">3</span>,
-    XXXDownloadStatusDone = <span class="number">4</span>,
-    XXXDownloadStatusPause = <span class="number">5</span>
-};
-</code></pre><ul>
-<li>XXXDownloadStatusReady       代表了当前任务可以开始进行下载</li>
-<li>XXXDownloadStatusFailed      代表当前任务下载失败，比如网络断了</li>
-<li>XXXDownloadStatusDownloading 代表当前下载任务正在进行中</li>
-<li>XXXDownloadStatusCancelled   代表当前任务已经被取消了</li>
-<li>XXXDonwloadStatusDone        代表当前任务下载完毕</li>
-<li>XXXDownloadStatusPause       代表当前任务暂停</li>
-</ul>
-<p><b>设置为只读就是为了避免人为的修改状态</b></p>
-<h5 id="实现NSURLConnection">实现NSURLConnection</h5><p>实现NSURLConnection非常简单，它只有几个简单的Delegate需要我们去实现。</p>
-<pre><code><span class="tag">-</span> (<span class="tag">void</span>)<span class="rule"><span class="attribute">connection</span>:<span class="value">(NSURLConnection *)connection didFailWithError:(NSError *)error</span></span>;
-<span class="tag">-</span> (<span class="tag">void</span>)<span class="rule"><span class="attribute">connection</span>:<span class="value">(NSURLConnection *)connection didReceiveResponse:(NSURLResponse *)response</span></span>;
-<span class="tag">-</span> (<span class="tag">void</span>)<span class="rule"><span class="attribute">connection</span>:<span class="value">(NSURLConnection*)connection didReceiveData:(NSData *)data</span></span>;
-<span class="tag">-</span> (<span class="tag">void</span>)<span class="rule"><span class="attribute">connectionDidFinishLoading</span>:<span class="value">(NSURLConnection*)connection</span></span>;
-</code></pre><p>但是由于我们是基于NSOperation，在非主线程进行NSURLConnection进行操作，所以，我们要特别注意一点，就是非主线程是没有<b>RunLoop</b>的，而NSURLConnection的回调都是基于NSRunLoop，因此我们需要创建一个RunLoop, 如下所示：</p>
-<pre><code><span class="built_in">NSRunLoop</span>* runLoop = [<span class="built_in">NSRunLoop</span> currentRunLoop];
-[runLoop addPort:[<span class="built_in">NSMachPort</span> port] forMode:<span class="built_in">NSDefaultRunLoopMode</span>];
-[<span class="keyword">self</span><span class="variable">.connection</span> scheduleInRunLoop:runLoop
-                           forMode:<span class="built_in">NSDefaultRunLoopMode</span>];   
-[<span class="keyword">self</span><span class="variable">.connection</span> start];
-[runLoop run];
-</code></pre><p> 上述这段代码非常容易理解，我们创建了一个NSRunLoop，并且运行它，这样我们的NSURLConnection就可以基于它进行delegate回调了。</p>
-<p> 且慢，</p>
-<pre><code><span class="attr_selector">[runLoop addPort:[NSMachPort port]</span> <span class="rule"><span class="attribute">forMode</span>:<span class="value">NSDefaultRunLoopMode]</span></span>;
-</code></pre><p> 这段话是什么意思？我们为什么要让RunLoop监听一个port。<br> 原因就在于<b>默认情况下，当RunLoop无所事事的时候，它就自动退出了，有可能导致NSURLConnection的事件还没回调的时候NSRunLoop已经不存在了。因此我们要让它监听一个没啥用的端口，嘿嘿，大名鼎鼎的AFNetworking也是这么做的</b></p>
-<h5 id="实现并发下载">实现并发下载</h5><p>嘿嘿，知道我们为什么采用子类化NSOperation了吧，我们就是为了利用NSOperationQueue的并发特性。</p>
-<pre><code><span class="keyword">self</span><span class="variable">.taskQueue</span> = [[<span class="built_in">NSOperationQueue</span> alloc] init];
-<span class="keyword">self</span><span class="variable">.taskQueue</span><span class="variable">.maxConcurrentOperationCount</span> = capacity;
-<span class="keyword">self</span><span class="variable">.taskQueue</span><span class="variable">.name</span> = <span class="string">@"com.satanwoo.taskQueue"</span>;
-</code></pre><p>我们可以随意设置的NSOperationQueue的最大并发数来构建并发下载。当然这里要提醒一句，<b>多线程环境中，并不是线程数越多并发性越好，因为多线程最大并发数其实和系统硬件资源相关联。而过多的线程数会导致过多的线程上下文切换。</b></p>
-<h5 id="NSOperation与KVO">NSOperation与KVO</h5><p>首先建议大家读一下这篇文章 <a href="http://www.dribin.org/dave/blog/archives/2009/05/05/concurrent_operations/" target="_blank" rel="external">Concurrent Operations Demystified</a></p>
-<pre><code>- (<span class="built_in">BOOL</span>)isExecuting
-{
-    <span class="keyword">return</span> <span class="keyword">self</span><span class="variable">.status</span> == XXXDownloadStatusDownloading;
-}
-
-- (<span class="built_in">BOOL</span>)isCancelled
-{
-    <span class="keyword">return</span> <span class="keyword">self</span><span class="variable">.status</span> == XXXDownloadStatusCancelled;
-}
-
-- (<span class="built_in">BOOL</span>)isFinished
-{
-    <span class="keyword">return</span> <span class="keyword">self</span><span class="variable">.status</span> == XXXDownloadStatusCancelled ||
-           <span class="keyword">self</span><span class="variable">.status</span> == XXXDownloadStatusDone ||
-           <span class="keyword">self</span><span class="variable">.status</span> == XXXDownloadStatusFailed;
-}
-</code></pre><p>从上面链接文章我们可以得知，NSOperation的执行以来于这些状态。因此，我们根据自己下载任务的状态override了这些变量状态。<br>然后，我们只要利用KVO，去更改如上这些override的状态就好。</p>
-<pre><code>- (<span class="keyword">void</span>)updateState:(XXXDownloadStatus)status
-{
-      <span class="comment">// 防止我们直接调用了canel</span>
-    [<span class="keyword">self</span><span class="variable">.connection</span> cancel];
-
-    [<span class="keyword">self</span> willChangeValueForKey:<span class="string">@"isFinished"</span>];
-    [<span class="keyword">self</span> willChangeValueForKey:<span class="string">@"isExecuting"</span>];
-    <span class="keyword">self</span><span class="variable">.status</span> = status;
-    [<span class="keyword">self</span> didChangeValueForKey:<span class="string">@"isExecuting"</span>];
-    [<span class="keyword">self</span> didChangeValueForKey:<span class="string">@"isFinished"</span>];
-}
-
-- (<span class="keyword">void</span>)cancel
-{
-    [<span class="keyword">self</span> willChangeValueForKey:<span class="string">@"isCancelled"</span>];
-    [<span class="keyword">self</span> updateState];
-    [<span class="keyword">self</span> didChangeValueForKey:<span class="string">@"isCancelled"</span>];
-}
-</code></pre><p>至此，一个具备并发、取消的下载功能就完成了。我们可以根据业务需要，上层封装一系列简单的函数，进行便捷的管理。</p>
-<p>接下来我们要实现的，就是基于HTTP Header的range字段来支持断点续传功能了。</p>
-]]></content>
-    <summary type="html">
-    <![CDATA[<p>这是我在实习的时候对于一个下载模块的实现，在这里记录一下心得体会。这个模块完全独立实现，且不依赖于公司任何的代码，不会涉及任何隐私。</p>
-<h3 id="下载模块的需求">下载模块的需求</h3><p>在实现一个新模块之前，我们需要理清楚这个模块需要支持最小的功能集，并逐步扩展。并且由于下载模块是存在潜在的可能性被多个模块调用，因此，我们特别要注意模块的封装。</p>
-<h4 id="功能需求">功能需求</h4><h5 id="支持下载">支持下载</h5><p>   下载模块最基本的自然就是可以正确的将需要下载的东西下载到指定路径，这里下载的东西包括但是不局限于图片、文本文档、压缩文件等等。因此，这些下载东西的大小是不等的，在设计功能的时候，需要讲这点考虑进去。</p>
-<h5 id="支持取消下载">支持取消下载</h5><p>   处于控制角度的考虑，甚至是出于当流量和资源节省的角度考虑，我们都已经对下载任务有控制权。可以随时根据我们业务处于的状态，对下载任务进行暂停或者完整的停止取消。</p>
-<h5 id="支持并发下载">支持并发下载</h5><p>   下载任务的个数肯定不会只有一个，而是可能同时存在多个。因此，我们就需要考虑如何去支持多个下载任务同时并发的下载。其外，我们还要考虑到潜在的任务之间的关联性和依赖性（比如B下载任务需要依赖于A下载任务的完成）</p>
-<p>初步的任务我们可以认为就是如上三个就可以（<b>初期设计模块真的不要考虑过多功能，先开始做起来，一点点看着自己造的轮子可以运转起来，成就感会促使你会不停的去完善。当然，你的代码一定要写的整洁易读！</b>）</p>]]>
-    
     </summary>
     
       <category term="iOS" scheme="http://satanwoo.github.io/tags/iOS/"/>
