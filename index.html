@@ -62,6 +62,376 @@
       <div class="outer">
         <section id="main">
   
+    <article id="post-DGRunKeeperSwitch" class="article article-type-post" itemscope itemprop="blogPost">
+  <div class="article-meta">
+    <a href="/2016/02/05/DGRunKeeperSwitch/" class="article-date">
+  <time datetime="2016-02-05T14:35:57.000Z" itemprop="datePublished">2016-02-05</time>
+</a>
+    
+  </div>
+  <div class="article-inner">
+    
+    
+      <header class="article-header">
+        
+  
+    <h1 itemprop="name">
+      <a class="article-title" href="/2016/02/05/DGRunKeeperSwitch/">DGRunKeeperSwitch 源码解析</a>
+    </h1>
+  
+
+      </header>
+    
+    <div class="article-entry" itemprop="articleBody">
+      
+        <p>DGRunKeeperSwitch是非常有趣的自定义的<em>Segment Control</em>的实现，从其Github上的展现效果来看，可以发现在 <em>同一个</em> UILabel中的文本竟然可以展现出两种不同的颜色，是不是很奇妙？今天就让我们来看看它是如何实现的。</p>
+<p><img src="https://raw.githubusercontent.com/gontovnik/DGRunkeeperSwitch/master/DGRunkeeperSwitch.gif" alt=""></p>
+<h3 id="源码分析">源码分析</h3><p>打开项目，发现这个项目真的很简单，就一个文件，<code>DGRunkeeperSwitch.swift</code>，并且实现也只有接近260行左右。</p>
+<p>既然这个项目是个UI的开源库，我们主要还是先从界面层级入手。和<a href="http:glowing.com" target="_blank" rel="external">Glow的开源库(GLCalendar)</a>不同，这个是纯手写的控件，因此无法从<strong>.xib</strong>文件来快速了解，所以我们把目标首先投向相关的UIKit子属性，包括如下：</p>
+<pre><code><span class="comment">// 1. </span>
+private <span class="tag">var</span> titleLabelsContentView = <span class="function"><span class="title">UIView</span><span class="params">()</span></span>
+private <span class="tag">var</span> leftTitleLabel = <span class="function"><span class="title">UILabel</span><span class="params">()</span></span>
+private <span class="tag">var</span> rightTitleLabel = <span class="function"><span class="title">UILabel</span><span class="params">()</span></span>
+
+<span class="comment">// 2.</span>
+private <span class="tag">var</span> selectedTitleLabelsContentView = <span class="function"><span class="title">UIView</span><span class="params">()</span></span>
+private <span class="tag">var</span> selectedLeftTitleLabel = <span class="function"><span class="title">UILabel</span><span class="params">()</span></span>
+private <span class="tag">var</span> selectedRightTitleLabel = <span class="function"><span class="title">UILabel</span><span class="params">()</span></span>
+
+<span class="comment">// 3.</span>
+<span class="function"><span class="title">private</span><span class="params">(set)</span></span> <span class="tag">var</span> selectedBackgroundView = <span class="function"><span class="title">UIView</span><span class="params">()</span></span> 
+private <span class="tag">var</span> titleMaskView: UIView = <span class="function"><span class="title">UIView</span><span class="params">()</span></span>
+</code></pre><p>其中第一部分我们一看命名就很容易理解了，有一个<code>ContentView</code>作为<code>container</code>，包含了<code>segment control</code>对应的左右两个Label。</p>
+<p>然后来看第二部分，第二部分从命名上也很直观，感觉上和第一部分是一致的，但是却<strong>可能代表的是选中的状态</strong>。不过我们很奇怪，作者为什么要构建一个一模一样的来表征不同的状态呢，直接用一个变量比如 <code>var selected = false</code> 进行样式的控制不可以吗？</p>
+<p>好，先别急，这里卖个关子，我们继续往下看。</p>
+<p>第三部分，<code>selectedBackgroundView</code>和<code>titleMaskView</code>，从名字看，也不能一下子了解含义，我们先全局搜索下相关连的代码，与<code>titleMaskView</code>相关的内容如下：</p>
+<pre><code>titleMaskView<span class="class">.backgroundColor</span> = .<span class="function"><span class="title">blackColor</span><span class="params">()</span></span>
+selectedTitleLabelsContentView<span class="class">.layer</span><span class="class">.mask</span> = titleMaskView.layer
+</code></pre><p>看起来是用<code>titleMaskView</code>给之前<strong>可能的选中状态的</strong><code>selectedTitleLabelsContentView</code>加了一层遮罩。</p>
+<p>由于遮罩是白色的地方不显示，黑色的地方（准确来说是非白色的区域）显示，因此我们可以理解上述代码是通过<code>titleMaskView</code>来显示<code>selectedTitleLabelsContentView</code>中的内容（<strong>也就是两个UILabel</strong>），非<code>titleMaskView</code>区域自动隐藏了。</p>
+<pre><code>addObserver(<span class="keyword">self</span>, forKeyPath: <span class="string">"selectedBackgroundView.frame"</span>, options: .<span class="type">New</span>, context: <span class="literal">nil</span>)
+
+<span class="keyword">override</span> public <span class="func"><span class="keyword">func</span> <span class="title">observeValueForKeyPath</span><span class="params">(keyPath: String?, ofObject object: AnyObject?, change: [String : AnyObject]?, context: UnsafeMutablePointer&lt;Void&gt;)</span></span> {
+    <span class="keyword">if</span> keyPath == <span class="string">"selectedBackgroundView.frame"</span> {
+        titleMaskView.frame = selectedBackgroundView.frame
+    }
+}
+</code></pre><p>哦，看完上述这段代码，我开始有点恍然大悟了，通过监听<code>selectedBackgroundView.frame</code>，我们实时改变<code>titleMaskView</code>的<code>frame</code>。而通过实际运行项目，我们可以很容易理解<code>selectedBackgroundView</code>就是用户可拖拽的选项高亮条。</p>
+<p>到这，我渐渐有点理解作者为什么要构建两个完全一样的contentView，并都包含左右两个UILabel了。</p>
+<p>作者应该是对于<code>titleLabelsContentView</code>设定为普通状态的Label，左右两个Label都是未选中的颜色状态，同时将<code>selectedTitleLabelsContentView</code>设定为选定状态，左右Label都使用了选中时候的颜色状态，然后通过<code>titleMaskView</code>进行遮罩，这样，<code>selectedTitleLabelsContentView</code>其余部分就被隐藏，会显示出下部<code>titleLabelsContentView</code>普通状态的Label颜色。</p>
+<p>嘿嘿，读一下剩下的源代码，和我的猜测一致，不得不说，<strong>我真是太聪明了</strong>，这个思路真是太赞了。</p>
+<h3 id="如何真正实现一个好的UI库">如何真正实现一个好的UI库</h3><p>看到这个小标题，可能有人会产生疑惑，实现好一个UI库不就是功能正确，效果正常吗？错！</p>
+<p>我认为这只是基本的两点，还有如下几点需要包含：</p>
+<ul>
+<li>使用正确的类型</li>
+<li>在正确的函数中做正确的事</li>
+<li>暴露不过多也不过少的属性</li>
+<li>抛出、监听相对应的事件</li>
+<li>根据不同屏幕大小、屏幕方向进行适配</li>
+<li>横竖屏情况都能展示良好</li>
+</ul>
+<ol>
+<li><p>第一，从DGRunkeeperSwitch来看，首先由于其模仿的是UISegmentControl，所以自然而然的应该继承与<strong>UIControl</strong>而不是UIView。有人要问有啥区别，简单来说就是<strong>UIControl将UIView中能接受的Touch事件，转换成了更高级的UIEvent，比如UITouchUpInside。</strong></p>
+</li>
+<li><p>第二，作者通过init函数进行初始化，通过layoutSubview进行页面布局，而不是像很多人自己写代码时将很多东西一窝蜂的堆到了init中。</p>
+</li>
+<li><p>提供了颜色、字体、边距以及动画弹性等属性给外部调用，同时将不应该暴露的内部UIKit变量进行私有化，并将<code>selectedIndex</code>通过<code>private(set)</code>对外设置为只读。</p>
+</li>
+<li><p>在切换Segment选择后，抛出了相应的<code>sendActionsForControlEvents(.ValueChanged)</code> 用于给外部监听。</p>
+</li>
+</ol>
+<h3 id="效果之外的重点">效果之外的重点</h3><p>作者在实现这个项目之中，有几点是比较值得注意的：</p>
+<h4 id="利用元组同时赋值多个属性">利用元组同时赋值多个属性</h4><pre><code><span class="keyword">public</span> var leftTitle: <span class="keyword">String</span> {
+    <span class="built_in">set</span> { (leftTitleLabel.<span class="built_in">text</span>, selectedLeftTitleLabel.<span class="built_in">text</span>) = (newValue, newValue) }
+    <span class="built_in">get</span> { <span class="keyword">return</span> leftTitleLabel.<span class="built_in">text</span>! }
+}
+</code></pre><p>在Swift中引入了一个元组的新类型，我们可以利用这个数据结构同时给多个属性赋值。</p>
+<h4 id="private(set)">private(set)</h4><pre><code><span class="keyword">private</span>(<span class="keyword">set</span>) <span class="keyword">public</span> <span class="variable"><span class="keyword">var</span> selectedIndex</span>: <span class="typename">Int</span> = <span class="number">0</span>
+</code></pre><p>作者在实现过程中保留了一个<code>selectedIndex</code> 变量，但是这个类对外只读，对内可以读写，因此用了<strong>private(set)</strong>。</p>
+<p><strong>这相当于在Objective-C时代，我们在.h文件中声明  <code>@property(nonatomic, strong, readonly) Class *A</code><br>然后又在.m文件中，声明  <code>@property(nonatomic, strong, readwrite) Class *A</code></strong></p>
+<h4 id="UIView和CALayer">UIView和CALayer</h4><p>很多人写iOS的时候，分不清UIView和CALayer之间的区别，很多人都理解成了继承的关系。大错特错！</p>
+<ul>
+<li>实际上UIView里面有个成员变量是CALayer，而CALayer的delegate是UIView(这会涉及到很多的隐式动画之类的，不展开了)</li>
+<li>UIView可以接受Touch事件，而Layer不行</li>
+<li>UIView有个layerClass的类型方法，可以被复写，用于改变这个UIView对应的基础Layer类型，比如你可以将赋值CAGradientLayer给这个View</li>
+</ul>
+<p>在本项目中，作者复写了layerClass，如下：</p>
+<pre><code><span class="keyword">override</span> <span class="keyword">public</span> <span class="class"><span class="keyword">class</span> <span class="title">func</span> <span class="title">layerClass</span>() -&gt; <span class="title">AnyClass</span> </span>{
+    <span class="keyword">return</span> DGRunkeeperSwitchRoundedLayer.self
+}
+</code></pre><p>好啦，今天就差不多到这啦~下周再见。</p>
+
+      
+    </div>
+    <footer class="article-footer">
+      <a data-url="http://satanwoo.github.io/2016/02/05/DGRunKeeperSwitch/" data-id="cik9sx1iz001ab0i1nu3gvmym" class="article-share-link">Share</a>
+      
+      
+  <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
+
+    </footer>
+  </div>
+  
+</article>
+
+
+  
+    <article id="post-PureLayout" class="article article-type-post" itemscope itemprop="blogPost">
+  <div class="article-meta">
+    <a href="/2016/02/05/PureLayout/" class="article-date">
+  <time datetime="2016-02-05T14:33:20.000Z" itemprop="datePublished">2016-02-05</time>
+</a>
+    
+  </div>
+  <div class="article-inner">
+    
+    
+      <header class="article-header">
+        
+  
+    <h1 itemprop="name">
+      <a class="article-title" href="/2016/02/05/PureLayout/">PureLayout 源码解析</a>
+    </h1>
+  
+
+      </header>
+    
+    <div class="article-entry" itemprop="articleBody">
+      
+        <p>在开始这篇文章之前，想必大家都应该使用过Autolayout方式的界面布局，相信大家都有过类似于如下这样的API调用：    </p>
+<pre><code>[NSLayoutConstraint(item: self.viewA, attribute: .CenterY, relatedBy: .Equal, toItem: self.viewB, attribute: .CenterY, multiplier: <span class="number">1.0</span>, constant: <span class="number">0.0</span>)]
+</code></pre><p>抑或是Visual Format Language</p>
+<pre><code>NSLayoutConstraint.constraintsWithVisualFormat(<span class="string">"|-(leftPadding)-[imageView(imageViewWidth)]-(rigntPadding)-[labelA]-(4)-[labelB]-(&gt;=44)-|"</span>, <span class="string">options:</span> NSLayoutFormatOptions(<span class="string">rawValue:</span> <span class="number">0</span>), <span class="string">metrics:</span> methics, <span class="string">views:</span> views)
+</code></pre><p>这种冗长而又晦涩的代码，真是恶心人啊。因此在Github上涌现了一大堆简化布局的开源库，如SnapKit, Mansory以及今天我们要说的PureLayout。  </p>
+<p>在这之中，PureLayout是最轻量级的，它仅仅是对Autolayout现成的语法进行了一层封装，相较于Mansory引入的一些<strong>新概念</strong>，Purelayout更直接易懂。</p>
+<h3 id="源码解析">源码解析</h3><p>Purelayout的源码基本没什么难懂的地方，我们首先来看一下其项目结构：</p>
+<ul>
+<li>PurelayoutDefines.h</li>
+<li>ALView + PureLayout.h/.m</li>
+<li>NSArray + PureLayout.h/.m</li>
+<li>NSLayoutConstraint + Purelayout.h/.m</li>
+</ul>
+<h4 id="PurelayoutDefines">PurelayoutDefines</h4><p>首先从PurelayoutDefines上入手，这个文件主要是进行一些类似<strong>Domain Specific Language</strong>定义的转化，如：</p>
+<pre><code>typedef NS_ENUM(NSInteger, ALEdge) {
+    /** The <span class="built_in">left</span> edge of the view. */
+    ALEdgeLeft = NSLayoutAttributeLeft,
+    /** The <span class="built_in">right</span> edge of the view. */
+    ALEdgeRight = NSLayoutAttributeRight,
+    /** The top edge of the view. */
+    ALEdgeTop = NSLayoutAttributeTop,
+    /** The bottom edge of the view. */
+    ALEdgeBottom = NSLayoutAttributeBottom,
+    /** The leading edge of the view (<span class="built_in">left</span> edge <span class="keyword">for</span> <span class="built_in">left</span>-<span class="keyword">to</span>-<span class="built_in">right</span> languages like English, <span class="built_in">right</span> edge <span class="keyword">for</span> <span class="built_in">right</span>-<span class="keyword">to</span>-<span class="built_in">left</span> languages like Arabic). */
+    ALEdgeLeading = NSLayoutAttributeLeading,
+    /** The trailing edge of the view (<span class="built_in">right</span> edge <span class="keyword">for</span> <span class="built_in">left</span>-<span class="keyword">to</span>-<span class="built_in">right</span> languages like English, <span class="built_in">left</span> edge <span class="keyword">for</span> <span class="built_in">right</span>-<span class="keyword">to</span>-<span class="built_in">left</span> languages like Arabic). */
+    ALEdgeTrailing = NSLayoutAttributeTrailing
+};
+</code></pre><p>上述这段代码，就是将传统的UIKit中的NSLayoutAttribute的枚举类型全部转换成对应的PureLayout中的定义，如ALEdgeRight对应到NSLayoutAttributeRight。</p>
+<p><strong>LayoutMargins</strong><br>在这里补充一点题外知识，在iOS8中，苹果为Autolayout引入了LayoutMargins这一概念。这个概念乍一听可能都不了解，但是大家回忆下，比如在Storyboard中，我们拖拽一个UIView到ViewController的view并设置边距的时候，上边距和下边距对应的限制都是layout guide，如下图所示：</p>
+<p><img src="http://7lrzqz.com1.z0.glb.clouddn.com/%E5%B1%8F%E5%B9%95%E5%BF%AB%E7%85%A7%202016-01-26%20%E4%B8%8B%E5%8D%882.55.37.png" alt=""></p>
+<p><img src="http://7lrzqz.com1.z0.glb.clouddn.com/%E5%B1%8F%E5%B9%95%E5%BF%AB%E7%85%A7%202016-01-26%20%E4%B8%8B%E5%8D%882.56.23.png" alt=""><br><img src="http://7lrzqz.com1.z0.glb.clouddn.com/%E5%B1%8F%E5%B9%95%E5%BF%AB%E7%85%A7%202016-01-26%20%E4%B8%8B%E5%8D%882.56.13.png" alt=""></p>
+<p><strong>简单来说，在iOS7上就已经存在了LayoutMargin了，当时的作用是用来限制view的真实内容不会被UINavigationBar（上部）以及UIToolbar（下部）所遮盖</strong>。而从iOS8中开始，苹果将这一技术引入到了任意一个UIView中。</p>
+<h4 id="ALView_+_Purelayout">ALView + Purelayout</h4><p><strong>ALView实际上是UIView或者NSView的别名，通过添加ALView的分类，可以通过Define在编译期进行替换，避免为NSView和UIView各创建一份重复的代码</strong>。这个类中的API过多，因此我们以轴对齐为典型的例子来分解下源码：</p>
+<ol>
+<li>轴对齐<br>在PureLayout中，包括<code>Vertical</code>, <code>Horizontal</code>, <code>Baseline</code>等几种轴对齐方式，其中Baseline指的是View中潜在包含文字的Baseline。</li>
+</ol>
+<p>好，我们来看看相关的API</p>
+<pre><code><span class="comment">/** Aligns an axis of the view to the same axis of another view. */</span>
+<span class="tag">-</span> (<span class="tag">NSLayoutConstraint</span> *)<span class="rule"><span class="attribute">autoAlignAxis</span>:<span class="value">(ALAxis)axis toSameAxisOfView:(ALView *)otherView</span></span>;
+</code></pre><p>从该API的名称，我们可以直观的感觉出其作用是用于将两个View按照同一个轴对齐。这个API是一个<strong>Convenience Init</strong>，其层层传递</p>
+<pre><code>- (NSLayoutConstraint *)<span class="string">autoAlignAxis:</span>(ALAxis)axis <span class="string">toSameAxisOfView:</span>(ALView *)otherView
+{
+    <span class="keyword">return</span> [self <span class="string">autoAlignAxis:</span>axis <span class="string">toSameAxisOfView:</span>otherView <span class="string">withOffset:</span><span class="number">0.0</span>];
+}
+
+- (NSLayoutConstraint *)<span class="string">autoAlignAxis:</span>(ALAxis)axis <span class="string">toSameAxisOfView:</span>(ALView *)otherView <span class="string">withOffset:</span>(CGFloat)offset
+{
+    <span class="keyword">return</span> [self <span class="string">autoConstrainAttribute:</span>(ALAttribute)axis <span class="string">toAttribute:</span>(ALAttribute)axis <span class="string">ofView:</span>otherView <span class="string">withOffset:</span>offset];
+}
+</code></pre><p>最后调用了</p>
+<pre><code><span class="pp">- <span class="params">(<span class="variable">NSLayoutConstraint</span> *)</span>autoConstrainAttribute:<span class="params">(<span class="variable">ALAttribute</span>)</span>attribute toAttribute:<span class="params">(<span class="variable">ALAttribute</span>)</span>toAttribute ofView:<span class="params">(<span class="variable">ALView</span> *)</span>otherView withOffset:<span class="params">(<span class="variable">CGFloat</span>)</span>offset`</span>
+</code></pre><p>好，那就让我们来看看这个上述这个函数的实现，如下所示：</p>
+<pre><code><span class="comment">//1.</span>
+self.translatesAutoresizingMaskIntoConstraints = NO;
+
+<span class="comment">//2.</span>
+NSLayoutAttribute layoutAttribute = [NSLayoutConstraint <span class="string">al_layoutAttributeForAttribute:</span>attribute];
+NSLayoutAttribute toLayoutAttribute = [NSLayoutConstraint <span class="string">al_layoutAttributeForAttribute:</span>toAttribute];
+
+<span class="comment">//3.</span>
+NSLayoutConstraint *constraint = [NSLayoutConstraint <span class="string">constraintWithItem:</span>self <span class="string">attribute:</span>layoutAttribute <span class="string">relatedBy:</span>relation <span class="string">toItem:</span>otherView <span class="string">attribute:</span>toLayoutAttribute <span class="string">multiplier:</span><span class="number">1.0</span> <span class="string">constant:</span>offset];
+
+<span class="comment">//4.</span>
+[constraint autoInstall];
+<span class="keyword">return</span> constraint;
+</code></pre><ul>
+<li>1.首先将translatesAutoresizingMaskIntoConstraints设置为false，对于要使用autolayout的UIView，必须设置为false，也就是不将传统frame布局中的Autoresizing Mask转换成约束。</li>
+<li>2.根据传入的<strong>PureLayout属性</strong>转换成对应的NSLayoutAttribute</li>
+<li>3.调用冗长恶心的Autolayout API构建约束</li>
+<li>4.添加约束</li>
+</ul>
+<p>在这里，我们需要注意一下这个<code>[constraint autoInstall]</code>，让我们来探一探实现：</p>
+<pre><code>- (<span class="keyword">void</span>)autoInstall
+{
+<span class="comment">// 1. iOS8+</span>
+<span class="preprocessor">#if __PureLayout_MinBaseSDK_iOS_8_0 || __PureLayout_MinBaseSDK_OSX_10_10</span>
+    <span class="keyword">if</span> ([<span class="keyword">self</span> respondsToSelector:<span class="keyword">@selector</span>(setActive:)]) {
+        [<span class="built_in">NSLayoutConstraint</span> al_applyGlobalStateToConstraint:<span class="keyword">self</span>];
+        <span class="comment">// 1.1</span>
+        <span class="keyword">if</span> ([<span class="built_in">NSLayoutConstraint</span> al_preventAutomaticConstraintInstallation]) {         
+            [[<span class="built_in">NSLayoutConstraint</span> al_currentArrayOfCreatedConstraints] addObject:<span class="keyword">self</span>];
+        } <span class="keyword">else</span> {
+        <span class="comment">// 1.2 </span>
+            <span class="keyword">self</span><span class="variable">.active</span> = <span class="literal">YES</span>;
+        }
+        <span class="keyword">return</span>;
+    }
+<span class="preprocessor">#endif /* __PureLayout_MinBaseSDK_iOS_8_0 || __PureLayout_MinBaseSDK_OSX_10_10 */</span>
+
+<span class="comment">// 2. iOS 7</span>
+    <span class="built_in">NSAssert</span>(<span class="keyword">self</span><span class="variable">.firstItem</span> || <span class="keyword">self</span><span class="variable">.secondItem</span>, <span class="string">@"Can't install a constraint with nil firstItem and secondItem."</span>);
+    <span class="keyword">if</span> (<span class="keyword">self</span><span class="variable">.firstItem</span>) {
+        <span class="keyword">if</span> (<span class="keyword">self</span><span class="variable">.secondItem</span>) {
+            <span class="built_in">NSAssert</span>([<span class="keyword">self</span><span class="variable">.firstItem</span> isKindOfClass:[ALView class]] &amp;&amp; [<span class="keyword">self</span><span class="variable">.secondItem</span> isKindOfClass:[ALView class]], <span class="string">@"Can only automatically install a constraint if both items are views."</span>);
+            ALView *commonSuperview = [<span class="keyword">self</span><span class="variable">.firstItem</span> al_commonSuperviewWithView:<span class="keyword">self</span><span class="variable">.secondItem</span>];
+            [commonSuperview al_addConstraint:<span class="keyword">self</span>];
+        } <span class="keyword">else</span> {
+            <span class="built_in">NSAssert</span>([<span class="keyword">self</span><span class="variable">.firstItem</span> isKindOfClass:[ALView class]], <span class="string">@"Can only automatically install a constraint if the item is a view."</span>);
+            [<span class="keyword">self</span><span class="variable">.firstItem</span> al_addConstraint:<span class="keyword">self</span>];
+        }
+    } <span class="keyword">else</span> {
+        <span class="built_in">NSAssert</span>([<span class="keyword">self</span><span class="variable">.secondItem</span> isKindOfClass:[ALView class]], <span class="string">@"Can only automatically install a constraint if the item is a view."</span>);
+        [<span class="keyword">self</span><span class="variable">.secondItem</span> al_addConstraint:<span class="keyword">self</span>];
+    }
+}
+</code></pre><p>整个实现的部分被一分为二，上半部分专门针对iOS8+的，下半部分针对iOS7（<strong>事实上在整个PureLayout的设计中，大部分地方的处理方式都一分为二了</strong>）</p>
+<p>我们暂时也不管<code>al_applyGlobalStateToConstraint:self</code> 以及 <code>al_preventAutomaticConstraintInstallation</code>的作用，我们从1.2看起。</p>
+<ul>
+<li>在iOS8上，启用或者禁用一个AutoLayout的Constraint变得更加容易了，仅仅需要设置active即可</li>
+<li>在iOS7上，需要手动的addConstraint或者removeConstraint</li>
+<li>在处理iOS7的逻辑当中，需要判断当前这个Constraint是否是针对两个Item的，如果是，找到他们的公共父View，在父View在添加约束，比如添加View A和View B之间的间距；而如果是单一一个View，比如是设置高度或者宽度的，直接在当前View添加即可。</li>
+<li>通过调用<code>al_addConstraint</code>进行约束实际的添加。</li>
+</ul>
+<p>而<strong>al_addConstraint</strong>的实现则如下所示：</p>
+<pre><code><span class="attr_selector">[NSLayoutConstraint al_applyGlobalStateToConstraint:constraint]</span>;
+<span class="tag">if</span> ([NSLayoutConstraint al_preventAutomaticConstraintInstallation]) {
+    <span class="attr_selector">[[NSLayoutConstraint al_currentArrayOfCreatedConstraints]</span> <span class="tag">addObject</span><span class="pseudo">:constraint</span>];
+} <span class="tag">else</span> {
+    <span class="attr_selector">[self addConstraint:constraint]</span>;
+}
+</code></pre><p>这里又出现了<code>al_applyGlobalStateToConstraint:constraint</code>以及<code>al_preventAutomaticConstraintInstallation</code>了，这次我们可不能再躲着它了，赶紧瞧一瞧。</p>
+<p>首先是<code>al_applyGlobalStateToConstraint:constraint</code>，这个参数对应的是一个全局静态变量，用于判断：</p>
+<pre><code><span class="keyword">if</span> ([<span class="built_in">NSLayoutConstraint</span> al_isExecutingPriorityConstraintsBlock]) {
+    constraint<span class="variable">.priority</span> = [<span class="built_in">NSLayoutConstraint</span> al_currentGlobalConstraintPriority];
+}
+</code></pre><p>而这个<code>al_isExecutingPriorityConstraintsBlock</code>则是用于如下这个函数：</p>
+<pre><code>+ (void)autoSetPriority:(ALLayoutPriority)priority forConstraints:(ALConstraintsBlock)<span class="keyword">block
+</span>{
+    NSAssert(<span class="keyword">block, </span><span class="comment">@"The constraints block cannot be nil.");</span>
+    <span class="preprocessor">if</span> (<span class="keyword">block) </span>{
+        [[<span class="keyword">self </span>al_globalConstraintPriorities] <span class="keyword">addObject:@(priority)];
+</span>        <span class="keyword">block();
+</span>        [[<span class="keyword">self </span>al_globalConstraintPriorities] removeLastObject]<span class="comment">;</span>
+    }
+}
+</code></pre><p>这里可能大家有点晦涩，主要在于PureLayout对于给Constraint设置Priority定义了一个Block-based的方法，也就是<code>autoSetPriority</code>。在回调的Block中，可以对多个Constraint设置同一个大小的Priority。（<strong>其实我也不是很理解这个集体加Priority设计的目的</strong>）</p>
+<p><strong>不过需要有一点可以肯定的是，设置Constraint的Priority的时机一定要在<code>addConstraint</code>或者<code>active = true</code>之前</strong></p>
+<p>而对于<code>al_preventAutomaticConstraintInstallation</code>这个变量，作者在API中描述了如下一段话：</p>
+<blockquote>Creates all of the constraints in the block, then installs (activates) them all at once.<br> All constraints created from calls to the PureLayout API in the block are returned in a single array.<br> This may be more efficient than installing (activating) each constraint one-by-one.</blockquote>
+
+<p>简而言之，一次性添加所有约束（实际上调用了UIKit的API<code>activateConstraints</code>），比一个个添加要有效率。<strong>然而，Purelayout的这个特性对于iOS7来说，用不上，只能通过<code>addConstraint</code>一个个装，哈哈，么么哒</strong></p>
+<h4 id="NSArray_+_Purelayout">NSArray + Purelayout</h4><p>说完了ALView的layout，我们接下来说说另外的NSArray + Purelayout。顾名思义，该分类的主要目的就是给一个NSArray中的所有UIView添加约束。</p>
+<p>比如这个API：</p>
+<pre><code>- <span class="list">(<span class="keyword">__NSArray_of</span><span class="list">(<span class="keyword">NSLayoutConstraint</span> <span class="variable">*) *</span>)</span>autoDistributeViewsAlongAxis:<span class="list">(<span class="keyword">ALAxis</span>)</span>axis
+                                                           alignedTo:<span class="list">(<span class="keyword">ALAttribute</span>)</span>alignment
+                                                    withFixedSpacing:<span class="list">(<span class="keyword">CGFloat</span>)</span>spacing
+                                                        insetSpacing:<span class="list">(<span class="keyword">BOOL</span>)</span>shouldSpaceInsets
+                                                        matchedSizes:<span class="list">(<span class="keyword">BOOL</span>)</span>shouldMatchSizes</span>
+</code></pre><p>其实现如下：</p>
+<pre><code><span class="built_in">NSAssert</span>([<span class="keyword">self</span> al_containsMinimumNumberOfViews:<span class="number">1</span>], <span class="string">@"This array must contain at least 1 view to distribute."</span>);
+
+<span class="comment">//1. 第一部分</span>
+    ALDimension matchedDimension;
+    ALEdge firstEdge, lastEdge;
+    <span class="keyword">switch</span> (axis) {
+        <span class="keyword">case</span> ALAxisHorizontal:
+        <span class="keyword">case</span> ALAxisBaseline: <span class="comment">// same value as ALAxisLastBaseline</span>
+<span class="preprocessor">#if __PureLayout_MinBaseSDK_iOS_8_0</span>
+        <span class="keyword">case</span> ALAxisFirstBaseline:
+<span class="preprocessor">#endif /* __PureLayout_MinBaseSDK_iOS_8_0 */</span>
+            matchedDimension = ALDimensionWidth;
+            firstEdge = ALEdgeLeading;
+            lastEdge = ALEdgeTrailing;
+            <span class="keyword">break</span>;
+        <span class="keyword">case</span> ALAxisVertical:
+            matchedDimension = ALDimensionHeight;
+            firstEdge = ALEdgeTop;
+            lastEdge = ALEdgeBottom;
+            <span class="keyword">break</span>;
+        <span class="keyword">default</span>:
+            <span class="built_in">NSAssert</span>(<span class="literal">nil</span>, <span class="string">@"Not a valid ALAxis."</span>);
+            <span class="keyword">return</span> <span class="literal">nil</span>;
+    }
+    <span class="built_in">CGFloat</span> leadingSpacing = shouldSpaceInsets ? spacing : <span class="number">0.0</span>;
+    <span class="built_in">CGFloat</span> trailingSpacing = shouldSpaceInsets ? spacing : <span class="number">0.0</span>;
+
+<span class="comment">//2. 第二部分  </span>
+    __<span class="built_in">NSMutableArray_of</span>(<span class="built_in">NSLayoutConstraint</span> *) *constraints = [<span class="built_in">NSMutableArray</span> new];
+    ALView *previousView = <span class="literal">nil</span>;
+    <span class="keyword">for</span> (<span class="keyword">id</span> object <span class="keyword">in</span> <span class="keyword">self</span>) {
+        <span class="keyword">if</span> ([object isKindOfClass:[ALView class]]) {
+            ALView *view = (ALView *)object;
+            view<span class="variable">.translatesAutoresizingMaskIntoConstraints</span> = <span class="literal">NO</span>;
+            <span class="keyword">if</span> (previousView) {
+                <span class="comment">// Second, Third, ... View</span>
+                [constraints addObject:[view autoPinEdge:firstEdge toEdge:lastEdge ofView:previousView withOffset:spacing]];
+                <span class="keyword">if</span> (shouldMatchSizes) {
+                    [constraints addObject:[view autoMatchDimension:matchedDimension toDimension:matchedDimension ofView:previousView]];
+                }
+                [constraints addObject:[view al_alignAttribute:alignment toView:previousView forAxis:axis]];
+            }
+            <span class="keyword">else</span> {
+                <span class="comment">// First view</span>
+                [constraints addObject:[view autoPinEdgeToSuperviewEdge:firstEdge withInset:leadingSpacing]];
+            }
+            previousView = view;
+        }
+    }
+    <span class="keyword">if</span> (previousView) {
+        <span class="comment">// Last View</span>
+        [constraints addObject:[previousView autoPinEdgeToSuperviewEdge:lastEdge withInset:trailingSpacing]];
+    }
+    <span class="keyword">return</span> constraints;            
+</code></pre><ol>
+<li>这个API的目的是将一组UIView按照Spacing间距进行均分，同时每个UIView的宽度或者高度保持一致。</li>
+<li>第一部分是根据传入的轴，进行判断，是在竖直方向均分还是水平方向均分，同时影响的还有是宽度一致还是高度一致。</li>
+<li>第二部分是根据传入的轴（比如水平方向），将前一个View的右边距和后一个View的左边距添加间距，循环添加，直至最后一个View的右边距和父View的右边距添加完成约束。  </li>
+</ol>
+<p>其他方面，这个分类的作用基本和<code>ALView + PureLayout一致</code>，也就不再重复解释了。<br>至此，PureLayout的源码解析基本上差不多了，其余类似于边对齐的API，如：</p>
+<pre><code><span class="pp">- <span class="params">(<span class="variable">NSLayoutConstraint</span> *)</span>autoPinEdge:<span class="params">(<span class="variable">ALEdge</span>)</span>edge toEdge:<span class="params">(<span class="variable">ALEdge</span>)</span>toEdge ofView:<span class="params">(<span class="variable">ALView</span> *)</span>otherView;</span>
+</code></pre><p>又或者是约束尺寸的，如：</p>
+<pre><code>- <span class="list">(<span class="keyword">__NSArray_of</span><span class="list">(<span class="keyword">NSLayoutConstraint</span> <span class="variable">*) *</span>)</span>autoSetDimensionsToSize:<span class="list">(<span class="keyword">CGSize</span>)</span>size<span class="comment">;</span></span>
+</code></pre><p>都大同小异，在此就不一一赘述了。</p>
+<p>最后，<strong>强调一点</strong>：</p>
+<ol>
+<li>PureLayout必须在主线程使用，其本身实现非常依赖于静态的全局变量。</li>
+</ol>
+
+      
+    </div>
+    <footer class="article-footer">
+      <a data-url="http://satanwoo.github.io/2016/02/05/PureLayout/" data-id="cik9sx1ia000ob0i1a0mu161n" class="article-share-link">Share</a>
+      
+      
+  <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
+
+    </footer>
+  </div>
+  
+</article>
+
+
+  
     <article id="post-Refactor-Mega-ViewController" class="article article-type-post" itemscope itemprop="blogPost">
   <div class="article-meta">
     <a href="/2015/12/30/Refactor-Mega-ViewController/" class="article-date">
@@ -376,97 +746,7 @@ extension Task {
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/12/30/Refactor-Mega-ViewController/" data-id="ciirmomvq000mmji1i0wttm7p" class="article-share-link">Share</a>
-      
-      
-  <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
-
-    </footer>
-  </div>
-  
-</article>
-
-
-  
-    <article id="post-Learn-R-3" class="article article-type-post" itemscope itemprop="blogPost">
-  <div class="article-meta">
-    <a href="/2015/12/27/Learn-R-3/" class="article-date">
-  <time datetime="2015-12-26T17:15:17.000Z" itemprop="datePublished">2015-12-27</time>
-</a>
-    
-  </div>
-  <div class="article-inner">
-    
-    
-      <header class="article-header">
-        
-  
-    <h1 itemprop="name">
-      <a class="article-title" href="/2015/12/27/Learn-R-3/">Learn-R-3</a>
-    </h1>
-  
-
-      </header>
-    
-    <div class="article-entry" itemprop="articleBody">
-      
-        <h3 id="系列连载">系列连载</h3><p><a href="http://satanwoo.github.io/2015/12/13/Learn-R-1/">一步步学R（1）</a><br><a href="http://satanwoo.github.io/2015/12/20/Learn-R-2/">一步步学R（2）</a></p>
-<h3 id="Loop_Function">Loop Function</h3><p>Loop Function是指不<strong>显示</strong>调用<code>for</code>循环的方式来进行一个集合的迭代。<br>在R中，主要有以下几种Loop Function</p>
-<ul>
-<li><p>lapply 对于一个集合中的每个元素通过一个自定义的函数来进行处理，返回的结果<strong>一定是个<code>list</code></strong></p>
-</li>
-<li><p>sapply 和lapply相同，但是对于结果会进行简化。如果返回的结果是个list，并且list里面的元素长度都为<strong>1，那就直接合并成一个vector</strong>返回；而如果返回的list里的元素长度<strong>相同且都大于1，就合并成Matrix</strong>返回；如果不能正确合并，那就返回默认的list。</p>
-</li>
-<li><p>apply，</p>
-</li>
-<li>tapply，</li>
-<li>mapply，</li>
-</ul>
-
-      
-    </div>
-    <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/12/27/Learn-R-3/" data-id="ciirmomw0000qmji1moapf42j" class="article-share-link">Share</a>
-      
-      
-    </footer>
-  </div>
-  
-</article>
-
-
-  
-    <article id="post-LLDB-2" class="article article-type-post" itemscope itemprop="blogPost">
-  <div class="article-meta">
-    <a href="/2015/12/20/LLDB-2/" class="article-date">
-  <time datetime="2015-12-20T15:58:40.000Z" itemprop="datePublished">2015-12-20</time>
-</a>
-    
-  </div>
-  <div class="article-inner">
-    
-    
-      <header class="article-header">
-        
-  
-    <h1 itemprop="name">
-      <a class="article-title" href="/2015/12/20/LLDB-2/">浅出浅出LLDB（2）</a>
-    </h1>
-  
-
-      </header>
-    
-    <div class="article-entry" itemprop="articleBody">
-      
-        <h3 id="系列连载">系列连载</h3><p><a href="http://satanwoo.github.io/2015/12/13/Learn-R-1/">浅入浅出LLDB（1）</a><br><a href="http://satanwoo.github.io/2015/12/13/Learn-R-1/">浅入浅出LLDB（2）</a></p>
-<h3 id="基础语法">基础语法</h3><ol>
-<li><code>expr</code> 表达式命令</li>
-</ol>
-
-      
-    </div>
-    <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/12/20/LLDB-2/" data-id="ciirmomwb000zmji1pvi938zt" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/12/30/Refactor-Mega-ViewController/" data-id="cik9sx1i6000mb0i1j16712e5" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
@@ -617,7 +897,7 @@ extension Task {
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/12/20/Learn-R-2/" data-id="ciirmomw3000rmji15w8tnrfh" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/12/20/Learn-R-2/" data-id="cik9sx1ig000sb0i1cll8g3vl" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/R/">R</a></li></ul>
@@ -671,7 +951,7 @@ extension Task {
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/12/15/Regression-Model-1/" data-id="ciirmomvl000jmji1mm4a22v9" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/12/15/Regression-Model-1/" data-id="cik9sx1i2000jb0i1xb8s1n4l" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Math/">Math</a></li></ul>
@@ -814,7 +1094,7 @@ $foo
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/12/13/Learn-R-1/" data-id="ciirmomw6000umji1r8wxhwhm" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/12/13/Learn-R-1/" data-id="cik9sx1ii000vb0i1k3twzh3o" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/R/">R</a></li></ul>
@@ -920,7 +1200,7 @@ frame <span class="preprocessor">#<span class="number">20</span>: libdyld.dylib`
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/12/11/LLDB-1/" data-id="ciirmomwd0011mji1vqenf959" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/12/11/LLDB-1/" data-id="cik9sx1io0010b0i1s42n4xsn" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
@@ -1219,7 +1499,7 @@ TBBoundingBox TBBoundingBoxMake(<span class="built_in">double</span> x0, <span c
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/12/11/TBAnnotationClustering/" data-id="ciirmomva000amji1vtrltebw" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/12/11/TBAnnotationClustering/" data-id="cik9sx1hs000ab0i1bzq54vlh" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
@@ -1444,7 +1724,7 @@ BOOL success = class_addMethod(<span class="keyword">class</span>, originalSelec
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/11/26/FDFullScreenPopGesture-Source-Code/" data-id="ciirmomwk0017mji11l2jyj1t" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/11/26/FDFullScreenPopGesture-Source-Code/" data-id="cik9sx1iv0016b0i1ycuxbcvf" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
@@ -1554,7 +1834,7 @@ replicationLayer.instanceDelay = <span class="number">0.3</span>
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/11/17/Fun-of-CAReplicationLayer/" data-id="ciirmomwi0015mji1x0khi061" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/11/17/Fun-of-CAReplicationLayer/" data-id="cik9sx1is0014b0i1k6phzstp" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Swift/">Swift</a></li></ul>
@@ -1581,7 +1861,7 @@ replicationLayer.instanceDelay = <span class="number">0.3</span>
   <div class="widget-wrap">
     <h3 class="widget-title">Tags</h3>
     <div class="widget">
-      <ul class="tag-list"><li class="tag-list-item"><a class="tag-list-link" href="/tags/Android/">Android</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/JavaScript/">JavaScript</a><span class="tag-list-count">2</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Math/">Math</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/R/">R</a><span class="tag-list-count">2</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Swift/">Swift</a><span class="tag-list-count">4</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/iOS/">iOS</a><span class="tag-list-count">10</span></li></ul>
+      <ul class="tag-list"><li class="tag-list-item"><a class="tag-list-link" href="/tags/Android/">Android</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/JavaScript/">JavaScript</a><span class="tag-list-count">2</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Math/">Math</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/R/">R</a><span class="tag-list-count">2</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Swift/">Swift</a><span class="tag-list-count">4</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/iOS/">iOS</a><span class="tag-list-count">11</span></li></ul>
     </div>
   </div>
 
@@ -1599,7 +1879,7 @@ replicationLayer.instanceDelay = <span class="number">0.3</span>
   <div class="widget-wrap">
     <h3 class="widget-title">Archives</h3>
     <div class="widget">
-      <ul class="archive-list"><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/12/">December 2015</a><span class="archive-list-count">8</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/11/">November 2015</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/10/">October 2015</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/09/">September 2015</a><span class="archive-list-count">4</span></li></ul>
+      <ul class="archive-list"><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/02/">February 2016</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/12/">December 2015</a><span class="archive-list-count">6</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/11/">November 2015</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/10/">October 2015</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/09/">September 2015</a><span class="archive-list-count">4</span></li></ul>
     </div>
   </div>
 
@@ -1611,15 +1891,15 @@ replicationLayer.instanceDelay = <span class="number">0.3</span>
       <ul>
         
           <li>
+            <a href="/2016/02/05/DGRunKeeperSwitch/">DGRunKeeperSwitch 源码解析</a>
+          </li>
+        
+          <li>
+            <a href="/2016/02/05/PureLayout/">PureLayout 源码解析</a>
+          </li>
+        
+          <li>
             <a href="/2015/12/30/Refactor-Mega-ViewController/">重构你的ViewController</a>
-          </li>
-        
-          <li>
-            <a href="/2015/12/27/Learn-R-3/">Learn-R-3</a>
-          </li>
-        
-          <li>
-            <a href="/2015/12/20/LLDB-2/">浅出浅出LLDB（2）</a>
           </li>
         
           <li>
@@ -1642,7 +1922,7 @@ replicationLayer.instanceDelay = <span class="number">0.3</span>
   
   <div class="outer">
     <div id="footer-info" class="inner">
-      &copy; 2015 John Doe<br>
+      &copy; 2016 John Doe<br>
       Powered by <a href="http://hexo.io/" target="_blank">Hexo</a>
     </div>
   </div>

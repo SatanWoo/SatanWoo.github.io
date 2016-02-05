@@ -3,12 +3,12 @@
 <head>
   <meta charset="utf-8">
   
-  <title>Tag: Swift | Hexo</title>
+  <title>Hexo</title>
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
   <meta name="description">
 <meta property="og:type" content="website">
 <meta property="og:title" content="Hexo">
-<meta property="og:url" content="http://satanwoo.github.io/tags/Swift/index.html">
+<meta property="og:url" content="http://satanwoo.github.io/page/3/index.html">
 <meta property="og:site_name" content="Hexo">
 <meta property="og:description">
 <meta name="twitter:card" content="summary">
@@ -62,93 +62,58 @@
       <div class="outer">
         <section id="main">
   
-  
-    
-    
-      
-      
-      <section class="archives-wrap">
-        <div class="archive-year-wrap">
-          <a href="/archives/2015" class="archive-year">2015</a>
-        </div>
-        <div class="archives">
-    
-    <article class="archive-article archive-type-post">
-  <div class="archive-article-inner">
-    <header class="archive-article-header">
-      <a href="/2015/11/17/Fun-of-CAReplicationLayer/" class="archive-article-date">
-  <time datetime="2015-11-16T17:54:05.000Z" itemprop="datePublished">Nov 17</time>
+    <article id="post-A-New-Start" class="article article-type-post" itemscope itemprop="blogPost">
+  <div class="article-meta">
+    <a href="/2015/09/11/A-New-Start/" class="article-date">
+  <time datetime="2015-09-11T04:15:55.000Z" itemprop="datePublished">2015-09-11</time>
 </a>
-      
+    
+  </div>
+  <div class="article-inner">
+    
+    
+      <header class="article-header">
+        
   
     <h1 itemprop="name">
-      <a class="archive-article-title" href="/2015/11/17/Fun-of-CAReplicationLayer/">Swift每日一练：妙用CAReplicationLayer</a>
+      <a class="article-title" href="/2015/09/11/A-New-Start/">iOS下载模块的实现</a>
     </h1>
   
 
-    </header>
-  </div>
-</article>
-  
+      </header>
     
-    
-    <article class="archive-article archive-type-post">
-  <div class="archive-article-inner">
-    <header class="archive-article-header">
-      <a href="/2015/11/12/Swift-UITransition-iOS8/" class="archive-article-date">
-  <time datetime="2015-11-11T18:33:50.000Z" itemprop="datePublished">Nov 12</time>
-</a>
+    <div class="article-entry" itemprop="articleBody">
       
-  
-    <h1 itemprop="name">
-      <a class="archive-article-title" href="/2015/11/12/Swift-UITransition-iOS8/">Swift每日一练：自定义转场在iOS8中的那些坑</a>
-    </h1>
-  
-
-    </header>
-  </div>
-</article>
-  
-    
-    
-    <article class="archive-article archive-type-post">
-  <div class="archive-article-inner">
-    <header class="archive-article-header">
-      <a href="/2015/10/29/Swift-Count-Down-Label/" class="archive-article-date">
-  <time datetime="2015-10-28T18:54:23.000Z" itemprop="datePublished">Oct 29</time>
-</a>
+        <p>这是我在实习的时候对于一个下载模块的实现，在这里记录一下心得体会。这个模块完全独立实现，且不依赖于公司任何的代码，不会涉及任何隐私。</p>
+<h3 id="下载模块的需求">下载模块的需求</h3><p>在实现一个新模块之前，我们需要理清楚这个模块需要支持最小的功能集，并逐步扩展。并且由于下载模块是存在潜在的可能性被多个模块调用，因此，我们特别要注意模块的封装。</p>
+<h4 id="功能需求">功能需求</h4><h5 id="支持下载">支持下载</h5><p>   下载模块最基本的自然就是可以正确的将需要下载的东西下载到指定路径，这里下载的东西包括但是不局限于图片、文本文档、压缩文件等等。因此，这些下载东西的大小是不等的，在设计功能的时候，需要讲这点考虑进去。</p>
+<h5 id="支持取消下载">支持取消下载</h5><p>   处于控制角度的考虑，甚至是出于当流量和资源节省的角度考虑，我们都已经对下载任务有控制权。可以随时根据我们业务处于的状态，对下载任务进行暂停或者完整的停止取消。</p>
+<h5 id="支持并发下载">支持并发下载</h5><p>   下载任务的个数肯定不会只有一个，而是可能同时存在多个。因此，我们就需要考虑如何去支持多个下载任务同时并发的下载。其外，我们还要考虑到潜在的任务之间的关联性和依赖性（比如B下载任务需要依赖于A下载任务的完成）</p>
+<p>初步的任务我们可以认为就是如上三个就可以（<b>初期设计模块真的不要考虑过多功能，先开始做起来，一点点看着自己造的轮子可以运转起来，成就感会促使你会不停的去完善。当然，你的代码一定要写的整洁易读！</b>）</p>
+        
+          <p class="article-more-link">
+            <a href="/2015/09/11/A-New-Start/#more">Read More</a>
+          </p>
+        
       
-  
-    <h1 itemprop="name">
-      <a class="archive-article-title" href="/2015/10/29/Swift-Count-Down-Label/">Swift每日一练：重写UICountingLabel</a>
-    </h1>
-  
-
-    </header>
-  </div>
-</article>
-  
-    
-    
-    <article class="archive-article archive-type-post">
-  <div class="archive-article-inner">
-    <header class="archive-article-header">
-      <a href="/2015/10/27/Swift-Circle-Slider/" class="archive-article-date">
-  <time datetime="2015-10-27T07:24:11.000Z" itemprop="datePublished">Oct 27</time>
-</a>
+    </div>
+    <footer class="article-footer">
+      <a data-url="http://satanwoo.github.io/2015/09/11/A-New-Start/" data-id="cik9sx1gj0000b0i14ljt5apl" class="article-share-link">Share</a>
       
-  
-    <h1 itemprop="name">
-      <a class="archive-article-title" href="/2015/10/27/Swift-Circle-Slider/">Swift每日一练：圆形滑动条</a>
-    </h1>
-  
+      
+  <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
 
-    </header>
+    </footer>
   </div>
+  
 </article>
+
+
   
   
-    </div></section>
+    <nav id="page-nav">
+      <a class="extend prev" rel="prev" href="/page/2/">&laquo; Prev</a><a class="page-number" href="/">1</a><a class="page-number" href="/page/2/">2</a><span class="page-number current">3</span>
+    </nav>
   
 </section>
         
