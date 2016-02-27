@@ -62,6 +62,640 @@
       <div class="outer">
         <section id="main">
   
+    <article id="post-TBAnnotationClustering" class="article article-type-post" itemscope itemprop="blogPost">
+  <div class="article-meta">
+    <a href="/2015/12/11/TBAnnotationClustering/" class="article-date">
+  <time datetime="2015-12-10T16:56:04.000Z" itemprop="datePublished">2015-12-11</time>
+</a>
+    
+  </div>
+  <div class="article-inner">
+    
+    
+      <header class="article-header">
+        
+  
+    <h1 itemprop="name">
+      <a class="article-title" href="/2015/12/11/TBAnnotationClustering/">TBAnnotationClustering源码解析</a>
+    </h1>
+  
+
+      </header>
+    
+    <div class="article-entry" itemprop="articleBody">
+      
+        <p>毕设这两天飞一般的加速，终于可以写写源码解析了，嘿嘿，这周读两个跟性能相关的源码，首先是一个跟地图相关的，今天来看看一个数据结构在iOS开发中的妙用。</p>
+<h3 id="TBAnnotationClustering">TBAnnotationClustering</h3><p>我们都知道，MapView的实现机制其实和UITableView类似，首先他们都是基于UIScrollView支持滑动的，此外，他们都采用了循环服用的机制了来保持内存的开销。</p>
+<p><strong>但是</strong>，两者之间有个很大的区别就是数量级的差距，UITableView就算充满整个屏幕，充其量也就是10多个同时可见的VisibleCell，因此就多维护一个大小是VisibleCells数量 ＋ 2的这样一个循环队列，进行复用。但是MapView就不一样了，地图上同时展示一段范围内几千个Point of Interest是非常有可能的，这一下子的内存开销和性能卡顿就非常不得了，因此我们需要一种合理的手段来避免，这就是我们今天要讲解的TBAnnotationClustering的由来。</p>
+<p><a href="https://github.com/thoughtbot/TBAnnotationClustering" target="_blank" rel="external">Github地址</a></p>
+<h3 id="Level_of_Detail">Level of Detail</h3><p>首先，让我们先介绍一下相关背景知识。</p>
+<p>根据图像渲染的理论我们可以知道，人的视野存在焦点区域和盲点区域，总是更倾向于关注处于视线左上角到视线中心部分的。因此，在现实应用中，如游戏场景，当场景需要展现的模型距离视线焦点非常近时，就采用高精度的模型来进行展示；而到模型处于较远位置时，比如体育游戏的场外观众，就可以采用低精度模型进行替换，减少渲染时候的计算量；而到模型所处位置基本可以考虑成为背景时，则会采用基本图元进行展示。通过这种方法，即保证了场景的真实观感，同时又大大减少了不必要的计算量。这也就是通常计算机图形学领域所谓的Level Of Detail技术。</p>
+<h3 id="QuadTree">QuadTree</h3><p>QuadTree可能很多人会比较陌生，但是一提到他的哥哥 － 二叉树，想必大家不会陌生，所以QuadTree又被称为四叉树，关于四叉树的定义，</p>
+<blockquote><br>A quadtree is a tree data structure in which each internal node has exactly four children.<br></blockquote>
+
+<p>四叉树被广泛的运用于空间划分。通过将空间递归划分不同层次的子结构，可以达到较高的空间数据插入和查询效果。</p>
+<p>下面就是一张比较经典的四叉树构造，首先先将一个大空间划分为四个字空间 a b c d。然后根据每一个子空间内的节点个数再进行细分。<strong>这里要强调一点，四叉树的细分没有具体要求，你可以按你的需求划分成每个节点能只包含一个，也可以根据平衡减少划分次数。</strong></p>
+<p><img src="http://img.blog.csdn.net/20131005154434687?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvemhvdXh1Z3VhbmcyMzY=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast"></p>
+<h3 id="TBAnnotationClustering源码讲解">TBAnnotationClustering源码讲解</h3><p>打开这个项目，粗略过一下项目结构，大致需要关注的代码如下：</p>
+<ul>
+<li>TBQuadTree.h/.m</li>
+<li>TBCoordinateQuadTree.h/.m</li>
+</ul>
+<p>让我们一个个来分析</p>
+<h4 id="TBQuadTree">TBQuadTree</h4><p>毫无疑问，从文件名称来看，我们就知道，这个类就代表基础的四叉树数据结构，首先让我们来看看数据结构的定义</p>
+<pre><code><span class="keyword">typedef</span> <span class="class"><span class="keyword">struct</span> <span class="title">TBQuadTreeNodeData</span> </span>{
+    <span class="built_in">double</span> x;
+    <span class="built_in">double</span> y;
+    <span class="keyword">void</span>* data;
+} TBQuadTreeNodeData;
+TBQuadTreeNodeData TBQuadTreeNodeDataMake(<span class="built_in">double</span> x, <span class="built_in">double</span> y, <span class="keyword">void</span>* data);
+</code></pre><p>这个毫无疑问，就是代表的坐标系的<strong>数据节点</strong>。 (x, y)表征坐标点，void *data自由的指向附加的数据。</p>
+<pre><code><span class="keyword">typedef</span> <span class="class"><span class="keyword">struct</span> <span class="title">TBBoundingBox</span> </span>{
+    <span class="built_in">double</span> x0; <span class="built_in">double</span> y0;
+    <span class="built_in">double</span> xf; <span class="built_in">double</span> yf;
+} TBBoundingBox;
+TBBoundingBox TBBoundingBoxMake(<span class="built_in">double</span> x0, <span class="built_in">double</span> y0, <span class="built_in">double</span> xf, <span class="built_in">double</span> yf);
+</code></pre><p>这个同样很简单，用两个对角点限定了一个长方形区域，也就是一个四叉树的节点究竟包含哪些范围。</p>
+<pre><code><span class="label">typedef</span> <span class="keyword">struct </span>quadTreeNode {
+    <span class="keyword">struct </span>quadTreeNode* northWest<span class="comment">;</span>
+    <span class="keyword">struct </span>quadTreeNode* northEast<span class="comment">;</span>
+    <span class="keyword">struct </span>quadTreeNode* southWest<span class="comment">;</span>
+    <span class="keyword">struct </span>quadTreeNode* southEast<span class="comment">;</span>
+    <span class="keyword">TBBoundingBox </span><span class="keyword">boundingBox;
+</span>    int <span class="keyword">bucketCapacity;
+</span>    TBQuadTreeNodeData *points<span class="comment">;</span>
+    int count<span class="comment">;</span>
+} TBQuadTreeNode<span class="comment">;</span>
+<span class="label">TBQuadTreeNode</span>* TBQuadTreeNodeMake(<span class="keyword">TBBoundingBox </span><span class="keyword">boundary, </span>int <span class="keyword">bucketCapacity);</span>
+</code></pre><p>这个稍微复杂点，是四叉树的树节点，其中</p>
+<ul>
+<li>northWest, northEast, southWest, southEast分别代表四叉树的四个子细分区域。</li>
+<li>bondingBox代表的当前这个树节点的涵盖区域。</li>
+<li>bucketCapacity表示这个树节点最大容纳的数据节点个数</li>
+<li>points 数据节点数组</li>
+<li>count 当前包含了数据节点。</li>
+</ul>
+<p><strong>再次强调，千万不要把树节点和数据节点搞混。树节点指的是四叉树上的数据结构，每个树节点最多有四个子树节点，但是可以有bucketCapacity大小的数据节点，数据节点仅仅是用来封装坐标系和其相关的数据的一个数据结构，非四叉树特有。</strong></p>
+<p>看完了数据定义，我们再来看看其实现部分。</p>
+<pre><code><span class="preprocessor">#<span class="keyword">pragma</span> mark - Constructors</span>
+
+<span class="function">TBQuadTreeNodeData <span class="title">TBQuadTreeNodeDataMake</span><span class="params">(<span class="keyword">double</span> x, <span class="keyword">double</span> y, <span class="keyword">void</span>* data)</span>
+</span>{
+    TBQuadTreeNodeData d; d.x = x; d.y = y; d.data = data;
+    <span class="keyword">return</span> d;
+}
+
+<span class="function">TBBoundingBox <span class="title">TBBoundingBoxMake</span><span class="params">(<span class="keyword">double</span> x0, <span class="keyword">double</span> y0, <span class="keyword">double</span> xf, <span class="keyword">double</span> yf)</span>
+</span>{
+    TBBoundingBox bb; bb.x0 = x0; bb.y0 = y0; bb.xf = xf; bb.yf = yf;
+    <span class="keyword">return</span> bb;
+}
+
+<span class="function">TBQuadTreeNode* <span class="title">TBQuadTreeNodeMake</span><span class="params">(TBBoundingBox boundary, <span class="keyword">int</span> bucketCapacity)</span>
+</span>{
+    TBQuadTreeNode* node = <span class="built_in">malloc</span>(<span class="keyword">sizeof</span>(TBQuadTreeNode));
+    node-&gt;northWest = <span class="literal">NULL</span>;
+    node-&gt;northEast = <span class="literal">NULL</span>;
+    node-&gt;southWest = <span class="literal">NULL</span>;
+    node-&gt;southEast = <span class="literal">NULL</span>;
+
+    node-&gt;boundingBox = boundary;
+    node-&gt;bucketCapacity = bucketCapacity;
+    node-&gt;count = <span class="number">0</span>;
+    node-&gt;points = <span class="built_in">malloc</span>(<span class="keyword">sizeof</span>(TBQuadTreeNodeData) * bucketCapacity);
+
+    <span class="keyword">return</span> node;
+}
+</code></pre><p>这三个构造函数，分别是构造<span style="color:red">数据节点</span>、长方形以及<span style="color:blue">四叉树节点</span>，默认情况下四叉树的节点<strong>并非满构造</strong>，而是初始化为空，根据需要插入新节点。</p>
+<pre><code><span class="label">#pragma</span> <span class="keyword">mark </span>- <span class="keyword">Bounding </span><span class="keyword">Box </span>Functions
+
+<span class="keyword">bool </span><span class="keyword">TBBoundingBoxContainsData(TBBoundingBox </span><span class="keyword">box, </span>TBQuadTreeNodeData <span class="preprocessor">data</span>)
+{
+    <span class="keyword">bool </span>containsX = <span class="keyword">box.x0 </span>&lt;= <span class="preprocessor">data</span>.x &amp;&amp; <span class="preprocessor">data</span>.x &lt;= <span class="keyword">box.xf;
+</span>    <span class="keyword">bool </span>containsY = <span class="keyword">box.y0 </span>&lt;= <span class="preprocessor">data</span>.y &amp;&amp; <span class="preprocessor">data</span>.y &lt;= <span class="keyword">box.yf;
+</span>
+    return containsX &amp;&amp; containsY<span class="comment">;</span>
+}
+
+<span class="keyword">bool </span><span class="keyword">TBBoundingBoxIntersectsBoundingBox(TBBoundingBox </span><span class="keyword">b1, </span><span class="keyword">TBBoundingBox </span><span class="keyword">b2)
+</span>{
+    return (<span class="keyword">b1.x0 </span>&lt;= <span class="keyword">b2.xf </span>&amp;&amp; <span class="keyword">b1.xf </span>&gt;= <span class="keyword">b2.x0 </span>&amp;&amp; <span class="keyword">b1.y0 </span>&lt;= <span class="keyword">b2.yf </span>&amp;&amp; <span class="keyword">b1.yf </span>&gt;= <span class="keyword">b2.y0);
+</span>}
+</code></pre><p>随后就是上面两个判断长方形包含和相交的方法了，包含自然是整个包围。而相交的补集是不相交，即在横坐标上一个长方形的xf另一个长方形的x0抑或是一个长方形的x0完全大于另一个长方形的xf，当然在y轴上也是同理，因此通过补集很容易就理解TBBoundingBoxIntersectsBoundingBox的实现了。</p>
+<p>然后来看看非常重要的几个函数，首先是<strong>TBQuadTreeNodeSubdivide</strong></p>
+<pre><code><span class="label">void</span> TBQuadTreeNodeSubdivide(TBQuadTreeNode* node)
+{
+    <span class="keyword">TBBoundingBox </span><span class="keyword">box </span>= node-&gt;<span class="keyword">boundingBox;
+</span>
+    double xMid = (<span class="keyword">box.xf </span>+ <span class="keyword">box.x0) </span>/ <span class="number">2</span>.<span class="number">0</span><span class="comment">;</span>
+    double yMid = (<span class="keyword">box.yf </span>+ <span class="keyword">box.y0) </span>/ <span class="number">2</span>.<span class="number">0</span><span class="comment">;</span>
+
+    <span class="keyword">TBBoundingBox </span>northWest = <span class="keyword">TBBoundingBoxMake(box.x0, </span><span class="keyword">box.y0, </span>xMid, yMid)<span class="comment">;</span>
+    node-&gt;northWest = TBQuadTreeNodeMake(northWest, node-&gt;<span class="keyword">bucketCapacity);
+</span>
+    <span class="keyword">TBBoundingBox </span>northEast = <span class="keyword">TBBoundingBoxMake(xMid, </span><span class="keyword">box.y0, </span><span class="keyword">box.xf, </span>yMid)<span class="comment">;</span>
+    node-&gt;northEast = TBQuadTreeNodeMake(northEast, node-&gt;<span class="keyword">bucketCapacity);
+</span>
+    <span class="keyword">TBBoundingBox </span>southWest = <span class="keyword">TBBoundingBoxMake(box.x0, </span>yMid, xMid, <span class="keyword">box.yf);
+</span>    node-&gt;southWest = TBQuadTreeNodeMake(southWest, node-&gt;<span class="keyword">bucketCapacity);
+</span>
+    <span class="keyword">TBBoundingBox </span>southEast = <span class="keyword">TBBoundingBoxMake(xMid, </span>yMid, <span class="keyword">box.xf, </span><span class="keyword">box.yf);
+</span>    node-&gt;southEast = TBQuadTreeNodeMake(southEast, node-&gt;<span class="keyword">bucketCapacity);
+</span>}
+</code></pre><p>这个函数负责将四叉树节点进行细分。首先获取当前节点负责的长方形区域的中点，然后根据中点到原有长方形的四个顶点，分成四个象限，进行划分。<strong>这个时候请注意</strong>，还只是进行四叉树节点的细分，还没重新更改数据节点的分布。</p>
+<pre><code><span class="keyword">bool</span> TBQuadTreeNodeInsertData(TBQuadTreeNode* node, TBQuadTreeNodeData data)
+{
+    <span class="keyword">if</span> (!TBBoundingBoxContainsData(node-&gt;boundingBox, data)) {
+        <span class="keyword">return</span> <span class="keyword">false</span>;
+    }
+
+    <span class="keyword">if</span> (node-&gt;count &lt; node-&gt;bucketCapacity) {
+        node-&gt;points[node-&gt;count++] = data;
+        <span class="keyword">return</span> <span class="keyword">true</span>;
+    }
+
+    <span class="keyword">if</span> (node-&gt;northWest == <span class="keyword">NULL</span>) {
+        TBQuadTreeNodeSubdivide(node);
+    }
+
+    <span class="keyword">if</span> (TBQuadTreeNodeInsertData(node-&gt;northWest, data)) <span class="keyword">return</span> <span class="keyword">true</span>;
+    <span class="keyword">if</span> (TBQuadTreeNodeInsertData(node-&gt;northEast, data)) <span class="keyword">return</span> <span class="keyword">true</span>;
+    <span class="keyword">if</span> (TBQuadTreeNodeInsertData(node-&gt;southWest, data)) <span class="keyword">return</span> <span class="keyword">true</span>;
+    <span class="keyword">if</span> (TBQuadTreeNodeInsertData(node-&gt;southEast, data)) <span class="keyword">return</span> <span class="keyword">true</span>;
+
+    <span class="keyword">return</span> <span class="keyword">false</span>;
+}
+</code></pre><p>这个函数则是真正的将数据插入到节点中。</p>
+<ul>
+<li>首先先判断这个数据是否落在该长方形中，不是直接滚蛋。</li>
+<li>如果当前包含的数据节点个数没有超过最大数目，直接应用在其中。</li>
+<li>如果四个子节点为空，就先创建</li>
+<li>然后再递归插入</li>
+</ul>
+<pre><code><span class="type">void</span> <span class="type">TBQuadTreeGatherDataInRange</span>(<span class="type">TBQuadTreeNode</span>* node, <span class="type">TBBoundingBox</span> <span class="type">range</span>, <span class="type">TBDataReturnBlock</span> <span class="keyword">block</span>)
+{
+    <span class="keyword">if</span> (!<span class="type">TBBoundingBoxIntersectsBoundingBox</span>(node-&gt;boundingBox, <span class="type">range</span>)) {
+        <span class="keyword">return</span>;
+    }
+
+    <span class="keyword">for</span> (<span class="type">int</span> i = <span class="number">0</span>; i &lt; node-&gt;count; i++) {
+        <span class="keyword">if</span> (<span class="type">TBBoundingBoxContainsData</span>(<span class="type">range</span>, node-&gt;points[i])) {
+            <span class="keyword">block</span>(node-&gt;points[i]);
+        }
+    }
+
+    <span class="keyword">if</span> (node-&gt;northWest == <span class="type">NULL</span>) {
+        <span class="keyword">return</span>;
+    }
+
+    <span class="type">TBQuadTreeGatherDataInRange</span>(node-&gt;northWest, <span class="type">range</span>, <span class="keyword">block</span>);
+    <span class="type">TBQuadTreeGatherDataInRange</span>(node-&gt;northEast, <span class="type">range</span>, <span class="keyword">block</span>);
+    <span class="type">TBQuadTreeGatherDataInRange</span>(node-&gt;southWest, <span class="type">range</span>, <span class="keyword">block</span>);
+    <span class="type">TBQuadTreeGatherDataInRange</span>(node-&gt;southEast, <span class="type">range</span>, <span class="keyword">block</span>);
+}
+</code></pre><p>这个就是通过DFS进行节点的遍历，一旦有落在range内的数据节点，就进行回调。</p>
+<p><strong>综上所述，就是一个基本的四叉树，可以很明显的看到，在四叉树的构建、遍历中，都用了树的递归，也就是俗称的DFS算法。</strong></p>
+<h4 id="TBCoordinateQuadTree">TBCoordinateQuadTree</h4><p>这个类呢，和实质上的四叉树或者性能优化并无太大关系，只是一层简单的封装，我们大致来了解一下就好。</p>
+<pre><code><span class="keyword">TBBoundingBox </span><span class="keyword">TBBoundingBoxForMapRect(MKMapRect </span>mapRect)
+{
+    CLLocationCoordinate2D topLeft = MKCoordinateForMapPoint(mapRect.origin)<span class="comment">;</span>
+    CLLocationCoordinate2D <span class="keyword">botRight </span>= MKCoordinateForMapPoint(MKMapPointMake(MKMapRectGetMaxX(mapRect), MKMapRectGetMaxY(mapRect)))<span class="comment">;</span>
+
+    CLLocationDegrees minLat = <span class="keyword">botRight.latitude;
+</span>    CLLocationDegrees maxLat = topLeft.latitude<span class="comment">;</span>
+
+    CLLocationDegrees minLon = topLeft.longitude<span class="comment">;</span>
+    CLLocationDegrees maxLon = <span class="keyword">botRight.longitude;
+</span>
+    return <span class="keyword">TBBoundingBoxMake(minLat, </span>minLon, maxLat, maxLon)<span class="comment">;</span>
+}
+
+<span class="label">MKMapRect</span> TBMapRectForBoundingBox(<span class="keyword">TBBoundingBox </span><span class="keyword">boundingBox)
+</span>{
+    MKMapPoint topLeft = MKMapPointForCoordinate(CLLocationCoordinate2DMake(<span class="keyword">boundingBox.x0, </span><span class="keyword">boundingBox.y0));
+</span>    MKMapPoint <span class="keyword">botRight </span>= MKMapPointForCoordinate(CLLocationCoordinate2DMake(<span class="keyword">boundingBox.xf, </span><span class="keyword">boundingBox.yf));
+</span>
+    return MKMapRectMake(topLeft.x, <span class="keyword">botRight.y, </span>fabs(<span class="keyword">botRight.x </span>- topLeft.x), fabs(<span class="keyword">botRight.y </span>- topLeft.y))<span class="comment">;</span>
+}
+</code></pre><p>这两个函数就是MKMapRect和我们的BoundingBox之间的转换，难度很小，但是很有意思啊。从中我们可以一窥MapView的一些实现。比如MapView不仅仅是传统的ContentView和ContainerView，更重要的其坐标系和传统的CGRect之间的无法换算，<strong>简而言之，就是，在MapView中，所有的东西都要拿经度纬度来谈。</strong></p>
+<pre><code>- (<span class="built_in">NSArray</span> *)clusteredAnnotationsWithinMapRect:(<span class="built_in">MKMapRect</span>)rect withZoomScale:(<span class="keyword">double</span>)zoomScale
+{
+     <span class="comment">// 1.</span>
+    <span class="keyword">double</span> TBCellSize = TBCellSizeForZoomScale(zoomScale);
+    <span class="keyword">double</span> scaleFactor = zoomScale / TBCellSize;
+
+     <span class="comment">// 2.</span>
+    <span class="built_in">NSInteger</span> minX = floor(<span class="built_in">MKMapRectGetMinX</span>(rect) * scaleFactor);
+    <span class="built_in">NSInteger</span> maxX = floor(<span class="built_in">MKMapRectGetMaxX</span>(rect) * scaleFactor);
+    <span class="built_in">NSInteger</span> minY = floor(<span class="built_in">MKMapRectGetMinY</span>(rect) * scaleFactor);
+    <span class="built_in">NSInteger</span> maxY = floor(<span class="built_in">MKMapRectGetMaxY</span>(rect) * scaleFactor);
+
+    <span class="built_in">NSMutableArray</span> *clusteredAnnotations = [[<span class="built_in">NSMutableArray</span> alloc] init];
+    <span class="keyword">for</span> (<span class="built_in">NSInteger</span> x = minX; x &lt;= maxX; x++) {
+        <span class="keyword">for</span> (<span class="built_in">NSInteger</span> y = minY; y &lt;= maxY; y++) {
+            <span class="built_in">MKMapRect</span> mapRect = <span class="built_in">MKMapRectMake</span>(x / scaleFactor, y / scaleFactor, <span class="number">1.0</span> / scaleFactor, <span class="number">1.0</span> / scaleFactor);
+
+            __block <span class="keyword">double</span> totalX = <span class="number">0</span>;
+            __block <span class="keyword">double</span> totalY = <span class="number">0</span>;
+            __block <span class="keyword">int</span> count = <span class="number">0</span>;
+
+            <span class="built_in">NSMutableArray</span> *names = [[<span class="built_in">NSMutableArray</span> alloc] init];
+            <span class="built_in">NSMutableArray</span> *phoneNumbers = [[<span class="built_in">NSMutableArray</span> alloc] init];
+
+              <span class="comment">// 3.</span>
+            TBQuadTreeGatherDataInRange(<span class="keyword">self</span><span class="variable">.root</span>, TBBoundingBoxForMapRect(mapRect), ^(TBQuadTreeNodeData data) {
+                totalX += data<span class="variable">.x</span>;
+                totalY += data<span class="variable">.y</span>;
+                count++;
+
+                TBHotelInfo hotelInfo = *(TBHotelInfo *)data<span class="variable">.data</span>;
+                [names addObject:[<span class="built_in">NSString</span> stringWithFormat:<span class="string">@"%s"</span>, hotelInfo<span class="variable">.hotelName</span>]];
+                [phoneNumbers addObject:[<span class="built_in">NSString</span> stringWithFormat:<span class="string">@"%s"</span>, hotelInfo<span class="variable">.hotelPhoneNumber</span>]];
+            });
+
+              <span class="comment">// 4.</span>
+            <span class="keyword">if</span> (count == <span class="number">1</span>) {
+                CLLocationCoordinate2D coordinate = CLLocationCoordinate2DMake(totalX, totalY);
+                TBClusterAnnotation *annotation = [[TBClusterAnnotation alloc] initWithCoordinate:coordinate count:count];
+                annotation<span class="variable">.title</span> = [names lastObject];
+                annotation<span class="variable">.subtitle</span> = [phoneNumbers lastObject];
+                [clusteredAnnotations addObject:annotation];
+            }
+
+           <span class="comment">// 5.</span>
+            <span class="keyword">if</span> (count &gt; <span class="number">1</span>) {
+                CLLocationCoordinate2D coordinate = CLLocationCoordinate2DMake(totalX / count, totalY / count);
+                TBClusterAnnotation *annotation = [[TBClusterAnnotation alloc] initWithCoordinate:coordinate count:count];
+                [clusteredAnnotations addObject:annotation];
+            }
+        }
+    }
+
+    <span class="keyword">return</span> [<span class="built_in">NSArray</span> arrayWithArray:clusteredAnnotations];
+}
+</code></pre><p>而上述的最后一个函数，就是根据传入的MKMapRect，返回簇类数组的。</p>
+<ul>
+<li>1.首先根据放缩比例，或者Cell大小。</li>
+<li>2.根据cell大小计算当前地图区域的范围所对应的minX - maxX，minY - maxY对应的网格。</li>
+</ul>
+<p>什么是网格？就是根据Cell大小将地图划分成了一块块区域，通过minX， maxX, minY - maxY找到对应的网格。类似于array[1][2]找到第二行第三列的网格（从0开始索引）。</p>
+<ul>
+<li>3.遍历每一个网格，获取当前网格对应的四叉树节点中的数据信息，并记录个数。</li>
+<li>4.如果个数是1，那么直接显示，包含数据节点的附加信息，比如在这里就是酒店名称和酒店电话。</li>
+<li>5.如果个数大于1的话，利用均值计算中心点，中心点是所有包含的数据节点平均值，同时信息只简单的显示个数。</li>
+</ul>
+<p>至此，整个代码就解读完整啦。</p>
+
+      
+    </div>
+    <footer class="article-footer">
+      <a data-url="http://satanwoo.github.io/2015/12/11/TBAnnotationClustering/" data-id="cil4zgkwn000fpoi1du0r9fr3" class="article-share-link">Share</a>
+      
+      
+  <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
+
+    </footer>
+  </div>
+  
+</article>
+
+
+  
+    <article id="post-FDFullScreenPopGesture-Source-Code" class="article article-type-post" itemscope itemprop="blogPost">
+  <div class="article-meta">
+    <a href="/2015/11/26/FDFullScreenPopGesture-Source-Code/" class="article-date">
+  <time datetime="2015-11-26T03:38:42.000Z" itemprop="datePublished">2015-11-26</time>
+</a>
+    
+  </div>
+  <div class="article-inner">
+    
+    
+      <header class="article-header">
+        
+  
+    <h1 itemprop="name">
+      <a class="article-title" href="/2015/11/26/FDFullScreenPopGesture-Source-Code/">FDFullScreenPopGesture源码解析</a>
+    </h1>
+  
+
+      </header>
+    
+    <div class="article-entry" itemprop="articleBody">
+      
+        <p><em>嘿嘿，花了三天时间把自己的代码从700行缩减成了200行，终于有时间可以拜读新源码了，好开心。</em></p>
+<p>好了，废话不多话，今天我们要读了百度出品的一个开源项目FDFullScreenPopGesture。</p>
+<h2 id="项目介绍">项目介绍</h2><p><a href="https://github.com/forkingdog/FDFullscreenPopGesture" target="_blank" rel="external">FDFullScreenPopGesture</a>是一款无需改动即可整合进入现有项目的全局手势操作，使用这个即可以在左侧边缘拖拽的时候返回上一级的效果。</p>
+<p>看到这，有人会问，我们这个直接用UIPanGestureRecognizer不也能达到吗？<br>没错，仅仅是返回上一级这个需求确实很简单。但是iOS7上返回上一级时候，UINavigationBar的切换效果你能实现吗？</p>
+<p>而且，我要说的重点是<strong>FDFullscreenPopGesture</strong>实现思路很赞！！！</p>
+<h2 id="源码分析">源码分析</h2><h3 id="结构分析">结构分析</h3><p>整个FDFullscreenPopGesture其实可以主要拆分成三块：</p>
+<pre><code>-<span class="ruby">- _FDFullscreenPopGestureRecognizerDelegate
+</span>-<span class="ruby">- <span class="constant">UIViewController</span> (<span class="constant">FDFullscreenPopGesturePrivate</span>)
+</span>-<span class="ruby">- <span class="constant">UINavigationController</span> (<span class="constant">FDFullscreenPopGesture</span>)</span>
+</code></pre><ul>
+<li><p>_FDFullscreenPopGestureRecognizerDelegate虽然名字看起来像一个Protocol，但是它实质上是一个<strong>NSObject</strong>子类，同时实现了<strong>UIGestureRecognizerDelegate</strong>。这么做的好处是什么呢？不知道大家有没有经历过ViewController重构，以前很多时候，比如我们写UIScrollView，UITableView，他们的Delegate，DataSource都耦合进了ViewController，常常导致MassViewController灾难的发生。<strong>单独构建一个专门负责的Delgeate“处理器”是非常有效的手段</strong></p>
+</li>
+<li><p>UIViewController (FDFullscreenPopGesturePrivate)是一个Category，我们在这个分类里面主要进行<strong>viewWillAppear</strong>的Hook，具体做什么，后面章节我们细细道来。</p>
+</li>
+<li><p>UINavigationController (FDFullscreenPopGesture)也是一个分类，是进行<strong>pushViewController:animated:</strong>方法的hook，实现部分我们后续再看。</p>
+</li>
+</ul>
+<h3 id="源码分析-1">源码分析</h3><h4 id="_FDFullscreenPopGestureRecognizerDelegate">_FDFullscreenPopGestureRecognizerDelegate</h4><pre><code>- (<span class="built_in">BOOL</span>)gestureRecognizerShouldBegin:(<span class="built_in">UIPanGestureRecognizer</span> *)gestureRecognizer
+{
+    <span class="comment">// 1.</span>
+    <span class="keyword">if</span> (<span class="keyword">self</span><span class="variable">.navigationController</span><span class="variable">.viewControllers</span><span class="variable">.count</span> &lt;= <span class="number">1</span>) {
+        <span class="keyword">return</span> <span class="literal">NO</span>;
+    }
+
+    <span class="comment">// 2.</span>
+    <span class="built_in">UIViewController</span> *topViewController = <span class="keyword">self</span><span class="variable">.navigationController</span><span class="variable">.viewControllers</span><span class="variable">.lastObject</span>;
+    <span class="keyword">if</span> (topViewController<span class="variable">.fd_interactivePopDisabled</span>) {
+        <span class="keyword">return</span> <span class="literal">NO</span>;
+    }
+
+    <span class="comment">// 3. </span>
+    <span class="built_in">CGPoint</span> beginningLocation = [gestureRecognizer locationInView:gestureRecognizer<span class="variable">.view</span>];
+    <span class="built_in">CGFloat</span> maxAllowedInitialDistance = topViewController<span class="variable">.fd_interactivePopMaxAllowedInitialDistanceToLeftEdge</span>;
+    <span class="keyword">if</span> (maxAllowedInitialDistance &gt; <span class="number">0</span> &amp;&amp; beginningLocation<span class="variable">.x</span> &gt; maxAllowedInitialDistance) {
+        <span class="keyword">return</span> <span class="literal">NO</span>;
+    }
+
+    <span class="comment">// 4.</span>
+    <span class="keyword">if</span> ([[<span class="keyword">self</span><span class="variable">.navigationController</span> valueForKey:<span class="string">@"_isTransitioning"</span>] boolValue]) {
+        <span class="keyword">return</span> <span class="literal">NO</span>;
+    }
+
+    <span class="comment">// 5.</span>
+    <span class="built_in">CGPoint</span> translation = [gestureRecognizer translationInView:gestureRecognizer<span class="variable">.view</span>];
+    <span class="keyword">if</span> (translation<span class="variable">.x</span> &lt;= <span class="number">0</span>) {
+        <span class="keyword">return</span> <span class="literal">NO</span>;
+    }
+
+    <span class="keyword">return</span> <span class="literal">YES</span>;
+}
+</code></pre><p>整个类特别精简，它的职责就是维护一个UINavigationController然后根据一系列的状态判断该手势是否生效。这些状态包括</p>
+<ol>
+<li>当前UINavigationController的栈是否只剩最后一个ViewController了</li>
+<li>当前即将出栈的topViewController是否禁用了<strong>fd_interactivePopDisabled</strong>，该变量我们稍后会说</li>
+<li>当前手势的启动点是不是离左侧边缘太远了，毕竟我们是要模拟iOS原生的手势操作，原生的不支持全屏，我们为啥要支持！</li>
+<li>当前是否已经处在转场过程中。在这里，可以看到它使用了valueForKey这一<strong>Key-Value-Coding</strong>技术，它可以访问私有变量<strong>_isTransitioning</strong>哦！</li>
+<li>方向相反的滑动滚粗。</li>
+</ol>
+<h4 id="UIViewController_(FDFullscreenPopGesturePrivate)">UIViewController (FDFullscreenPopGesturePrivate)</h4><p>整个这个类也非常简单，就是通过 <strong>fd_viewWillAppear</strong> hook了 <strong>viewWillAppear</strong> 这个方法，然后插入了自己一段回调的block。</p>
+<pre><code>- (<span class="keyword">void</span>)fd_viewWillAppear:(<span class="built_in">BOOL</span>)animated
+{
+    <span class="comment">// Forward to primary implementation.</span>
+    [<span class="keyword">self</span> fd_viewWillAppear:animated];
+
+    <span class="keyword">if</span> (<span class="keyword">self</span><span class="variable">.fd_willAppearInjectBlock</span>) {
+        <span class="keyword">self</span><span class="variable">.fd_willAppearInjectBlock</span>(<span class="keyword">self</span>, animated);
+    }
+}
+</code></pre><h4 id="UINavigationController_(FDFullscreenPopGesture)">UINavigationController (FDFullscreenPopGesture)</h4><p>这个分类是整个项目的逻辑控制核心。它干了这么几件事：</p>
+<ul>
+<li>用 <strong>fd_pushViewController:animated:</strong> hook <strong>pushViewController:animated:</strong></li>
+<li><strong>禁用</strong>UINavgationController的<strong>interactivePopGestureRecognizer</strong></li>
+<li>构建了属于自己UIPanGestureRecognizer替换interactivePopGestureRecognizer，同时把手势的delegate赋值给了_FDFullscreenPopGestureRecognizerDelegate</li>
+</ul>
+<p>它的主要核心代码如下：</p>
+<pre><code>- (<span class="keyword">void</span>)fd_pushViewController:(<span class="built_in">UIViewController</span> *)viewController animated:(<span class="built_in">BOOL</span>)animated
+{
+    <span class="keyword">if</span> (![<span class="keyword">self</span><span class="variable">.interactivePopGestureRecognizer</span><span class="variable">.view</span><span class="variable">.gestureRecognizers</span> containsObject:<span class="keyword">self</span><span class="variable">.fd_fullscreenPopGestureRecognizer</span>]) {
+
+        <span class="comment">// 1.</span>
+        [<span class="keyword">self</span><span class="variable">.interactivePopGestureRecognizer</span><span class="variable">.view</span> addGestureRecognizer:<span class="keyword">self</span><span class="variable">.fd_fullscreenPopGestureRecognizer</span>];
+
+        <span class="comment">// 2.</span>
+        <span class="built_in">NSArray</span> *internalTargets = [<span class="keyword">self</span><span class="variable">.interactivePopGestureRecognizer</span> valueForKey:<span class="string">@"targets"</span>];
+        <span class="keyword">id</span> internalTarget = [internalTargets<span class="variable">.firstObject</span> valueForKey:<span class="string">@"target"</span>];
+        SEL internalAction = <span class="built_in">NSSelectorFromString</span>(<span class="string">@"handleNavigationTransition:"</span>);
+        <span class="keyword">self</span><span class="variable">.fd_fullscreenPopGestureRecognizer</span><span class="variable">.delegate</span> = <span class="keyword">self</span><span class="variable">.fd_popGestureRecognizerDelegate</span>;
+        [<span class="keyword">self</span><span class="variable">.fd_fullscreenPopGestureRecognizer</span> addTarget:internalTarget action:internalAction];
+
+        <span class="comment">// 3.</span>
+        <span class="keyword">self</span><span class="variable">.interactivePopGestureRecognizer</span><span class="variable">.enabled</span> = <span class="literal">NO</span>;
+    }
+
+    <span class="comment">// 4.</span>
+    [<span class="keyword">self</span> fd_setupViewControllerBasedNavigationBarAppearanceIfNeeded:viewController];
+
+    <span class="comment">// Forward to primary implementation.</span>
+    <span class="keyword">if</span> (![<span class="keyword">self</span><span class="variable">.viewControllers</span> containsObject:viewController]) {
+        [<span class="keyword">self</span> fd_pushViewController:viewController animated:animated];
+    }
+}
+</code></pre><p>整体来看这段源码，无非做了如下这些事：</p>
+<ol>
+<li>将UIPanGestureRecognizer添加到本来interactivePopGestureRecognizer所在的view上</li>
+<li><div style="color:red"><strong>这段是重点的重点</strong>，一定要往下看！！！</div><br>将PanGesture的target设置为<strong>internalTarget</strong>，action设置为<br><strong>handleNavigationTransition</strong>.</li>
+<li>禁用interactivePopGestureRecognizer</li>
+<li><p>根据是否需要隐藏UINavigationBar来调用fd_setupViewControllerBasedNavigationBarAppearanceIfNeeded:viewController进行之前提到过的<strong>fdwillAppearInjectBlock</strong>设置，代码如下：</p>
+<pre><code>- (void)fd_setupViewControllerBasedNavigationBarAppearanceIfNeeded:(UIViewController *)appearingViewController
+{
+    <span class="preprocessor">if</span> (!<span class="keyword">self.fd_viewControllerBasedNavigationBarAppearanceEnabled) </span>{
+        return<span class="comment">;</span>
+    }
+
+    __weak typeof(<span class="keyword">self) </span>weakSelf = <span class="keyword">self;
+</span>    _FDViewControllerWillAppearInjectBlock <span class="keyword">block </span>= ^(UIViewController *viewController, <span class="keyword">BOOL </span>animated) {
+        __strong typeof(weakSelf) <span class="keyword">strongSelf </span>= weakSelf<span class="comment">;</span>
+        <span class="preprocessor">if</span> (<span class="keyword">strongSelf) </span>{
+            [<span class="keyword">strongSelf </span>setNavigationBarHidden:viewController.fd_prefersNavigationBarHidden animated:animated]<span class="comment">;</span>
+        }
+    }<span class="comment">;</span>
+
+    // Setup will appear inject <span class="keyword">block </span>to appearing view controller.
+    // Setup disappearing view controller as well, <span class="keyword">because </span>not every view controller is <span class="keyword">added </span>into
+    // stack <span class="keyword">by </span><span class="keyword">pushing, </span>maybe <span class="keyword">by </span><span class="string">"-setViewControllers:"</span>.
+    appearingViewController.fd_willAppearInjectBlock = <span class="keyword">block;
+</span>    UIViewController *disappearingViewController = <span class="keyword">self.viewControllers.lastObject;
+</span>    <span class="preprocessor">if</span> (disappearingViewController &amp;&amp; !disappearingViewController.fd_willAppearInjectBlock) {
+        disappearingViewController.fd_willAppearInjectBlock = <span class="keyword">block;
+</span>    }
+}
+</code></pre></li>
+</ol>
+<p>这段代码就是将即将消失和展现的ViewController在viewWillAppear设置了一个自定义UINavigationBar的回调，用以根据进入的方式来展现NaviagtionBar，而不会出现突兀的“镂空”。</p>
+<p>到这，源码就结束了，可以回家收衣服喽！</p>
+<h3 id="重点">重点</h3><p>源码是不是很简单？有什么好分析的呢？<br>如果你读到这，哈哈，恭喜啦，重点分析来啦。</p>
+<p>首先感谢@J_雨的天才思路，大家可以阅读<a href="http://www.jianshu.com/p/d39f7d22db6c" target="_blank" rel="external">轻松学习之二——iOS利用Runtime自定义控制器POP手势动画</a>这篇文章，真的很赞</p>
+<p>之前我们在上文用红色标注了一段内容：</p>
+<div style="color:red"><br>将PanGesture的target设置为<strong>internalTarget</strong>，action设置为<br><strong>handleNavigationTransition</strong>。</div>
+
+<p>看起来很容易理解，可是大家有没有想过为什么action的名称是handleNavigationTransition呢？</p>
+<p>首先我们先打印看看NavigationController的interactivePopGestureRecognizer究竟是个什么玩意？</p>
+<pre><code>&lt;<span class="built_in">UIScreenEdgePanGestureRecognizer</span>: <span class="number">0x7fea78ec5950</span>; state = Possible; delaysTouchesBegan = <span class="literal">YES</span>; view = &lt;<span class="built_in">UILayoutContainerView</span> <span class="number">0x7fea78f77960</span>&gt;; target= &lt;(action=handleNavigationTransition:, target=&lt;_<span class="built_in">UINavigationInteractiveTransition</span> <span class="number">0x7fea78c1c640</span>&gt;)&gt;
+</code></pre><p>这是什么玩意？让我们分别来看看它答应出来的这些属性。</p>
+<ol>
+<li>state = Possible，很简单，就是一个UIGestureRecognizerState = UIGestureRecognizerStatePossible。</li>
+<li>view = UILayoutContainerView，不太懂，暂时也没觉得有需要，不管他。</li>
+<li>target =&lt;(action=handleNavigationTransition:, target=<_uinavigationinteractivetransition 0x7fea78c1c640="">)，这个看起来很有用，因为我们都知道，Gesture就是通过<strong>Target-Action</strong>的方式进行动作触发的。</_uinavigationinteractivetransition></li>
+</ol>
+<p>所以我们赶紧看看这个<strong>target</strong>是个啥玩意，使用如下命令：</p>
+<pre><code><span class="collection">[self.navigationController.interactivePopGestureRecognizer valueForKey:@<span class="string">"target"</span>]</span><span class="comment">;</span>
+</code></pre><p>卧槽，一运行，Crash了，报找不到这个Key。咋回事，难道我记错了KVC的用户，赶紧换成valueForKey:@”View”试试。</p>
+<p>哎！没错啊！成功得到了如下输出：</p>
+<pre><code>-<span class="string">[UILayoutContainerView objectAtIndexedSubscript:]</span>
+</code></pre><p>那咋回事，看来必须祭出屠龙刀Runtime了，嘿嘿，Objective-C面前，一切私有变量都是纸老虎。</p>
+<pre><code><span class="keyword">unsigned</span> <span class="keyword">int</span> count = <span class="number">0</span>;
+Ivar *var = class_copyIvarList([UIGestureRecognizer <span class="keyword">class</span>], &amp;count);
+<span class="keyword">for</span> (<span class="keyword">unsigned</span> <span class="keyword">int</span> i = <span class="number">0</span>; i &lt; count; i++) {
+     Ivar _var = *(var + i);
+     NSLog(@<span class="string">"%s"</span>, ivar_getTypeEncoding(_var));
+     NSLog(@<span class="string">"%s"</span>, ivar_getName(_var));
+}
+</code></pre><p>输出太长了，我们找我们想看的，</p>
+<pre><code><span class="number">2015</span>-<span class="number">11</span>-<span class="number">27</span> <span class="number">02</span>:<span class="number">10</span>:<span class="number">03.873</span> SamplePhotosApp[<span class="number">85305</span>:<span class="number">2664323</span>] _targets
+<span class="number">2015</span>-<span class="number">11</span>-<span class="number">27</span> <span class="number">02</span>:<span class="number">10</span>:<span class="number">03.873</span> SamplePhotosApp[<span class="number">85305</span>:<span class="number">2664323</span>] @<span class="string">"NSMutableArray"</span>
+</code></pre><p>卧槽，这丫叫_targets，好吧，赶紧改成valueForKey:@”targets”再试试。<br>哎，等等，不是_targets吗，怎么能用targets呢？</p>
+<p><strong>咳咳，吴老师又要来讲课了！对于KVC来说，它的查找顺序是key -&gt; property -&gt; ivar，也就是说，它会先按照是否有targets这个名称的key，然后targets这个property，最后再找_targets这个ivar。</strong></p>
+<p>通过输出log，我们可以发现_targets是个数组，维护了一个个自定义结构维护的target-action配对。</p>
+<p>因此，我们现在只要找到这个自定义结构是啥，里面包含了啥就可以了是吧。</p>
+<p><strong>当头一棒</strong>，很遗憾，苹果太阴了，直接重载了这个自定义结构的debugDescription，特喵的什么都看不到。</p>
+<p>事情到了这咋办呢？其实我也没想到，还好上述的参考文章告诉了我们可以依靠断点，通过断点，我们发发现了该自定义结构叫<strong>UIGestureRecognizerTarget</strong>，我们通过KVC获取其target和action即可。</p>
+<h3 id="补充：关于Method_Swizzling">补充：关于Method Swizzling</h3><pre><code><span class="keyword">Class</span> <span class="keyword">class</span> = [<span class="keyword">self</span> <span class="keyword">class</span>];
+
+SEL originalSelector = @<span class="keyword">selector</span>(pushViewController:animated:);
+SEL swizzledSelector = @<span class="keyword">selector</span>(fd_pushViewController:animated:);
+
+<span class="function"><span class="keyword">Method</span> <span class="title">originalMethod</span> = <span class="title">class_getInstanceMethod</span><span class="params">(<span class="keyword">class</span>, originalSelector)</span>;</span>
+<span class="function"><span class="keyword">Method</span> <span class="title">swizzledMethod</span> = <span class="title">class_getInstanceMethod</span><span class="params">(<span class="keyword">class</span>, swizzledSelector)</span>;</span>
+
+BOOL success = class_addMethod(<span class="keyword">class</span>, originalSelector, method_getImplementation(swizzledMethod), method_getTypeEncoding(swizzledMethod));
+<span class="keyword">if</span> (success) <span class="comment">{
+    class_replaceMethod(class, swizzledSelector, method_getImplementation(originalMethod), method_getTypeEncoding(originalMethod));
+}</span> <span class="keyword">else</span> <span class="comment">{
+    method_exchangeImplementations(originalMethod, swizzledMethod);
+}</span>
+</code></pre><p>有很多人都了解Method Swizzling，但是不知道为什么这里需要进行<strong>BOOL success = class_addMethod</strong>判断。</p>
+<p>其主要原因就是如果直接通过method_exchangeImplementations来进行的话，可能子类里并没有originalSelector所代表的方法，你直接和父类进行了交换，这是我们不希望看到的。</p>
+<p>因此通过addMethod来判断，如果加成功了，说明原先这个函数在子类中并不存在，我们现在添加了，只要再把swizzleSelector指向旧函数即可；而如果没成功，说明这个函数在子类中存在了，我们直接替换也不会影响父类。</p>
+
+      
+    </div>
+    <footer class="article-footer">
+      <a data-url="http://satanwoo.github.io/2015/11/26/FDFullScreenPopGesture-Source-Code/" data-id="cil4zgkxo001bpoi1syh98ktr" class="article-share-link">Share</a>
+      
+      
+  <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
+
+    </footer>
+  </div>
+  
+</article>
+
+
+  
+    <article id="post-Fun-of-CAReplicationLayer" class="article article-type-post" itemscope itemprop="blogPost">
+  <div class="article-meta">
+    <a href="/2015/11/17/Fun-of-CAReplicationLayer/" class="article-date">
+  <time datetime="2015-11-16T17:54:05.000Z" itemprop="datePublished">2015-11-17</time>
+</a>
+    
+  </div>
+  <div class="article-inner">
+    
+    
+      <header class="article-header">
+        
+  
+    <h1 itemprop="name">
+      <a class="article-title" href="/2015/11/17/Fun-of-CAReplicationLayer/">Swift每日一练：妙用CAReplicationLayer</a>
+    </h1>
+  
+
+      </header>
+    
+    <div class="article-entry" itemprop="articleBody">
+      
+        <p>今天我们来学习一下一个在iOS常常被忽视的类 - CAReplicationLayer。我们要使用这个类来完成两个开起来很炫酷的加载效果。</p>
+<p>老样子，先上具体的效果一看<br><img src="http://7lrzqz.com1.z0.glb.clouddn.com/LearnCAReplicationLayer.gif"></p>
+<p>怎么样，效果还不错吧。一个是看起来有渐变效果的圆形加载，另外一个则是模仿Apple Music的柱状图加载。</p>
+<p>接下来，就让我们一起揭开实现的面纱吧！</p>
+<h3 id="CAReplicationLayer">CAReplicationLayer</h3><p>CAReplicationLayer是CALayer的子类，它与传统的CALayer系列不同，它基本不直接承担诸多效果，而是更多的承担一种“容器”的职责。</p>
+<p>怎么理解呢？大家可以把CAReplicationLayer看成一个工厂，你提供给他一个产品的模型，它就可以为了源源不断的复制出纺织品。回到iOS中来说就是，你提供一个CALayer给CAReplicationLayer，并告诉它你希望它复制几份，就打造出多个具有效果样式的Layer。<strong>不仅如此，动画效果也会被一同复制</strong></p>
+<p>因此，对于CAReplicationLayer，我们有几个特别需要关注的参数。</p>
+<ul>
+<li>instanceCount： 代表你希望将你提供它的Layer复制几份</li>
+<li>instanceDelay： 这个参数在编写动画的前提下特别有用，它表明对每一个复制(或者原生)出来的Layer，启动动画之间的时间差在多少。</li>
+<li>instanceTransform： 这个参数表示对于每一个Layer，它们之间的<strong>形变</strong>差距是多少。比如，每个Layer需要有相同的间隔。</li>
+</ul>
+<h3 id="渐变效果的圆形加载">渐变效果的圆形加载</h3><p>了解完CAReplicationLayer的基本知识以后，我们首先来看看圆形加载效果怎么实现。</p>
+<p>第一步，毫无疑问的，需要构建一个CAReplicationLayer。</p>
+<pre><code>let replicationLayer2 = <span class="function"><span class="title">CAReplicatorLayer</span><span class="params">()</span></span>
+</code></pre><p>第二部，需要一个样品，让我们的CAReplicationLayer复制生产</p>
+<pre><code>let circle = <span class="function"><span class="title">CAShapeLayer</span><span class="params">()</span></span>
+circle<span class="class">.path</span> = <span class="function"><span class="title">UIBezierPath</span><span class="params">(ovalInRect: CGRect(x: <span class="number">0</span>, y: <span class="number">0</span>, width: <span class="number">10</span>, height: <span class="number">10</span>)</span></span>)<span class="class">.CGPath</span>
+circle<span class="class">.lineWidth</span> = <span class="number">1</span>
+circle<span class="class">.fillColor</span> = UIColor.<span class="function"><span class="title">whiteColor</span><span class="params">()</span></span><span class="class">.CGColor</span>
+circle<span class="class">.transform</span> = <span class="function"><span class="title">CATransform3DMakeScale</span><span class="params">(<span class="number">0.1</span>, <span class="number">0.1</span>, <span class="number">0.1</span>)</span></span>
+</code></pre><p>在这里，我们构建了一个白色小球，把初始大小设置为了0.1。</p>
+<p>接下去，我们需要然CAReplicationLayer开始复制了，</p>
+<pre><code>replicationLayer2<span class="class">.instanceCount</span> = <span class="number">12</span>
+replicationLayer2<span class="class">.instanceTransform</span> = <span class="function"><span class="title">CATransform3DMakeRotation</span><span class="params">(CGFloat(<span class="number">2</span> * M_PI/<span class="number">12.0</span>)</span></span>, <span class="number">0.0</span>, <span class="number">0.0</span>, <span class="number">1.0</span>)
+</code></pre><p>从上述代码我们可以看出，我们首先构建了<strong>12</strong>个复制体，然后将这12个小球通过instanceTransform绕<strong>Z</strong>轴均匀的分度在圆周上。</p>
+<p>现在赶快run一下你的app，看看效果是不是正如我所说的！</p>
+<p>现在万事具备，只欠动画了！</p>
+<p>首先我们来定义如例子中的放缩动画</p>
+<pre><code><span class="component">func scaleAnimation() -&gt; CABasicAnimation {
+    let animation = CABasicAnimation(keyPath: "transform<span class="string">.scale")</span>
+    animation<span class="string">.duration</span> = 1.5
+    animation<span class="string">.fromValue</span> = 1.0
+    animation<span class="string">.toValue</span> = 0.1
+    animation<span class="string">.repeatCount</span> = Float<span class="string">.infinity</span>
+
+    return animation
+}</span>
+</code></pre><p>我们定义了一个针对scale属性、时常1.5s的动画，然后我们将这个动画添加到小球上。</p>
+<pre><code>circle.<span class="function"><span class="title">addAnimation</span><span class="params">(scaleAnimation()</span></span>, forKey: <span class="string">"scale"</span>)
+</code></pre><p>现在如果你跑一下代码的话，你会发现，所有的小球都同时启动了动画，和例子的效果不一致，怎么回事呢？</p>
+<p>嘿嘿，还记得我们之前提及的属性<strong>instanceDelay</strong>吗？没错，我们需要借助它的力量。</p>
+<pre><code>replicationLayer2.instanceDelay = <span class="number">1.5</span>/<span class="number">12</span>
+</code></pre><p>现在再看看？哈哈，效果拔群！</p>
+<h3 id="Apple_Music加载效果">Apple Music加载效果</h3><p>下面的代码，很清晰易懂，我就不逐条解析啦，有问题欢迎大家在下方评论！</p>
+<pre><code><span class="comment">// 1. 创建容器ReplicationLayer</span>
+let replicationLayer = CAReplicatorLayer()
+
+<span class="comment">// 2. 创建柱状图</span>
+let bar = CALayer()
+bar.frame = CGRect(<span class="string">x:</span> <span class="number">0</span>, <span class="string">y:</span> <span class="number">0</span>, <span class="string">width:</span> <span class="number">8</span>, <span class="string">height:</span> <span class="number">40</span>)
+bar.position = CGPoint(<span class="string">x:</span> <span class="number">10</span>, <span class="string">y:</span> <span class="number">75</span>)
+bar.backgroundColor = UIColor.purpleColor().CGColor
+
+<span class="comment">// 3. 复制生产3个，并添加水平间隔</span>
+replicationLayer.addSublayer(bar)
+replicationLayer.instanceCount = <span class="number">3</span>
+replicationLayer.instanceTransform = CATransform3DMakeTranslation(<span class="number">20</span>, <span class="number">0</span>, <span class="number">0</span>)
+
+<span class="comment">// 4. 创建动画，构造时间差</span>
+func jumpAnimation(<span class="string">bar:</span>CALayer) -&gt; CABasicAnimation {
+    let animation = CABasicAnimation(<span class="string">keyPath:</span> <span class="string">"position.y"</span>)
+    animation.toValue = bar.position.y - <span class="number">35.0</span>
+    animation.duration = <span class="number">0.45</span>
+    animation.autoreverses = <span class="literal">true</span>
+    animation.repeatCount = Float.infinity
+
+    <span class="keyword">return</span> animation
+}
+
+bar.addAnimation(jumpAnimation(bar), <span class="string">forKey:</span> <span class="string">"jump"</span>)
+replicationLayer.instanceDelay = <span class="number">0.3</span>
+</code></pre>
+      
+    </div>
+    <footer class="article-footer">
+      <a data-url="http://satanwoo.github.io/2015/11/17/Fun-of-CAReplicationLayer/" data-id="cil4zgkxm0019poi1xnz94blg" class="article-share-link">Share</a>
+      
+      
+  <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Swift/">Swift</a></li></ul>
+
+    </footer>
+  </div>
+  
+</article>
+
+
+  
     <article id="post-Swift-UITransition-iOS8" class="article article-type-post" itemscope itemprop="blogPost">
   <div class="article-meta">
     <a href="/2015/11/12/Swift-UITransition-iOS8/" class="article-date">
@@ -256,7 +890,7 @@ modalVC<span class="class">.modalPresentationStyle</span> = <span class="class">
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/11/12/Swift-UITransition-iOS8/" data-id="cik9sx1hu000cb0i1pizvxlce" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/11/12/Swift-UITransition-iOS8/" data-id="cil4zgkwq000hpoi16mxn2dd0" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Swift/">Swift</a></li></ul>
@@ -416,7 +1050,7 @@ modalVC<span class="class">.modalPresentationStyle</span> = <span class="class">
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/11/05/Understand-Viper/" data-id="cik9sx1hq0008b0i1my4i18mz" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/11/05/Understand-Viper/" data-id="cil4zgkwj000dpoi1k6mcresn" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
@@ -645,7 +1279,7 @@ objectPath.<span class="keyword">get</span>(obj, <span class="string">'a.\u1200'
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/11/05/Object-Path-Source-Code/" data-id="cik9sx1id000qb0i1ym922soo" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/11/05/Object-Path-Source-Code/" data-id="cil4zgkx9000vpoi1zene3lfh" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/JavaScript/">JavaScript</a></li></ul>
@@ -708,7 +1342,7 @@ objectPath.<span class="keyword">get</span>(obj, <span class="string">'a.\u1200'
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/10/29/Learn-Android-Day-by-Day/" data-id="cik9sx1il000xb0i1ng9ieai0" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/10/29/Learn-Android-Day-by-Day/" data-id="cil4zgkxg0012poi18qm4vwyr" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Android/">Android</a></li></ul>
@@ -920,7 +1554,7 @@ objectPath.<span class="keyword">get</span>(obj, <span class="string">'a.\u1200'
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/10/29/Swift-Count-Down-Label/" data-id="cik9sx1hx000fb0i140x42bkk" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/10/29/Swift-Count-Down-Label/" data-id="cil4zgkwt000kpoi1wltn2dxe" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Swift/">Swift</a></li></ul>
@@ -1051,7 +1685,7 @@ func computeAngle(p1:<span class="type">CGPoint</span> , p2:<span class="type">C
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/10/27/Swift-Circle-Slider/" data-id="cik9sx1i0000hb0i1dkft5cqn" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/10/27/Swift-Circle-Slider/" data-id="cil4zgkww000mpoi1m1z3ujwm" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Swift/">Swift</a></li></ul>
@@ -1273,1201 +1907,7 @@ func computeAngle(p1:<span class="type">CGPoint</span> , p2:<span class="type">C
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/10/14/GLCalendarView/" data-id="cik9sx1ir0012b0i1hkdrpmed" class="article-share-link">Share</a>
-      
-      
-  <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
-
-    </footer>
-  </div>
-  
-</article>
-
-
-  
-    <article id="post-Debounce-and-Throttle-in-iOS" class="article article-type-post" itemscope itemprop="blogPost">
-  <div class="article-meta">
-    <a href="/2015/09/30/Debounce-and-Throttle-in-iOS/" class="article-date">
-  <time datetime="2015-09-30T10:44:45.000Z" itemprop="datePublished">2015-09-30</time>
-</a>
-    
-  </div>
-  <div class="article-inner">
-    
-    
-      <header class="article-header">
-        
-  
-    <h1 itemprop="name">
-      <a class="article-title" href="/2015/09/30/Debounce-and-Throttle-in-iOS/">实现iOS中的函数节流和函数防抖</a>
-    </h1>
-  
-
-      </header>
-    
-    <div class="article-entry" itemprop="articleBody">
-      
-        <h3 id="函数防抖与节流">函数防抖与节流</h3><p>今天来和大家谈论一个非常有意思的话题，就是函数节流和函数防抖。<br>可能大家还不是非常了解这两个术语的意思，让我们先来看下他们的含义吧。</p>
-<blockquote><br>Throttling enforces a maximum number of times a function can be called over time. As in “execute this function at most once every 100 milliseconds.”<br></blockquote>
-
-<p>首先是函数节流（Throttling），意思就是说一个函数在一定时间内，只能执行有限次数。比如，一个函数在100毫秒呢，最多只能执行一次。<b>当然，也可以不执行！</b></p>
-<p>看完了节流，我们再来看看函数防抖（Debouncing）。</p>
-<blockquote><br>Debouncing enforces that a function not be called again until a certain amount of time has passed without it being called. As in “execute this function only if 100 milliseconds have passed without it being called.”<br></blockquote>
-
-<p>函数防抖的意思就是，一个函数被执行过一次以后，在一段时间内不能再次执行。比如，一个函数执行完了之后，100毫秒之内不能第二次执行。</p>
-<p>咦？有人看到这，肯定就有疑惑了，这两玩意有啥区别啊？这么解释吧，函数防抖可能会被无限延迟。用现实乘坐公交车中的例子来说，Throttle就是准点就发车（比如15分钟一班公交车）；Debounce就是黑车，上了一个人以后，司机说，再等一个人，等不到，咱么10分钟后出发。但是呢，如果在10分钟内又有一个人上车，这个10分钟自动延后直到等待的10分钟内没人上车了。换句话说，Debounce可以理解成merge一段时间的一系列相同函数调用。</p>
-<p>如果还不能理解，这里有个很好玩的<a href="http://demo.nimius.net/debounce_throttle/" target="_blank" rel="external">在线演示</a> (PS:你必须用电脑上)</p>
-<h3 id="JavaScript中的函数节流和防抖">JavaScript中的函数节流和防抖</h3><p>说到防抖和节流，我们就不得不先来提一提JavaScript中坑爹的DOM操作。我们直接看underscore.js中的源码：<br>首先是Throttle：</p>
-<pre><code>_.throttle = function(func, wait) {
-  <span class="keyword">var</span> context, args, <span class="literal">result</span>;
-  <span class="keyword">var</span> timeout = null;
-
-  <span class="keyword">var</span> previous = <span class="number">0</span>;
-  <span class="keyword">var</span> later = function() {
-    // 若设定了开始边界不执行选项，上次执行时间始终为<span class="number">0</span>
-    previous = options.leading === <span class="literal">false</span> ? <span class="number">0</span> : _.now();
-    timeout = null;
-    <span class="literal">result</span> = func.apply(context, args);
-    <span class="keyword">if</span> (!timeout) context = args = null;
-  };
-  <span class="keyword">return</span> function() {
-    <span class="keyword">var</span> now = _.now();
-    // 首次执行时，如果设定了开始边界不执行选项，将上次执行时间设定为当前时间。
-    <span class="keyword">if</span> (!previous &amp;&amp; options.leading === <span class="literal">false</span>) previous = now;
-    // 延迟执行时间间隔
-    <span class="keyword">var</span> remaining = wait - (now - previous);
-    context = this;
-    args = arguments;
-    // 延迟时间间隔remaining小于等于<span class="number">0</span>，表示上次执行至此所间隔时间已经超过一个时间窗口
-    // remaining大于时间窗口wait，表示客户端系统时间被调整过
-    <span class="keyword">if</span> (remaining &lt;= <span class="number">0</span> || remaining &gt; wait) {
-      clearTimeout(timeout);
-      timeout = null;
-      previous = now;
-      <span class="literal">result</span> = func.apply(context, args);
-      <span class="keyword">if</span> (!timeout) context = args = null;
-    //如果延迟执行不存在，且没有设定结尾边界不执行选项
-    } <span class="keyword">else</span> <span class="keyword">if</span> (!timeout &amp;&amp; options.trailing !== <span class="literal">false</span>) {
-      timeout = setTimeout(later, remaining);
-    }
-    <span class="keyword">return</span> <span class="literal">result</span>;
-  };
-};
-</code></pre><p>代码逻辑非常好理解，</p>
-<pre><code><span class="variable"><span class="keyword">var</span> remaining</span> = wait - (now - previous);
-</code></pre><p>就是计算下上一次调用的时间和现在所处的时间间隔是不是超过了wait的时间<b>（这个时间只有可能会大于等于wait，因为runloop是很繁忙的，前面一个任务很耗时，那你就多等一会呗）</b>。<br>可能会有人不理解option是啥意思，我们看下代码中涉及了以下两个参数：</p>
-<pre><code><span class="tag">options</span><span class="class">.leading</span>和<span class="tag">options</span><span class="class">.trailing</span>
-</code></pre><p>这两个参数的意思就是禁止第一次调用和最后一次调用，简单吧。</p>
-<p>理解了函数节流，我们再来看看防抖是怎么做的。<br>    _.debounce = function(func, wait, immediate) {<br>      var timeout, args, context, timestamp, result;</p>
-<pre><code>  <span class="keyword">var</span> later = function() {
-    // 据上一次触发时间间隔
-    <span class="keyword">var</span> last = _.now() - timestamp;
-
-    // 上次被包装函数被调用时间间隔last小于设定时间间隔wait
-    <span class="keyword">if</span> (last &lt; wait &amp;&amp; last &gt; <span class="number">0</span>) {
-      timeout = setTimeout(later, wait - last);
-    } <span class="keyword">else</span> {
-      timeout = null;
-      // 如果设定为immediate===<span class="literal">true</span>，因为开始边界已经调用过了此处无需调用
-      <span class="keyword">if</span> (!immediate) {
-        <span class="literal">result</span> = func.apply(context, args);
-        <span class="keyword">if</span> (!timeout) context = args = null;
-      }
-    }
-  };
-
-  <span class="keyword">return</span> function() {
-    context = this;
-    args = arguments;
-    timestamp = _.now();
-    <span class="keyword">var</span> callNow = immediate &amp;&amp; !timeout;
-    // 如果延时不存在，重新设定延时
-    <span class="keyword">if</span> (!timeout) timeout = setTimeout(later, wait);
-    <span class="keyword">if</span> (callNow) {
-      <span class="literal">result</span> = func.apply(context, args);
-      context = args = null;
-    }
-
-    <span class="keyword">return</span> <span class="literal">result</span>;
-  };
-};
-</code></pre><p>可以看到，在防抖的函数中包含了一个<b>timestamp</b>，这个参数用来记录了当前这个函数最后一次被调用是什么时候，每次调用的时候，就更新了timestamp。有人可能会问，这个timestamp在多次调用的过程中还能保留吗？<b>答案是肯定的，debounce函数返回的实际是一个匿名函数，这个匿名函数就是一个闭包环境，可以捕捉timestap进行持久话访问，所以多次调用这个匿名函数实际上访问的都是同一个timestamp。</b></p>
-<h3 id="实现iOS中的函数节流">实现iOS中的函数节流</h3><p>重头戏来啦！！！！。<br>在iOS中，我们经常会遇到这样的需求，比如说你要根据UIScrollView的contentOffset进行某些计算。这些计算有的很简单不耗时，比如根据offset动态的更改UINavigationBar的alpha值。但是有些就很复杂，比如你要根据某些offset启动某些动画，或者进行大规模的运算，还有很多时候时候会发送很多异步的API请求，由于很多用户会不停的用指尖在完美的iPhone屏幕上来回滑动，你一定不想你的App甚至是服务器这些操作给玩崩了，所以，函数节流是必不可少的。</p>
-<h4 id="初级版本">初级版本</h4><p>第一个版本的函数节流如下：</p>
-<pre><code><span class="preprocessor">#import <span class="title">"PerformSelectorWithDebounce.h"</span></span>
-<span class="preprocessor">#import <span class="title">&lt;objc/runtime.h&gt;</span></span>
-<span class="preprocessor">#import <span class="title">&lt;objc/message.h&gt;</span></span>
-
-<span class="class"><span class="keyword">@implementation</span> <span class="title">NSObject</span> (<span class="title">Throttle</span>)</span>
-
-<span class="keyword">const</span> <span class="keyword">char</span> * WZThrottledSelectorKey;
-
-- (<span class="keyword">void</span>) wz_performSelector:(SEL)aSelector withThrottle:(<span class="built_in">NSTimeInterval</span>)duration
-{
-    <span class="built_in">NSMutableDictionary</span> *blockedSelectors = objc_getAssociatedObject(<span class="keyword">self</span>, WZThrottledSelectorKey);
-
-    <span class="keyword">if</span>(!blockedSelectors)
-    {
-        blockedSelectors = [<span class="built_in">NSMutableDictionary</span> dictionary];
-        objc_setAssociatedObject(<span class="keyword">self</span>, kDictionaryOfSelectorsToBlock, blockedSelectors, OBJC_ASSO<span class="built_in">CIATION_RETAIN</span>);
-    }
-
-    <span class="built_in">NSString</span> * selectorName = <span class="built_in">NSStringFromSelector</span>(aSelector);
-    <span class="keyword">if</span>(![blockedSelectors objectForKey:aSelectorAsStr])
-    {
-        [blockedSelectors setObject:selectorName selectorName];
-
-        objc_msgSend(<span class="keyword">self</span>, aSelector);
-        [<span class="keyword">self</span> performSelector:<span class="keyword">@selector</span>(unlockSelector:) withObject:aSelectorAsStr afterDelay:duration];
-
-    }
-}
-
--(<span class="keyword">void</span>)unlockSelector:(<span class="built_in">NSString</span>*)selectorAsString
-{
-    <span class="built_in">NSMutableDictionary</span> *blockedSelectors = objc_getAssociatedObject(<span class="keyword">self</span>, WZThrottledSelectorKey);
-    [blockedSelectors removeObjectForKey:selectorAsString];
-}
-</code></pre><p>初看这个代码逻辑，这个代码基本实现了在一定时间内只调用有限次数的函数。但是，这哪是函数节流啊，这是函数断流！不信你们在<b>[UIScrollView scrollViewDidScroll]</b>试试看，你们就知道啥叫断流了。<b>原因也很简单，我们的unlockSelector是基于performSelector解锁的，而performSelector是基于runloop的，我们在不停的滚动的时候就会导致整个主runloop被我们占用，因此，unlock的函数一直没有得到调用，结果就导致了断流。</b></p>
-<h4 id="高级版本">高级版本</h4><p>因此，我又实现了一个高级版本，代码如下，需要测试用例和源码的可以上我的github自取，<a href="https://github.com/SatanWoo/iOSThrottle" target="_blank" rel="external">地址戳我</a>。代码逻辑很简单同时也解决了上述版本所提及的问题。</p>
-<pre><code><span class="preprocessor">#import <span class="title">"NSObject+Throttle.h"</span></span>
-<span class="preprocessor">#import <span class="title">&lt;objc/runtime.h&gt;</span></span>
-<span class="preprocessor">#import <span class="title">&lt;objc/message.h&gt;</span></span>
-
-<span class="keyword">static</span> <span class="keyword">char</span> WZThrottledSelectorKey;
-<span class="keyword">static</span> <span class="keyword">char</span> WZThrottledSerialQueue;
-
-<span class="class"><span class="keyword">@implementation</span> <span class="title">NSObject</span> (<span class="title">Throttle</span>)</span>
-
-- (<span class="keyword">void</span>)wz_performSelector:(SEL)aSelector withThrottle:(<span class="built_in">NSTimeInterval</span>)inteval
-{
-    <span class="built_in">dispatch_async</span>([<span class="keyword">self</span> getSerialQueue], ^{
-        <span class="built_in">NSMutableDictionary</span> *blockedSelectors = [objc_getAssociatedObject(<span class="keyword">self</span>, &amp;WZThrottledSelectorKey) mutableCopy];
-
-        <span class="keyword">if</span> (!blockedSelectors) {
-            blockedSelectors = [<span class="built_in">NSMutableDictionary</span> dictionary];
-            objc_setAssociatedObject(<span class="keyword">self</span>, &amp;WZThrottledSelectorKey, blockedSelectors, OBJC_ASSO<span class="built_in">CIATION_COPY_NONATOMIC</span>);
-        }
-
-        <span class="built_in">NSString</span> *selectorName = <span class="built_in">NSStringFromSelector</span>(aSelector);
-        <span class="keyword">if</span> (![blockedSelectors objectForKey:selectorName]) {
-            [blockedSelectors setObject:selectorName forKey:selectorName];
-            objc_setAssociatedObject(<span class="keyword">self</span>, &amp;WZThrottledSelectorKey, blockedSelectors, OBJC_ASSO<span class="built_in">CIATION_COPY_NONATOMIC</span>);
-
-            <span class="built_in">dispatch_async</span>(dispatch_get_main_queue(), ^{
-                objc_msgSend(<span class="keyword">self</span>, aSelector);
-
-                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(inteval * <span class="built_in">NSEC_PER_SEC</span>)), [<span class="keyword">self</span> getSerialQueue], ^{
-                    [<span class="keyword">self</span> unlockSelector:selectorName];
-                });
-            });
-        }
-    });
-}
-
-<span class="preprocessor">#pragma mark - Private</span>
-- (<span class="keyword">void</span>)unlockSelector:(<span class="built_in">NSString</span> *)selectorName
-{
-    <span class="built_in">dispatch_async</span>([<span class="keyword">self</span> getSerialQueue], ^{
-        <span class="built_in">NSMutableDictionary</span> *blockedSelectors = [objc_getAssociatedObject(<span class="keyword">self</span>, &amp;WZThrottledSelectorKey) mutableCopy];
-
-        <span class="keyword">if</span> ([blockedSelectors objectForKey:selectorName]) {
-            [blockedSelectors removeObjectForKey:selectorName];
-        }
-
-        objc_setAssociatedObject(<span class="keyword">self</span>, &amp;WZThrottledSelectorKey, blockedSelectors, OBJC_ASSO<span class="built_in">CIATION_COPY_NONATOMIC</span>);
-    });
-}
-
-- (<span class="built_in">dispatch_queue_t</span>)getSerialQueue
-{
-    <span class="built_in">dispatch_queue_t</span> serialQueur = objc_getAssociatedObject(<span class="keyword">self</span>, &amp;WZThrottledSerialQueue);
-    <span class="keyword">if</span> (!serialQueur) {
-        serialQueur = dispatch_queue_create(<span class="string">"com.satanwoo.throttle"</span>, <span class="literal">NULL</span>);
-        objc_setAssociatedObject(<span class="keyword">self</span>, &amp;WZThrottledSerialQueue, serialQueur, OBJC_ASSO<span class="built_in">CIATION_RETAIN_NONATOMIC</span>);
-    }
-    <span class="keyword">return</span> serialQueur;
-}
-
-<span class="keyword">@end</span>
-</code></pre>
-      
-    </div>
-    <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/09/30/Debounce-and-Throttle-in-iOS/" data-id="cik9sx1ix0018b0i1o3s4kbcx" class="article-share-link">Share</a>
-      
-      
-  <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
-
-    </footer>
-  </div>
-  
-</article>
-
-
-  
-    <article id="post-flux-js-part-one" class="article article-type-post" itemscope itemprop="blogPost">
-  <div class="article-meta">
-    <a href="/2015/09/23/flux-js-part-one/" class="article-date">
-  <time datetime="2015-09-23T10:37:36.000Z" itemprop="datePublished">2015-09-23</time>
-</a>
-    
-  </div>
-  <div class="article-inner">
-    
-    
-      <header class="article-header">
-        
-  
-    <h1 itemprop="name">
-      <a class="article-title" href="/2015/09/23/flux-js-part-one/">Flux源码解析（一）</a>
-    </h1>
-  
-
-      </header>
-    
-    <div class="article-entry" itemprop="articleBody">
-      
-        <h3 id="Flux源码解析_第一章">Flux源码解析 第一章</h3><p>Flux是Facebook推出的一个新的Web架构，用来构建新一代的客户端的Web程序，今天我们来解析下其中的源码：Dispatcher.js和Invariant.js</p>
-<h4 id="准备工作">准备工作</h4><p>建议大家先了解一下什么是Flux架构，Facebook的官网上有非常详细的解释:<a href="http://facebook.github.io/flux/docs/overview.html#content" target="_blank" rel="external">链接点我</a></p>
-<h4 id="Invariant-js">Invariant.js</h4><p>首先让我们来看下Invariant.js的代码内容，非常短：</p>
-<pre><code><span class="pi">"use strict"</span>;
-
-<span class="keyword">var</span> invariant = <span class="function"><span class="keyword">function</span>(<span class="params">condition, format, a, b, c, d, e, f</span>) </span>{
-  <span class="number">1.</span> 
-  <span class="keyword">if</span> (__DEV__) {
-    <span class="keyword">if</span> (format === <span class="literal">undefined</span>) {
-      <span class="keyword">throw</span> <span class="keyword">new</span> <span class="built_in">Error</span>(<span class="string">'invariant requires an error message argument'</span>);
-    }
-  }
-
-  <span class="number">2.</span> 
-  <span class="keyword">if</span> (!condition) {
-    <span class="keyword">var</span> error;
-    <span class="keyword">if</span> (format === <span class="literal">undefined</span>) {
-      error = <span class="keyword">new</span> <span class="built_in">Error</span>(
-        <span class="string">'Minified exception occurred; use the non-minified dev environment '</span> +
-        <span class="string">'for the full error message and additional helpful warnings.'</span>
-      );
-    } <span class="keyword">else</span> {
-      <span class="keyword">var</span> args = [a, b, c, d, e, f];
-      <span class="keyword">var</span> argIndex = <span class="number">0</span>;
-      error = <span class="keyword">new</span> <span class="built_in">Error</span>(
-        <span class="string">'Invariant Violation: '</span> +
-        format.replace(<span class="regexp">/%s/g</span>, <span class="function"><span class="keyword">function</span>(<span class="params"></span>) </span>{ <span class="keyword">return</span> args[argIndex++]; })
-      );
-    }
-
-    error.framesToPop = <span class="number">1</span>; <span class="comment">// we don't care about invariant's own frame</span>
-    <span class="keyword">throw</span> error;
-  }
-};
-
-<span class="built_in">module</span>.exports = invariant;
-</code></pre><p>‘use strict’ 不必多说，就是构建了一个严格的JS的执行环境。<br>整个Invariant.js其实就是定义了一个函数, 名字叫Invariant， 他的参数包含一个condition（判断条件），一个自定义的报错格式，以及一系列的自定义参数。</p>
-<p><b>第一次读Flux.js源码的时候，这里采用的还是arguments可变参数的定义方式，今天写这篇文章的时候竟然就改写了，晕！</b></p>
-<p>然后我们来分两个段落查看下其中的代码含义。</p>
-<p>第一部分，定义了一个<strong>dev</strong>变量，这个变量就是一种类似于配置的环境变量。玩过JavaScript或者ruby的人可能都有所了解，比如非常著名的’development’, ‘product’, ‘test’就是与之类似的。<br>如果没有format是个未定义的变量（在这里就是没有传入第二个参数），那么就保个错。</p>
-<p>第二部分也很简单，如果condition为假值，说明这个条件没被满足，那么执行报错的功能，报错的时候使用的提示格式就是传入的format, 参数则为自定义的a-f。</p>
-<p>总之，这个Invariant.js的作用就是构建了一个类似<b>iOS中NSAssert</b>的东西。</p>
-<p>哦，这里要指出一下 <b>/%s/g</b>这个正则表达式，这玩意啥意思呢。其实就类似于我们常常用的printf函数，可以简单理解为，把format中所有的%s, 替换成自定义的参数，g表示为global。</p>
-<h4 id="重点:Dispatcher-js">重点:Dispatcher.js</h4><p>再让我们来看一看Dispatcher.js，闲话不多话，上代码。</p>
-<pre><code><span class="pi">'use strict'</span>;
-
-<span class="keyword">var</span> invariant = <span class="built_in">require</span>(<span class="string">'./invariant'</span>);
-
-<span class="keyword">export</span> <span class="keyword">type</span> DispatchToken = <span class="built_in">string</span>;
-
-<span class="keyword">var</span> _prefix = <span class="string">'ID_'</span>;
-
-<span class="keyword">class</span> Dispatcher&lt;TPayload&gt; {
-  _callbacks: {[key: DispatchToken]: (payload: TPayload) =&gt; <span class="built_in">void</span>};
-  _isDispatching: <span class="built_in">boolean</span>;
-  _isHandled: {[key: DispatchToken]: <span class="built_in">boolean</span>};
-  _isPending: {[key: DispatchToken]: <span class="built_in">boolean</span>};
-  _lastID: <span class="built_in">number</span>;
-  _pendingPayload: TPayload;
-
-  <span class="constructor"><span class="keyword">constructor</span>() </span>{
-    <span class="keyword">this</span>._callbacks = {};
-    <span class="keyword">this</span>._isDispatching = <span class="literal">false</span>;
-    <span class="keyword">this</span>._isHandled = {};
-    <span class="keyword">this</span>._isPending = {};
-    <span class="keyword">this</span>._lastID = <span class="number">1</span>;
-  }
-
-
-  unregister(id: DispatchToken): <span class="built_in">void</span> {
-    invariant(
-      <span class="keyword">this</span>._callbacks[id],
-      <span class="string">'Dispatcher.unregister(...): `%s` does not map to a registered callback.'</span>,
-      id
-    );
-    <span class="keyword">delete</span> <span class="keyword">this</span>._callbacks[id];
-  }
-
-  waitFor(ids: <span class="built_in">Array</span>&lt;DispatchToken&gt;): <span class="built_in">void</span> {
-    invariant(
-      <span class="keyword">this</span>._isDispatching,
-      <span class="string">'Dispatcher.waitFor(...): Must be invoked while dispatching.'</span>
-    );
-    <span class="keyword">for</span> (<span class="keyword">var</span> ii = <span class="number">0</span>; ii &lt; ids.length; ii++) {
-      <span class="keyword">var</span> id = ids[ii];
-      <span class="keyword">if</span> (<span class="keyword">this</span>._isPending[id]) {
-        invariant(
-          <span class="keyword">this</span>._isHandled[id],
-          <span class="string">'Dispatcher.waitFor(...): Circular dependency detected while '</span> +
-          <span class="string">'waiting for `%s`.'</span>,
-          id
-        );
-        <span class="keyword">continue</span>;
-      }
-      invariant(
-        <span class="keyword">this</span>._callbacks[id],
-        <span class="string">'Dispatcher.waitFor(...): `%s` does not map to a registered callback.'</span>,
-        id
-      );
-      <span class="keyword">this</span>._invokeCallback(id);
-    }
-  }
-
-  dispatch(payload: TPayload): <span class="built_in">void</span> {
-    invariant(
-      !<span class="keyword">this</span>._isDispatching,
-      <span class="string">'Dispatch.dispatch(...): Cannot dispatch in the middle of a dispatch.'</span>
-    );
-    <span class="keyword">this</span>._startDispatching(payload);
-    <span class="keyword">try</span> {
-      <span class="keyword">for</span> (<span class="keyword">var</span> id <span class="keyword">in</span> <span class="keyword">this</span>._callbacks) {
-        <span class="keyword">if</span> (<span class="keyword">this</span>._isPending[id]) {
-          <span class="keyword">continue</span>;
-        }
-        <span class="keyword">this</span>._invokeCallback(id);
-      }
-    } <span class="keyword">finally</span> {
-      <span class="keyword">this</span>._stopDispatching();
-    }
-  }
-
-  isDispatching(): <span class="built_in">boolean</span> {
-    <span class="keyword">return</span> <span class="keyword">this</span>._isDispatching;
-  }
-
-  _invokeCallback(id: DispatchToken): <span class="built_in">void</span> {
-    <span class="keyword">this</span>._isPending[id] = <span class="literal">true</span>;
-    <span class="keyword">this</span>._callbacks[id](<span class="keyword">this</span>._pendingPayload);
-    <span class="keyword">this</span>._isHandled[id] = <span class="literal">true</span>;
-  }
-
-  _startDispatching(payload: TPayload): <span class="built_in">void</span> {
-    <span class="keyword">for</span> (<span class="keyword">var</span> id <span class="keyword">in</span> <span class="keyword">this</span>._callbacks) {
-      <span class="keyword">this</span>._isPending[id] = <span class="literal">false</span>;
-      <span class="keyword">this</span>._isHandled[id] = <span class="literal">false</span>;
-    }
-    <span class="keyword">this</span>._pendingPayload = payload;
-    <span class="keyword">this</span>._isDispatching = <span class="literal">true</span>;
-  }
-
-  _stopDispatching(): <span class="built_in">void</span> {
-    <span class="keyword">delete</span> <span class="keyword">this</span>._pendingPayload;
-    <span class="keyword">this</span>._isDispatching = <span class="literal">false</span>;
-  }
-}
-
-<span class="module"><span class="keyword">module</span>.exports = Dispatcher;</span>
-</code></pre><p>首先我们来看一下这句话：</p>
-<pre><code><span class="keyword">export</span> <span class="keyword">type</span> DispatchToken = <span class="built_in">string</span>;
-</code></pre><p>这其实就是一个typedef，那么DispatchToken是什么意思呢？如果你本文最上方的Flux解答的话，你就可以了解到，其实一个Flux的回调代码块有唯一的一个token，这个token就是用来让别人Invokoe你代码的。</p>
-<p>那么这个DispatchToken怎么确保唯一呢？看下面这句话：</p>
-<pre><code><span class="keyword">var</span> id = _prefix + <span class="keyword">this</span>._lastID++;
-</code></pre><p>第一感觉是不是想，我了个擦，怎么那么简单。后来想想，JavaScript在浏览器中执行就是单线程，这种自增ID的做法又快又安全呐。</p>
-<p>下面我们来解释一下Dispatcher这个类，这个类的目的很简单，六个字归纳一下：唯一，中控，分配。<br>可以把他看成一个单例对象，所有的任务分发都必须由这个类统一控制。</p>
-<p>那么，这个类中包含了哪些玩意呢？让我们赶快来一探究竟！</p>
-<pre><code><span class="rule"><span class="attribute">_callbacks</span>:<span class="value"> {[key: DispatchToken]: (payload: TPayload) =&gt; void}</span></span>;
-<span class="rule"><span class="attribute">_isDispatching</span>:<span class="value"> boolean</span></span>;
-<span class="rule"><span class="attribute">_isHandled</span>:<span class="value"> {[key: DispatchToken]: boolean}</span></span>;
-<span class="rule"><span class="attribute">_isPending</span>:<span class="value"> {[key: DispatchToken]: boolean}</span></span>;
-<span class="rule"><span class="attribute">_lastID</span>:<span class="value"> number</span></span>;
-<span class="rule"><span class="attribute">_pendingPayload</span>:<span class="value"> TPayload</span></span>;
-</code></pre><ul>
-<li>callbacks，就是DispatchToken和函数回调的一个Dictionary。</li>
-<li>isDispatching，体现当前Dispatcher是否处于dispatch状态。</li>
-<li>isHandled，通过token去检测一个函数是否被处理过了。</li>
-<li>isPending，通过token去检测一个函数是否被提交Dispatcher了。</li>
-<li>lastID，最近一次被加入Dispatcher的函数体的UniqueID，即DispatchToken。</li>
-<li>pendingPayload，需要传递给调用函数的参数，iOS开发者可以理解为<b>userInfo</b>。</li>
-</ul>
-<p>下面我们一个个函数来看看。</p>
-<pre><code><span class="keyword">register</span>(callback: (payload: TPayload) =&gt; <span class="keyword">void</span>): DispatchToken {
-    var <span class="keyword">id</span> = _prefix + <span class="keyword">this</span><span class="variable">._lastID</span>++;
-    <span class="keyword">this</span><span class="variable">._callbacks</span>[<span class="keyword">id</span>] = callback;
-    <span class="keyword">return</span> <span class="keyword">id</span>;
-}
-</code></pre><p>这函数就是注册一个callback进入dispatcher，同时为这个callback生成DispatchToken，加入字典。</p>
-<pre><code>unregister(<span class="property">id</span>: DispatchToken): void {
-    invariant(
-      this._callbacks[<span class="property">id</span>],
-      'Dispatcher.unregister(...): `%s` <span class="keyword">does</span> <span class="keyword">not</span> map <span class="keyword">to</span> a registered callback.',
-      <span class="property">id</span>
-    );
-    delete this._callbacks[<span class="property">id</span>];
-}
-</code></pre><p>有注册就有取消注册，unregister就是通过DispatchToken将注册的callback从字典中删除。当然了，这里使用了我们在上文中提过的Invariant来进行一个判断：即字典中必须包含对应这个DispatchToken的函数。</p>
-<p>dispatch函数是Dispatcher用来分发payload的函数。</p>
-<pre><code>dispatch(payload: TPayload): <span class="keyword">void</span> {
-    invariant(
-      !<span class="keyword">this</span>._isDispatching,
-      <span class="string">'Dispatch.dispatch(...): Cannot dispatch in the middle of a dispatch.'</span>
-    );
-    <span class="keyword">this</span>._startDispatching(payload);
-    <span class="keyword">try</span> {
-      <span class="keyword">for</span> (<span class="keyword">var</span> id <span class="keyword">in</span> <span class="keyword">this</span>._callbacks) {
-        <span class="keyword">if</span> (<span class="keyword">this</span>._isPending[id]) {
-          <span class="keyword">continue</span>;
-        }
-        <span class="keyword">this</span>._invokeCallback(id);
-      }
-    } <span class="keyword">finally</span> {
-      <span class="keyword">this</span>._stopDispatching();
-    }
-  }
-</code></pre><p>整个函数的含义就是，首先是判断当前Dispatcher是否已经处于Dispatching状态中了，如果是，不能打断。然后通过_startDispatching更新状态。更新状态结束以后，将非pending状态的callback进通过_invokeCallback执行<b>（pending在这里的含义可以简单理解为，还没准备好或者被卡住了）</b>。所有执行完了以后，通过_stopDispatching恢复状态。</p>
-<p>接下来便让我一一来看看其中涉及的几个函数，首先是_startDispatching函数。</p>
-<pre><code>_startDispatching(payload: TPayload): <span class="keyword">void</span> {
-    <span class="keyword">for</span> (var <span class="keyword">id</span> <span class="keyword">in</span> <span class="keyword">this</span><span class="variable">._callbacks</span>) {
-      <span class="keyword">this</span><span class="variable">._isPending</span>[<span class="keyword">id</span>] = <span class="literal">false</span>;
-      <span class="keyword">this</span><span class="variable">._isHandled</span>[<span class="keyword">id</span>] = <span class="literal">false</span>;
-    }
-    <span class="keyword">this</span><span class="variable">._pendingPayload</span> = payload;
-    <span class="keyword">this</span><span class="variable">._isDispatching</span> = <span class="literal">true</span>;
-  }
-</code></pre><p>首先该函数将所有注册的callback的状态都清空，并标记Dispatcher的状态进入dispatching。</p>
-<p>同样，与之对应的有的_stopDispatching，函数很简单，不具体解释了。</p>
-<pre><code>_stopDispatching(): <span class="keyword">void</span> {
-    <span class="keyword">delete</span> <span class="keyword">this</span>._pendingPayload;
-    <span class="keyword">this</span>._isDispatching = <span class="literal">false</span>;
-}
-</code></pre><p>而_invokeCallback函数也很简单，当真正调用callback之前将其状态设置为pending，执行完成之后设置为handled。<br>    _invokeCallback(id: DispatchToken): void {<br>        this._isPending[id] = true;<br>        this._callbacks<a href="this._pendingPayload">id</a>;<br>        this._isHandled[id] = true;<br>      }</p>
-<p>读到这里，有些人可能有些疑问，这个pending到底是用来做什么的呢？别着急，看了下面这个最重要的函数waitFor，你就会了解。</p>
-<pre><code>waitFor(ids: Array&lt;DispatchToken&gt;): void {
-     <span class="number">1.</span> 
-    invariant(
-      this._isDispatching,
-      'Dispatcher.waitFor(...): Must be invoked <span class="keyword">while</span> dispatching.'
-    );
-
-     <span class="number">2.</span>
-    <span class="keyword">for</span> (var ii = <span class="number">0</span>; ii &lt; ids.<span class="property">length</span>; ii++) {
-      var <span class="property">id</span> = ids[ii];
-      <span class="keyword">if</span> (this._isPending[<span class="property">id</span>]) {
-        <span class="number">3.</span> 
-        invariant(
-          this._isHandled[<span class="property">id</span>],
-          'Dispatcher.waitFor(...): Circular dependency detected <span class="keyword">while</span> ' +
-          'waiting <span class="keyword">for</span> `%s`.',
-          <span class="property">id</span>
-        );
-        <span class="keyword">continue</span>;
-      }
-       <span class="number">4.</span>
-      invariant(
-        this._callbacks[<span class="property">id</span>],
-        'Dispatcher.waitFor(...): `%s` <span class="keyword">does</span> <span class="keyword">not</span> map <span class="keyword">to</span> a registered callback.',
-        <span class="property">id</span>
-      );
-
-      <span class="number">5.</span>
-      this._invokeCallback(<span class="property">id</span>);
-    }
-  }
-</code></pre><p>这个waitFor啥意思呢？我们首先看下他的参数，一个数组，里面全是DispatchToken。再看下实现。</p>
-<ul>
-<li>首先是一个Invariant判断当前必须处于Dispatching状态。一开始比较难理解，简单来说就是，如果不处于Dispatching状态中，那么说明压根没有函数在执行，那你等谁呢？</li>
-<li>然后该函数从DispatchToken的数组中进行遍历，如果遍历到的DispatchToken处于pending状态，就暂时跳过他。</li>
-<li>但是，在这有个必要的循环以来的检查，试想如下情况，如果A函数以来B的Token, B函数依赖A的Token，就会造成“死锁”。<b>所以，当一个函数依赖的对象处于pending，说明这个函数已经被开始执行了，但是如果同时该函数没有进入handled状态，说明该函数也被卡死了。</b></li>
-<li>检查token对应的callback是否存在</li>
-<li>调用这个token对应的函数。</li>
-</ul>
-<p>从上诉步骤中，我们可以看到，waitFor就是一个等待函数，当B执行，执行到某些条件不满足的时候（我们称之为依赖没解决），就是等待依赖去完成，简单来说，就是如下函数代表的意思：</p>
-<pre><code><span class="keyword">while</span> (!satisfied) ; <span class="keyword">do</span>Something
-</code></pre><p>到这里，差不多Dispatcher.js就解释完了，下次继续。</p>
-
-      
-    </div>
-    <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/09/23/flux-js-part-one/" data-id="cik9sx1hk0003b0i1g95vxrd3" class="article-share-link">Share</a>
-      
-      
-  <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/JavaScript/">JavaScript</a></li></ul>
-
-    </footer>
-  </div>
-  
-</article>
-
-
-  
-    <article id="post-code-of-JSONModel" class="article article-type-post" itemscope itemprop="blogPost">
-  <div class="article-meta">
-    <a href="/2015/09/17/code-of-JSONModel/" class="article-date">
-  <time datetime="2015-09-17T12:52:12.000Z" itemprop="datePublished">2015-09-17</time>
-</a>
-    
-  </div>
-  <div class="article-inner">
-    
-    
-      <header class="article-header">
-        
-  
-    <h1 itemprop="name">
-      <a class="article-title" href="/2015/09/17/code-of-JSONModel/">JSONModel源码解析</a>
-    </h1>
-  
-
-      </header>
-    
-    <div class="article-entry" itemprop="articleBody">
-      
-        <h3 id="背景介绍">背景介绍</h3><p>现在的移动App基本上免不了和网络传输打交道，我们经常需要和服务器进行数据的传输，常用的数据格式无外乎XML或者JSON。这也就引出了一个新的话题，如何将获得的数据实际应用到我们的App中？答案很简单，建立Model。我们拿到的网络传输数据，无非就是一种以JSON格式标准划分的字符串罢了，我们需要将字符串解析到相应的字段中来，否则如果每次我们都需要直接和网络字符串打交道，那也太复杂了。在刚学习iOS开发的时候，那个时候看了Stanford老爷爷讲的开发教程，里面在涉及<b>Core Data</b>的章节曾经写过这样的一段代码：</p>
-<pre><code>+ (XXXModel *)insertModelWithDictionary:(<span class="built_in">NSDictionary</span> *)dict inContext:(<span class="built_in">NSManagedObjectContext</span> *)context
-{
-    <span class="keyword">if</span> (dict == <span class="literal">nil</span> || ![dict isKindOf[<span class="built_in">NSDictionary</span> class]]) <span class="keyword">return</span> <span class="literal">nil</span>;
-
-    XXXModel *model = [XXXModel getByIdentifier:[dict objectForKey:<span class="string">@"id"</span>] inContext:context];
-    <span class="keyword">if</span> (!model) {
-        model = [<span class="built_in">NSEntityDescription</span> insertNewObjectForEntityForName:<span class="string">@"XXXModel"</span> 
-                                              inManagedObjectContext:context];
-    }
-
-    model<span class="variable">.identifier</span> = [dict objectForKey:<span class="string">@"id"</span>];
-    model<span class="variable">.name</span>       = [dict objectForKey:<span class="string">@"name"</span>];
-    model<span class="variable">.age</span>        = [dict objectForKey:<span class="string">@"age"</span>];
-
-    <span class="comment">// 许多许多属性 </span>
-    ......
-    ......
-    ......
-
-    <span class="keyword">return</span> model;
-}
-
-+ (XXXModel *)getByIdentifier:(<span class="built_in">NSString</span> *)identifier inContext:(<span class="built_in">NSManagedObjectContext</span> *)context
-{
-    <span class="built_in">NSFetchRequest</span> *request = [<span class="built_in">NSFetchRequest</span> fetchRequestWithEntityName:<span class="string">@"XXXModel"</span>];
-    [request setPredicate:[<span class="built_in">NSPredicate</span> predicateWithFormat:<span class="string">@"identifier == %@"</span>, identifier]];
-
-    XXXModel *model = [[context executeFetchRequest:request error:<span class="literal">nil</span>] lastObject];
-    <span class="keyword">return</span> model;
-}
-</code></pre><p>当时一直以为这个是<b>圣经式的写法</b>，一直坚持着，直到后来我接触到了<b>Mantle</b>。当然，今天这篇文章说的不是Mantle，而是另外一个类似的开源库：<b>JSONModel</b></p>
-<h3 id="JSONModel">JSONModel</h3><p>既然要解析它，首先先放上他的代码地址以示尊重：<a href="https://github.com/icanzilb/JSONModel" target="_blank" rel="external">点我点我!</a></p>
-<p>从Github上的介绍来看，利用JSONModel，我们可以节省大量的时间，它会利用类似于反射(Introspect)的机制，帮助我们自动将JSON的数据解析成Model的字段。</p>
-<p>它的用法也很简单，比如有如下这样的JSON数据：</p>
-<pre><code>{"<span class="attribute">id</span>":<span class="value"><span class="string">"10"</span></span>, "<span class="attribute">country</span>":<span class="value"><span class="string">"Germany"</span></span>, "<span class="attribute">dialCode</span>": <span class="value"><span class="number">49</span></span>, "<span class="attribute">isInEurope</span>":<span class="value"><span class="literal">true</span></span>}
-</code></pre><p>你只需要建立如下这样的Model：</p>
-<pre><code><span class="preprocessor">#import <span class="title">"JSONModel.h"</span></span>
-
-<span class="class"><span class="keyword">@interface</span> <span class="title">CountryModel</span> : <span class="title">JSONModel</span></span>
-
-<span class="keyword">@property</span> (<span class="keyword">assign</span>, <span class="keyword">nonatomic</span>) <span class="keyword">int</span> <span class="keyword">id</span>;
-<span class="keyword">@property</span> (<span class="keyword">strong</span>, <span class="keyword">nonatomic</span>) <span class="built_in">NSString</span>* country;
-<span class="keyword">@property</span> (<span class="keyword">strong</span>, <span class="keyword">nonatomic</span>) <span class="built_in">NSString</span>* dialCode;
-<span class="keyword">@property</span> (<span class="keyword">assign</span>, <span class="keyword">nonatomic</span>) <span class="built_in">BOOL</span> isInEurope;
-
-<span class="keyword">@end</span>
-</code></pre><p>然后像这样：</p>
-<pre><code>NSString<span class="keyword">*</span> json = (fetch here JSON from Internet) ... 
-NSError<span class="keyword">*</span> err = nil;
-CountryModel<span class="keyword">*</span> country = [[CountryModel alloc] initWithString:json error:&amp;err];
-</code></pre><p>嘿嘿，JSON的数据就成功得被解析到country这个变量的对应字段上了！</p>
-<p>是不是很神奇？让我们赶快来一探背后的原理吧！！！</p>
-<h3 id="源码分析">源码分析</h3><p>下载源代码，我们可以看到如下格式的包内容：</p>
-<pre>
--- JSONModel
-   -- JSONModel.h/.m
-   -- JSONModelArray.h/.m
-   -- JSONModelClassProperty.h/.m
-   -- JSONModelError.h/.m
--- JSONModelCategories
-   -- NSArray+JSONModel.h/.m
--- JSONModelNetworking
-   -- 略
--- JSONModelTransformations
-   -- JSONKeyMapper.h/.m
-   -- JSONValueTransformer.h/.m
-</pre>
-
-<p>我们把JSONModelNetworking中的内容略过，因为基本就是网络传输的东西，不是我们了解的重点。</p>
-<h4 id="JSONModel文件">JSONModel文件</h4><p>JSONModel是我们要讲解的重点，我们首先从它的初始化方法谈起。</p>
-<pre><code><span class="pp">-<span class="params">(instancetype)</span>initWithString:<span class="params">(<span class="variable">NSString</span>*)</span>string error:<span class="params">(<span class="variable">JSONModelError</span>**)</span>err;
--<span class="params">(instancetype)</span>initWithString:<span class="params">(<span class="variable">NSString</span> *)</span>string usingEncoding:<span class="params">(<span class="variable">NSStringEncoding</span>)</span>encoding error:<span class="params">(<span class="variable">JSONModelError</span>**)</span>err;
--<span class="params">(instancetype)</span>initWithDictionary:<span class="params">(<span class="variable">NSDictionary</span>*)</span>dict error:<span class="params">(<span class="variable">NSError</span> **)</span>err;
--<span class="params">(instancetype)</span>initWithData:<span class="params">(<span class="variable">NSData</span> *)</span>data error:<span class="params">(<span class="variable">NSError</span> **)</span>error;</span>
-</code></pre><p>粗略一看，四个初始化方法，太可怕了。但是我们知道在iOS的设计理念里，有一种designated initializer的说法，因此，我们挑一个<b>initWithDictionary</b>看起。</p>
-<h5 id="initWithDictionary">initWithDictionary</h5><pre><code>-(<span class="keyword">id</span>)initWithDictionary:(<span class="built_in">NSDictionary</span>*)dict error:(<span class="built_in">NSError</span>**)err
-{
-    <span class="number">1.</span> <span class="comment">//check for nil input</span>
-    <span class="keyword">if</span> (!dict) {
-        <span class="keyword">if</span> (err) *err = [JSONModelError errorInputIsNil];
-        <span class="keyword">return</span> <span class="literal">nil</span>;
-    }
-
-    <span class="number">2.</span> <span class="comment">//invalid input, just create empty instance</span>
-    <span class="keyword">if</span> (![dict isKindOfClass:[<span class="built_in">NSDictionary</span> class]]) {
-        <span class="keyword">if</span> (err) *err = [JSONModelError errorInvalidDataWithMessage:<span class="string">@"Attempt to initialize JSONModel object using initWithDictionary:error: but the dictionary parameter was not an 'NSDictionary'."</span>];
-        <span class="keyword">return</span> <span class="literal">nil</span>;
-    }
-
-    <span class="number">3.</span> <span class="comment">//create a class instance</span>
-    <span class="keyword">self</span> = [<span class="keyword">self</span> init];
-    <span class="keyword">if</span> (!<span class="keyword">self</span>) {
-
-        <span class="comment">//super init didn't succeed</span>
-        <span class="keyword">if</span> (err) *err = [JSONModelError errorModelIsInvalid];
-        <span class="keyword">return</span> <span class="literal">nil</span>;
-    }
-    <span class="comment">// Class infoClass = NSClassFromString([NSString stringWithFormat:@"%@Info", NSStringFromClass(class)]);</span>
-    <span class="number">4.</span> <span class="comment">//check incoming data structure</span>
-    <span class="keyword">if</span> (![<span class="keyword">self</span> __doesDictionary:dict matchModelWithKeyMapper:<span class="keyword">self</span><span class="variable">.__keyMapper</span> error:err]) {
-        <span class="keyword">return</span> <span class="literal">nil</span>;
-    }
-
-    <span class="number">5.</span> <span class="comment">//import the data from a dictionary</span>
-    <span class="keyword">if</span> (![<span class="keyword">self</span> __importDictionary:dict withKeyMapper:<span class="keyword">self</span><span class="variable">.__keyMapper</span> validation:<span class="literal">YES</span> error:err]) {
-        <span class="keyword">return</span> <span class="literal">nil</span>;
-    }
-
-    <span class="number">6.</span> <span class="comment">//run any custom model validation</span>
-    <span class="keyword">if</span> (![<span class="keyword">self</span> validate:err]) {
-        <span class="keyword">return</span> <span class="literal">nil</span>;
-    }
-
-    <span class="number">7.</span> <span class="comment">//model is valid! yay!</span>
-    <span class="keyword">return</span> <span class="keyword">self</span>;
-}
-</code></pre><p>我们分七步来解析这个函数：</p>
-<ul>
-<li>检查参数dict是不是空，是空直接解析失败</li>
-<li>检查参数dict是不是NSDictionary或其子类的实例，是空直接解析失败</li>
-<li><b>关键步骤</b>：创建JSONModel，创建失败直接滚粗，千万别小看这一步哦，具体我们下文说</li>
-<li><b>关键步骤</b>：这是一个通过检查是不是有没被映射到的property的过程，如果有存在疏漏的property，那么会导致解析失败，触发Crash</li>
-<li><b>关键步骤</b>：这是真正将解析的值对应的赋予Model的property的阶段</li>
-<li>进行自定义的检查工作，比如避免直接触发Crash之类的</li>
-<li>得到了正确的model，返回给程序使用。</li>
-</ul>
-<p>下面我们来着重分析最重要的三个步骤</p>
-<h5 id="重点1:_第三步_[self_init]">重点1: 第三步 [self init]</h5><p>[self init]的代码调用了init初始化函数，实现如下，我们主要关注的是其中<em>[self <strong>setup</strong>]</em></p>
-<pre><code>- (id)init
-{
-    <span class="keyword">self</span> = [<span class="keyword">super</span> init];
-    <span class="keyword">if</span> (<span class="keyword">self</span>) {
-        <span class="regexp">//do</span> initial <span class="class"><span class="keyword">class</span> <span class="title">setup</span></span>
-        [<span class="keyword">self</span> __setup__];
-    }
-    <span class="keyword">return</span> <span class="keyword">self</span>;
-}
-</code></pre><p>来看看setup的实现，</p>
-<pre><code>- (<span class="keyword">void</span>)__setup__
-{
-    <span class="comment">//if first instance of this model, generate the property list</span>
-    <span class="keyword">if</span> (!objc_getAssociatedObject(<span class="keyword">self</span><span class="variable">.class</span>, &amp;kClassPropertiesKey)) {
-        [<span class="keyword">self</span> __inspectProperties];
-    }
-
-    <span class="comment">//if there's a custom key mapper, store it in the associated object</span>
-    <span class="keyword">id</span> mapper = [[<span class="keyword">self</span> class] keyMapper];
-    <span class="keyword">if</span> ( mapper &amp;&amp; !objc_getAssociatedObject(<span class="keyword">self</span><span class="variable">.class</span>, &amp;kMapperObjectKey) ) {
-        objc_setAssociatedObject(
-                                 <span class="keyword">self</span><span class="variable">.class</span>,
-                                 &amp;kMapperObjectKey,
-                                 mapper,
-                                 OBJC_ASSO<span class="built_in">CIATION_RETAIN</span> <span class="comment">// This is atomic</span>
-                                 );
-    }
-}
-</code></pre><p>WoW! What are 这个函数弄啥类？看起来很吓人？别怕，让我来一个个解释。</p>
-<p><b>objc_getAssociatedObject想必大家都不会陌生，这就是一个Associate Object，我们经常用这种方法在Category给一个类添加property。</b></p>
-<p>所以，第一个if的意思就是，我根据kClassPropertiesKey这个key，去当前类的Associate Object找property list，如果没找到，就说明是第一次执行解析，所以我要自己建立一个。所以我们赶紧进入<br>__inspectProperties一探究竟！</p>
-<pre><code>- (<span class="keyword">void</span>)__inspectProperties
-{
-    <span class="comment">//JMLog(@"Inspect class: %@", [self class]);</span>
-
-    <span class="built_in">NSMutableDictionary</span>* propertyIndex = [<span class="built_in">NSMutableDictionary</span> dictionary];
-
-    <span class="comment">//temp variables for the loops</span>
-    Class class = [<span class="keyword">self</span> class];
-    <span class="built_in">NSScanner</span>* scanner = <span class="literal">nil</span>;
-    <span class="built_in">NSString</span>* propertyType = <span class="literal">nil</span>;
-
-    <span class="comment">// inspect inherited properties up to the JSONModel class</span>
-    <span class="keyword">while</span> (class != [JSONModel class]) {
-        <span class="comment">//JMLog(@"inspecting: %@", NSStringFromClass(class));</span>
-
-        <span class="keyword">unsigned</span> <span class="keyword">int</span> propertyCount;
-        objc_property_t *properties = class_copyPropertyList(class, &amp;propertyCount);
-
-        <span class="comment">//loop over the class properties</span>
-        <span class="keyword">for</span> (<span class="keyword">unsigned</span> <span class="keyword">int</span> i = <span class="number">0</span>; i &lt; propertyCount; i++) {
-
-            JSONModelClassProperty* p = [[JSONModelClassProperty alloc] init];
-            <span class="comment">//get property name</span>
-            objc_property_t property = properties[i];
-            <span class="keyword">const</span> <span class="keyword">char</span> *propertyName = property_getName(property);
-            p<span class="variable">.name</span> = @(propertyName);
-
-            <span class="comment">//JMLog(@"property: %@", p.name);</span>
-
-            <span class="comment">//get property attributes</span>
-            <span class="keyword">const</span> <span class="keyword">char</span> *attrs = property_getAttributes(property);
-            <span class="built_in">NSString</span>* propertyAttributes = @(attrs);
-            <span class="built_in">NSArray</span>* attributeItems = [propertyAttributes componentsSeparatedByString:<span class="string">@","</span>];
-
-            <span class="comment">//ignore read-only properties</span>
-            <span class="keyword">if</span> ([attributeItems containsObject:<span class="string">@"R"</span>]) {
-                <span class="keyword">continue</span>; <span class="comment">//to next property</span>
-            }
-
-            <span class="comment">//check for 64b BOOLs</span>
-            <span class="keyword">if</span> ([propertyAttributes hasPrefix:<span class="string">@"Tc,"</span>]) {
-                <span class="comment">//mask BOOLs as structs so they can have custom convertors</span>
-                p<span class="variable">.structName</span> = <span class="string">@"BOOL"</span>;
-            }
-
-            scanner = [<span class="built_in">NSScanner</span> scannerWithString: propertyAttributes];
-
-            <span class="comment">//JMLog(@"attr: %@", [NSString stringWithCString:attrs encoding:NSUTF8StringEncoding]);</span>
-            [scanner scanUpToString:<span class="string">@"T"</span> intoString: <span class="literal">nil</span>];
-            [scanner scanString:<span class="string">@"T"</span> intoString:<span class="literal">nil</span>];
-
-            <span class="comment">//check if the property is an instance of a class</span>
-            <span class="keyword">if</span> ([scanner scanString:<span class="string">@"@\""</span> intoString: &amp;propertyType]) {
-
-                [scanner scanUpToCharactersFromSet:[<span class="built_in">NSCharacterSet</span> characterSetWithCharactersInString:<span class="string">@"\"&lt;"</span>]
-                                        intoString:&amp;propertyType];
-
-                <span class="comment">//JMLog(@"type: %@", propertyClassName);</span>
-                p<span class="variable">.type</span> = <span class="built_in">NSClassFromString</span>(propertyType);
-                p<span class="variable">.isMutable</span> = ([propertyType rangeOfString:<span class="string">@"Mutable"</span>]<span class="variable">.location</span> != <span class="built_in">NSNotFound</span>);
-                p<span class="variable">.isStandardJSONType</span> = [allowedJSONTypes containsObject:p<span class="variable">.type</span>];
-
-                <span class="comment">//read through the property protocols</span>
-                <span class="keyword">while</span> ([scanner scanString:<span class="string">@"&lt;"</span> intoString:<span class="literal">NULL</span>]) {
-
-                    <span class="built_in">NSString</span>* protocolName = <span class="literal">nil</span>;
-
-                    [scanner scanUpToString:<span class="string">@"&gt;"</span> intoString: &amp;protocolName];
-
-                    <span class="keyword">if</span> ([protocolName isEqualToString:<span class="string">@"Optional"</span>]) {
-                        p<span class="variable">.isOptional</span> = <span class="literal">YES</span>;
-                    } <span class="keyword">else</span> <span class="keyword">if</span>([protocolName isEqualToString:<span class="string">@"Index"</span>]) {
-                        p<span class="variable">.isIndex</span> = <span class="literal">YES</span>;
-                        objc_setAssociatedObject(
-                                                 <span class="keyword">self</span><span class="variable">.class</span>,
-                                                 &amp;kIndexPropertyNameKey,
-                                                 p<span class="variable">.name</span>,
-                                                 OBJC_ASSO<span class="built_in">CIATION_RETAIN</span> <span class="comment">// This is atomic</span>
-                                                 );
-                    } <span class="keyword">else</span> <span class="keyword">if</span>([protocolName isEqualToString:<span class="string">@"ConvertOnDemand"</span>]) {
-                        p<span class="variable">.convertsOnDemand</span> = <span class="literal">YES</span>;
-                    } <span class="keyword">else</span> <span class="keyword">if</span>([protocolName isEqualToString:<span class="string">@"Ignore"</span>]) {
-                        p = <span class="literal">nil</span>;
-                    } <span class="keyword">else</span> {
-                        p<span class="variable">.protocol</span> = protocolName;
-                    }
-
-                    [scanner scanString:<span class="string">@"&gt;"</span> intoString:<span class="literal">NULL</span>];
-                }
-
-            }
-            <span class="comment">//check if the property is a structure</span>
-            <span class="keyword">else</span> <span class="keyword">if</span> ([scanner scanString:<span class="string">@"{"</span> intoString: &amp;propertyType]) {
-                [scanner scanCharactersFromSet:[<span class="built_in">NSCharacterSet</span> alphanumericCharacterSet]
-                                    intoString:&amp;propertyType];
-
-                p<span class="variable">.isStandardJSONType</span> = <span class="literal">NO</span>;
-                p<span class="variable">.structName</span> = propertyType;
-
-            }
-            <span class="comment">//the property must be a primitive</span>
-            <span class="keyword">else</span> {
-
-                <span class="comment">//the property contains a primitive data type</span>
-                [scanner scanUpToCharactersFromSet:[<span class="built_in">NSCharacterSet</span> characterSetWithCharactersInString:<span class="string">@","</span>]
-                                        intoString:&amp;propertyType];
-
-                <span class="comment">//get the full name of the primitive type</span>
-                propertyType = valueTransformer<span class="variable">.primitivesNames</span>[propertyType];
-
-                <span class="keyword">if</span> (![allowedPrimitiveTypes containsObject:propertyType]) {
-
-                    <span class="comment">//type not allowed - programmer mistaked -&gt; exception</span>
-                    <span class="keyword">@throw</span> [<span class="built_in">NSException</span> exceptionWithName:<span class="string">@"JSONModelProperty type not allowed"</span>
-                                                   reason:[<span class="built_in">NSString</span> stringWithFormat:<span class="string">@"Property type of %@.%@ is not supported by JSONModel."</span>, <span class="keyword">self</span><span class="variable">.class</span>, p<span class="variable">.name</span>]
-                                                 userInfo:<span class="literal">nil</span>];
-                }
-
-            }
-
-            <span class="built_in">NSString</span> *nsPropertyName = @(propertyName);
-            <span class="keyword">if</span>([[<span class="keyword">self</span> class] propertyIsOptional:nsPropertyName]){
-                p<span class="variable">.isOptional</span> = <span class="literal">YES</span>;
-            }
-
-            <span class="keyword">if</span>([[<span class="keyword">self</span> class] propertyIsIgnored:nsPropertyName]){
-                p = <span class="literal">nil</span>;
-            }
-
-            <span class="comment">//few cases where JSONModel will ignore properties automatically</span>
-            <span class="keyword">if</span> ([propertyType isEqualToString:<span class="string">@"Block"</span>]) {
-                p = <span class="literal">nil</span>;
-            }
-
-            <span class="comment">//add the property object to the temp index</span>
-            <span class="keyword">if</span> (p &amp;&amp; ![propertyIndex objectForKey:p<span class="variable">.name</span>]) {
-                [propertyIndex setValue:p forKey:p<span class="variable">.name</span>];
-            }
-        }
-
-        free(properties);
-
-        <span class="comment">//ascend to the super of the class</span>
-        <span class="comment">//(will do that until it reaches the root class - JSONModel)</span>
-        class = [class superclass];
-    }
-
-    <span class="comment">//finally store the property index in the static property index</span>
-    objc_setAssociatedObject(
-                             <span class="keyword">self</span><span class="variable">.class</span>,
-                             &amp;kClassPropertiesKey,
-                             [propertyIndex <span class="keyword">copy</span>],
-                             OBJC_ASSO<span class="built_in">CIATION_RETAIN</span> <span class="comment">// This is atomic</span>
-                             );
-}
-</code></pre><p>这么多代码，其实总结起来就几个步骤：</p>
-<ul>
-<li>获取当前类的的property list，通过class_copyPropertyList runtime的方法</li>
-<li><p>遍历每一个propery，解析他们的属性，这里的属性包括是否只读、类型、是否是weak类型，是否是原子性的等等，如果不了解，可以看如下的表格：</p>
-<p>  | Code        | Meaning          |<br>  | :————-: |:————-<br>  | R      | The property is read-only (readonly).<br>  | C      | The property is a copy of the value last assigned (copy).<br>  | &amp; | The property is a reference to the value last assigned (retain).<br>  | N | The property is non-atomic (nonatomic).<br>  | G<name> | The property defines a custom getter selector name. The name follows the G (for example, GcustomGetter,).<br>  | S<name> | The property defines a custom setter selector name. The name follows the S (for example, ScustomSetter:,).<br>  | D | The property is dynamic (@dynamic).<br>  | W | The property is a weak reference (__weak).<br>  | P | The property is eligible for garbage collection.<br>  | t<encoding> | Specifies the type using old-style encoding.</encoding></name></name></p>
-</li>
-<li><p>根据解析结果，检测是不是合法，如果合法创建对应的JSONModelClassProperty并赋值相应的属性值。</p>
-</li>
-<li><p>然后重复执行，查看完当前的类就去查询其父类，直到没有为止。</p>
-</li>
-<li><p>最后将解析出来的property list通过Associate Object给赋值，这和我们刚刚在<strong>setup</strong>中看到的相呼应。</p>
-</li>
-</ul>
-<p>同样，附上关于property属性的<a href="https://developer.apple.com/library/ios/documentation/Cocoa/Conceptual/ObjCRuntimeGuide/Articles/ocrtPropertyIntrospection.html" target="_blank" rel="external">苹果的官方文档链接</a></p>
-<p>这一步基本就解释完了，我们来看看下一步。</p>
-<h5 id="重点2:_第四步___doesDictionary:(NSDictionary)dict_matchModelWithKeyMapper:(JSONKeyMapper)keyMapper_error:(NSError**)err">重点2: 第四步 __doesDictionary:(NSDictionary<em>)dict matchModelWithKeyMapper:(JSONKeyMapper</em>)keyMapper error:(NSError**)err</h5><p>老样子，我们先来看看他的实现：</p>
-<pre><code>-(<span class="built_in">BOOL</span>)__doesDictionary:(<span class="built_in">NSDictionary</span>*)dict matchModelWithKeyMapper:(JSONKeyMapper*)keyMapper error:(<span class="built_in">NSError</span>**)err
-{
-    <span class="comment">//check if all required properties are present</span>
-    <span class="built_in">NSArray</span>* incomingKeysArray = [dict allKeys];
-    <span class="built_in">NSMutableSet</span>* requiredProperties = [<span class="keyword">self</span> __requiredPropertyNames]<span class="variable">.mutableCopy</span>;
-    <span class="built_in">NSSet</span>* incomingKeys = [<span class="built_in">NSSet</span> setWithArray: incomingKeysArray];
-
-    <span class="comment">//transform the key names, if neccessary</span>
-    <span class="keyword">if</span> (keyMapper || globalKeyMapper) {
-
-        <span class="built_in">NSMutableSet</span>* transformedIncomingKeys = [<span class="built_in">NSMutableSet</span> setWithCapacity: requiredProperties<span class="variable">.count</span>];
-        <span class="built_in">NSString</span>* transformedName = <span class="literal">nil</span>;
-
-        <span class="comment">//loop over the required properties list</span>
-        <span class="keyword">for</span> (JSONModelClassProperty* property <span class="keyword">in</span> [<span class="keyword">self</span> __properties__]) {
-
-            transformedName = (keyMapper||globalKeyMapper) ? [<span class="keyword">self</span> __mapString:property<span class="variable">.name</span> withKeyMapper:keyMapper importing:<span class="literal">YES</span>] : property<span class="variable">.name</span>;
-
-            <span class="comment">//chek if exists and if so, add to incoming keys</span>
-            <span class="keyword">id</span> value;
-            <span class="keyword">@try</span> {
-                value = [dict valueForKeyPath:transformedName];
-            }
-            <span class="keyword">@catch</span> (<span class="built_in">NSException</span> *exception) {
-                value = dict[transformedName];
-            }
-
-            <span class="keyword">if</span> (value) {
-                [transformedIncomingKeys addObject: property<span class="variable">.name</span>];
-            }
-        }
-
-        <span class="comment">//overwrite the raw incoming list with the mapped key names</span>
-        incomingKeys = transformedIncomingKeys;
-    }
-
-    <span class="comment">//check for missing input keys</span>
-    <span class="keyword">if</span> (![requiredProperties isSubsetOfSet:incomingKeys]) {
-
-        <span class="comment">//get a list of the missing properties</span>
-        [requiredProperties minusSet:incomingKeys];
-
-        <span class="comment">//not all required properties are in - invalid input</span>
-        JMLog(<span class="string">@"Incoming data was invalid [%@ initWithDictionary:]. Keys missing: %@"</span>, <span class="keyword">self</span><span class="variable">.class</span>, requiredProperties);
-
-        <span class="keyword">if</span> (err) *err = [JSONModelError errorInvalidDataWithMissingKeys:requiredProperties];
-        <span class="keyword">return</span> <span class="literal">NO</span>;
-    }
-
-    <span class="comment">//not needed anymore</span>
-    incomingKeys= <span class="literal">nil</span>;
-    requiredProperties= <span class="literal">nil</span>;
-
-    <span class="keyword">return</span> <span class="literal">YES</span>;
-}
-</code></pre><p>抛开我们暂时还不熟悉的keyMapper(<b>用过Mantle的人估计有一定了解。</b>)，整个函数非常容易理解。我们首先获取我们传入的代表JSON数据的Dictionary，然后和我们解析出来的property list进行对比（基于NSSet），<b>如果得到property list室Dictionary的超集，意味着JSON中的数据不能完全覆盖我们生命的属性，说明我们有属性得不到赋值，因此会判断出错。</b>在默认的实现中，如果出现没匹配的实现，就是导致Crash</p>
-<h5 id="重点2:_第五步___importDictionary:(NSDictionary)dict_withKeyMapper:(JSONKeyMapper)keyMapper_validation:(BOOL)validation_error:(NSError**)err">重点2: 第五步 __importDictionary:(NSDictionary<em>)dict withKeyMapper:(JSONKeyMapper</em>)keyMapper validation:(BOOL)validation error:(NSError**)err</h5><p>继续看实现：</p>
-<pre><code>-(<span class="built_in">BOOL</span>)__importDictionary:(<span class="built_in">NSDictionary</span>*)dict withKeyMapper:(JSONKeyMapper*)keyMapper validation:(<span class="built_in">BOOL</span>)validation error:(<span class="built_in">NSError</span>**)err
-{
-    <span class="comment">//loop over the incoming keys and set self's properties</span>
-    <span class="keyword">for</span> (JSONModelClassProperty* property <span class="keyword">in</span> [<span class="keyword">self</span> __properties__]) {
-
-        <span class="comment">//convert key name ot model keys, if a mapper is provided</span>
-        <span class="built_in">NSString</span>* jsonKeyPath = (keyMapper||globalKeyMapper) ? [<span class="keyword">self</span> __mapString:property<span class="variable">.name</span> withKeyMapper:keyMapper importing:<span class="literal">YES</span>] : property<span class="variable">.name</span>;
-        <span class="comment">//JMLog(@"keyPath: %@", jsonKeyPath);</span>
-
-        <span class="comment">//general check for data type compliance</span>
-        <span class="keyword">id</span> jsonValue;
-        <span class="keyword">@try</span> {
-            jsonValue = [dict valueForKeyPath: jsonKeyPath];
-        }
-        <span class="keyword">@catch</span> (<span class="built_in">NSException</span> *exception) {
-            jsonValue = dict[jsonKeyPath];
-        }
-
-        <span class="comment">//check for Optional properties</span>
-        <span class="keyword">if</span> (isNull(jsonValue)) {
-            <span class="comment">//skip this property, continue with next property</span>
-            <span class="keyword">if</span> (property<span class="variable">.isOptional</span> || !validation) <span class="keyword">continue</span>;
-
-            <span class="keyword">if</span> ([property<span class="variable">.type</span> isSubclassOfClass:[JSONModel class]]) {
-                <span class="built_in">NSMutableDictionary</span> *infoKey = [<span class="built_in">NSMutableDictionary</span> new];
-                <span class="keyword">for</span> (<span class="built_in">NSString</span> *name <span class="keyword">in</span> dict<span class="variable">.allKeys</span>) {
-                    <span class="keyword">id</span> value = [dict objectForKey:name];
-                    <span class="built_in">NSMutableString</span> *ignoredCaseName = [<span class="built_in">NSMutableString</span> stringWithString:[name lowercaseString]];
-                    <span class="built_in">NSString</span> *ignoredCaseKey  = [property<span class="variable">.name</span> lowercaseString];
-
-                    <span class="built_in">NSRange</span> range = [ignoredCaseName rangeOfString:ignoredCaseKey];
-                    <span class="keyword">if</span> (range<span class="variable">.location</span> != <span class="built_in">NSNotFound</span>) {
-                        [ignoredCaseName deleteCharactersInRange:range];
-                        <span class="built_in">NSString</span> *newPropertyName = [ignoredCaseName <span class="keyword">copy</span>];
-                        <span class="keyword">if</span> (!isNull(value)) {
-                            [infoKey setObject:value forKey:newPropertyName];
-                        }
-                    }
-                }
-
-                jsonValue = [infoKey <span class="keyword">copy</span>];
-            }
-
-            <span class="keyword">if</span> (err &amp;&amp; isNull(jsonValue)) {
-                <span class="comment">//null value for required property</span>
-                <span class="built_in">NSString</span>* msg = [<span class="built_in">NSString</span> stringWithFormat:<span class="string">@"Value of required model key %@ is null"</span>, property<span class="variable">.name</span>];
-                JSONModelError* dataErr = [JSONModelError errorInvalidDataWithMessage:msg];
-                *err = [dataErr errorByPrependingKeyPathComponent:property<span class="variable">.name</span>];
-
-                <span class="keyword">return</span> <span class="literal">NO</span>;
-            }
-        }
-
-        Class jsonValueClass = [jsonValue class];
-        <span class="built_in">BOOL</span> isValueOfAllowedType = <span class="literal">NO</span>;
-
-        <span class="keyword">for</span> (Class allowedType <span class="keyword">in</span> allowedJSONTypes) {
-            <span class="keyword">if</span> ( [jsonValueClass isSubclassOfClass: allowedType] ) {
-                isValueOfAllowedType = <span class="literal">YES</span>;
-                <span class="keyword">break</span>;
-            }
-        }
-
-        <span class="keyword">if</span> (isValueOfAllowedType==<span class="literal">NO</span>) {
-            <span class="comment">//type not allowed</span>
-            JMLog(<span class="string">@"Type %@ is not allowed in JSON."</span>, <span class="built_in">NSStringFromClass</span>(jsonValueClass));
-
-            <span class="keyword">if</span> (err) {
-                <span class="built_in">NSString</span>* msg = [<span class="built_in">NSString</span> stringWithFormat:<span class="string">@"Type %@ is not allowed in JSON."</span>, <span class="built_in">NSStringFromClass</span>(jsonValueClass)];
-                JSONModelError* dataErr = [JSONModelError errorInvalidDataWithMessage:msg];
-                *err = [dataErr errorByPrependingKeyPathComponent:property<span class="variable">.name</span>];
-            }
-            <span class="keyword">return</span> <span class="literal">NO</span>;
-        }
-
-        <span class="comment">//check if there's matching property in the model</span>
-        <span class="keyword">if</span> (property) {
-
-            <span class="comment">// check for custom setter, than the model doesn't need to do any guessing</span>
-            <span class="comment">// how to read the property's value from JSON</span>
-            <span class="keyword">if</span> ([<span class="keyword">self</span> __customSetValue:jsonValue forProperty:property]) {
-                <span class="comment">//skip to next JSON key</span>
-                <span class="keyword">continue</span>;
-            };
-
-            <span class="comment">// 0) handle primitives</span>
-            <span class="keyword">if</span> (property<span class="variable">.type</span> == <span class="literal">nil</span> &amp;&amp; property<span class="variable">.structName</span>==<span class="literal">nil</span>) {
-
-                <span class="comment">//generic setter</span>
-                <span class="keyword">if</span> (jsonValue != [<span class="keyword">self</span> valueForKey:property<span class="variable">.name</span>]) {
-                    [<span class="keyword">self</span> setValue:jsonValue forKey: property<span class="variable">.name</span>];
-                }
-
-                <span class="comment">//skip directly to the next key</span>
-                <span class="keyword">continue</span>;
-            }
-
-            <span class="comment">// 0.5) handle nils</span>
-            <span class="keyword">if</span> (isNull(jsonValue)) {
-                <span class="keyword">if</span> ([<span class="keyword">self</span> valueForKey:property<span class="variable">.name</span>] != <span class="literal">nil</span>) {
-                    [<span class="keyword">self</span> setValue:<span class="literal">nil</span> forKey: property<span class="variable">.name</span>];
-                }
-                <span class="keyword">continue</span>;
-            }
-
-
-            <span class="comment">// 1) check if property is itself a JSONModel</span>
-            <span class="keyword">if</span> ([<span class="keyword">self</span> __isJSONModelSubClass:property<span class="variable">.type</span>]) {
-
-                <span class="comment">//initialize the property's model, store it</span>
-                JSONModelError* initErr = <span class="literal">nil</span>;
-                <span class="keyword">id</span> value = [[property<span class="variable">.type</span> alloc] initWithDictionary: jsonValue error:&amp;initErr];
-
-                <span class="keyword">if</span> (!value) {
-                    <span class="comment">//skip this property, continue with next property</span>
-                    <span class="keyword">if</span> (property<span class="variable">.isOptional</span> || !validation) <span class="keyword">continue</span>;
-
-                    <span class="comment">// Propagate the error, including the property name as the key-path component</span>
-                    <span class="keyword">if</span>((err != <span class="literal">nil</span>) &amp;&amp; (initErr != <span class="literal">nil</span>))
-                    {
-                        *err = [initErr errorByPrependingKeyPathComponent:property<span class="variable">.name</span>];
-                    }
-                    <span class="keyword">return</span> <span class="literal">NO</span>;
-                }
-                <span class="keyword">if</span> (![value isEqual:[<span class="keyword">self</span> valueForKey:property<span class="variable">.name</span>]]) {
-                    [<span class="keyword">self</span> setValue:value forKey: property<span class="variable">.name</span>];
-                }
-
-                <span class="comment">//for clarity, does the same without continue</span>
-                <span class="keyword">continue</span>;
-
-            } <span class="keyword">else</span> {
-
-                <span class="comment">// 2) check if there's a protocol to the property</span>
-                <span class="comment">//  ) might or not be the case there's a built in transofrm for it</span>
-                <span class="keyword">if</span> (property<span class="variable">.protocol</span>) {
-
-                    <span class="comment">//JMLog(@"proto: %@", p.protocol);</span>
-                    jsonValue = [<span class="keyword">self</span> __transform:jsonValue forProperty:property error:err];
-                    <span class="keyword">if</span> (!jsonValue) {
-                        <span class="keyword">if</span> ((err != <span class="literal">nil</span>) &amp;&amp; (*err == <span class="literal">nil</span>)) {
-                            <span class="built_in">NSString</span>* msg = [<span class="built_in">NSString</span> stringWithFormat:<span class="string">@"Failed to transform value, but no error was set during transformation. (%@)"</span>, property];
-                            JSONModelError* dataErr = [JSONModelError errorInvalidDataWithMessage:msg];
-                            *err = [dataErr errorByPrependingKeyPathComponent:property<span class="variable">.name</span>];
-                        }
-                        <span class="keyword">return</span> <span class="literal">NO</span>;
-                    }
-                }
-
-                <span class="comment">// 3.1) handle matching standard JSON types</span>
-                <span class="keyword">if</span> (property<span class="variable">.isStandardJSONType</span> &amp;&amp; [jsonValue isKindOfClass: property<span class="variable">.type</span>]) {
-
-                    <span class="comment">//mutable properties</span>
-                    <span class="keyword">if</span> (property<span class="variable">.isMutable</span>) {
-                        jsonValue = [jsonValue mutableCopy];
-                    }
-
-                    <span class="comment">//set the property value</span>
-                    <span class="keyword">if</span> (![jsonValue isEqual:[<span class="keyword">self</span> valueForKey:property<span class="variable">.name</span>]]) {
-                        [<span class="keyword">self</span> setValue:jsonValue forKey: property<span class="variable">.name</span>];
-                    }
-                    <span class="keyword">continue</span>;
-                }
-
-                <span class="comment">// 3.3) handle values to transform</span>
-                <span class="keyword">if</span> (
-                    (![jsonValue isKindOfClass:property<span class="variable">.type</span>] &amp;&amp; !isNull(jsonValue))
-                    ||
-                    <span class="comment">//the property is mutable</span>
-                    property<span class="variable">.isMutable</span>
-                    ||
-                    <span class="comment">//custom struct property</span>
-                    property<span class="variable">.structName</span>
-                    ) {
-
-                    <span class="comment">// searched around the web how to do this better</span>
-                    <span class="comment">// but did not find any solution, maybe that's the best idea? (hardly)</span>
-                    Class sourceClass = [JSONValueTransformer classByResolvingClusterClasses:[jsonValue class]];
-
-                    <span class="comment">//JMLog(@"to type: [%@] from type: [%@] transformer: [%@]", p.type, sourceClass, selectorName);</span>
-
-                    <span class="comment">//build a method selector for the property and json object classes</span>
-                    <span class="built_in">NSString</span>* selectorName = [<span class="built_in">NSString</span> stringWithFormat:<span class="string">@"%@From%@:"</span>,
-                                              (property<span class="variable">.structName</span>? property<span class="variable">.structName</span> : property<span class="variable">.type</span>), <span class="comment">//target name</span>
-                                              sourceClass]; <span class="comment">//source name</span>
-                    SEL selector = <span class="built_in">NSSelectorFromString</span>(selectorName);
-
-                    <span class="comment">//check for custom transformer</span>
-                    <span class="built_in">BOOL</span> foundCustomTransformer = <span class="literal">NO</span>;
-                    <span class="keyword">if</span> ([valueTransformer respondsToSelector:selector]) {
-                        foundCustomTransformer = <span class="literal">YES</span>;
-                    } <span class="keyword">else</span> {
-                        <span class="comment">//try for hidden custom transformer</span>
-                        selectorName = [<span class="built_in">NSString</span> stringWithFormat:<span class="string">@"__%@"</span>,selectorName];
-                        selector = <span class="built_in">NSSelectorFromString</span>(selectorName);
-                        <span class="keyword">if</span> ([valueTransformer respondsToSelector:selector]) {
-                            foundCustomTransformer = <span class="literal">YES</span>;
-                        }
-                    }
-
-                    <span class="comment">//check if there's a transformer with that name</span>
-                    <span class="keyword">if</span> (foundCustomTransformer) {
-
-                        <span class="comment">//it's OK, believe me...</span>
-<span class="preprocessor">#pragma clang diagnostic push</span>
-<span class="preprocessor">#pragma clang diagnostic ignored <span class="title">"-Warc-performSelector-leaks"</span></span>
-                        <span class="comment">//transform the value</span>
-                        jsonValue = [valueTransformer performSelector:selector withObject:jsonValue];
-<span class="preprocessor">#pragma clang diagnostic pop</span>
-
-                        <span class="keyword">if</span> (![jsonValue isEqual:[<span class="keyword">self</span> valueForKey:property<span class="variable">.name</span>]]) {
-                            [<span class="keyword">self</span> setValue:jsonValue forKey: property<span class="variable">.name</span>];
-                        }
-
-                    } <span class="keyword">else</span> {
-
-                        <span class="comment">// it's not a JSON data type, and there's no transformer for it</span>
-                        <span class="comment">// if property type is not supported - that's a programmer mistaked -&gt; exception</span>
-                        <span class="keyword">@throw</span> [<span class="built_in">NSException</span> exceptionWithName:<span class="string">@"Type not allowed"</span>
-                                                       reason:[<span class="built_in">NSString</span> stringWithFormat:<span class="string">@"%@ type not supported for %@.%@"</span>, property<span class="variable">.type</span>, [<span class="keyword">self</span> class], property<span class="variable">.name</span>]
-                                                     userInfo:<span class="literal">nil</span>];
-                        <span class="keyword">return</span> <span class="literal">NO</span>;
-                    }
-
-                } <span class="keyword">else</span> {
-                    <span class="comment">// 3.4) handle "all other" cases (if any)</span>
-                    <span class="keyword">if</span> (![jsonValue isEqual:[<span class="keyword">self</span> valueForKey:property<span class="variable">.name</span>]]) {
-                        [<span class="keyword">self</span> setValue:jsonValue forKey: property<span class="variable">.name</span>];
-                    }
-                }
-            }
-        }
-    }
-
-    <span class="keyword">return</span> <span class="literal">YES</span>;
-}
-</code></pre><p>这一个函数看着吓人，其实非常容易理解。根据我们刚刚得到的property list，我们一个个取出来，用property name作为key，来查询在对应的JSON字典中的value。然后分为如下几个情况：</p>
-<ul>
-<li>检查是不是空值。如果该属性是optional，那么无所谓。如果不能为空，那么抛出错误。</li>
-<li>检查这个值是不是合法的JSON类型，如果不是，抛出错误。</li>
-<li>如果property是非自定义JSONModel子类的字段，基于Key-Value赋值，当然，你可以自己override setter。</li>
-<li>如果是自定义的JSONModel子类是，创建一个对应的新类，解析对应的value。</li>
-<li>如果再不行，进行一系列的判断和利用JSONValueTransformer进行类型转换进行解析。</li>
-</ul>
-<p>为什么要进行JSONValueTransformer的转换呢，是因为在iOS的视线中，由于抽象工厂的存在，构建了大量的簇类，比如NSArray, NSNumber, NSDictionary等等，他们只是对外暴露的一层皮，实质上底层对于真正的类。比如NSArrayI &lt;=&gt; NSArray等等。因此，我们需要通过JSONValueTransformer得到真正的Class Type，同时通过class Type找到最合适的转换方法，在JSONValueTransformer.m的文件中，我们能找到一大堆<b>xxxFromYYY</b>的函数。</p>
-<p>好了，到此为止，JSONModel的源码解读就差不多了，下周带来SDWebImageCache的解读。</p>
-
-      
-    </div>
-    <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/09/17/code-of-JSONModel/" data-id="cik9sx1ho0006b0i1yucwsg6b" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/10/14/GLCalendarView/" data-id="cil4zgkxk0017poi1edejabx1" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
@@ -2494,7 +1934,7 @@ CountryModel<span class="keyword">*</span> country = [[CountryModel alloc] initW
   <div class="widget-wrap">
     <h3 class="widget-title">Tags</h3>
     <div class="widget">
-      <ul class="tag-list"><li class="tag-list-item"><a class="tag-list-link" href="/tags/Android/">Android</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/JavaScript/">JavaScript</a><span class="tag-list-count">2</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Math/">Math</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/R/">R</a><span class="tag-list-count">2</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Swift/">Swift</a><span class="tag-list-count">4</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/iOS/">iOS</a><span class="tag-list-count">11</span></li></ul>
+      <ul class="tag-list"><li class="tag-list-item"><a class="tag-list-link" href="/tags/Android/">Android</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/JavaScript/">JavaScript</a><span class="tag-list-count">2</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Math/">Math</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/R/">R</a><span class="tag-list-count">2</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Swift/">Swift</a><span class="tag-list-count">4</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/iOS/">iOS</a><span class="tag-list-count">13</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/shell/">shell</a><span class="tag-list-count">1</span></li></ul>
     </div>
   </div>
 
@@ -2503,7 +1943,7 @@ CountryModel<span class="keyword">*</span> country = [[CountryModel alloc] initW
   <div class="widget-wrap">
     <h3 class="widget-title">Tag Cloud</h3>
     <div class="widget tagcloud">
-      <a href="/tags/Android/" style="font-size: 10px;">Android</a> <a href="/tags/JavaScript/" style="font-size: 13.33px;">JavaScript</a> <a href="/tags/Math/" style="font-size: 10px;">Math</a> <a href="/tags/R/" style="font-size: 13.33px;">R</a> <a href="/tags/Swift/" style="font-size: 16.67px;">Swift</a> <a href="/tags/iOS/" style="font-size: 20px;">iOS</a>
+      <a href="/tags/Android/" style="font-size: 10px;">Android</a> <a href="/tags/JavaScript/" style="font-size: 13.33px;">JavaScript</a> <a href="/tags/Math/" style="font-size: 10px;">Math</a> <a href="/tags/R/" style="font-size: 13.33px;">R</a> <a href="/tags/Swift/" style="font-size: 16.67px;">Swift</a> <a href="/tags/iOS/" style="font-size: 20px;">iOS</a> <a href="/tags/shell/" style="font-size: 10px;">shell</a>
     </div>
   </div>
 
@@ -2512,7 +1952,7 @@ CountryModel<span class="keyword">*</span> country = [[CountryModel alloc] initW
   <div class="widget-wrap">
     <h3 class="widget-title">Archives</h3>
     <div class="widget">
-      <ul class="archive-list"><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/02/">February 2016</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/12/">December 2015</a><span class="archive-list-count">6</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/11/">November 2015</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/10/">October 2015</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/09/">September 2015</a><span class="archive-list-count">4</span></li></ul>
+      <ul class="archive-list"><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/02/">February 2016</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/12/">December 2015</a><span class="archive-list-count">6</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/11/">November 2015</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/10/">October 2015</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/09/">September 2015</a><span class="archive-list-count">4</span></li></ul>
     </div>
   </div>
 
@@ -2524,23 +1964,23 @@ CountryModel<span class="keyword">*</span> country = [[CountryModel alloc] initW
       <ul>
         
           <li>
+            <a href="/2016/02/27/check-manifest/">Check Pods Manifest.lock</a>
+          </li>
+        
+          <li>
+            <a href="/2016/02/27/pod-install-plugin/">开发一个简单的Pod Install 插件</a>
+          </li>
+        
+          <li>
+            <a href="/2016/02/27/FBKVOController/">FBKVOController 源码解析</a>
+          </li>
+        
+          <li>
             <a href="/2016/02/05/DGRunKeeperSwitch/">DGRunKeeperSwitch 源码解析</a>
           </li>
         
           <li>
             <a href="/2016/02/05/PureLayout/">PureLayout 源码解析</a>
-          </li>
-        
-          <li>
-            <a href="/2015/12/30/Refactor-Mega-ViewController/">重构你的ViewController</a>
-          </li>
-        
-          <li>
-            <a href="/2015/12/20/Learn-R-2/">一步步学R（2）</a>
-          </li>
-        
-          <li>
-            <a href="/2015/12/15/Regression-Model-1/">Regression Model</a>
           </li>
         
       </ul>

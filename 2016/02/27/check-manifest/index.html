@@ -3,24 +3,30 @@
 <head>
   <meta charset="utf-8">
   
-  <title>Regression Model | Hexo</title>
+  <title>Check Pods Manifest.lock | Hexo</title>
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
-  <meta name="description" content="Regression Model是什么Regression Model是一种基本的数据分析模型，通俗点来说就是我们在中学时期学习的截距式直线方程。通过斜率和截距来定义一种诸如 y = kx + b的方程。一旦有了这样的方程，我们就可以通过我们现有的数据集，比如一堆x 来预测y。
-今天就让我们来研究研究这一种数据模型
-CenteringCentering是一种常用的数学用语，意为 集中化。什么意思呢">
+  <meta name="description" content="初次看到这个题目的你，可能还不了解这是个啥。但是，我想下面这个错误提示，你肯定会非常熟悉：
+error: The sandbox is not in sync with the  
+Podfile.lock. Run &apos;pod install&apos; or update 
+your CocoaPods installation.
+没错，当我们使用cocoapods的时候，经常会遇到的一个问题。其原因在于">
 <meta property="og:type" content="article">
-<meta property="og:title" content="Regression Model">
-<meta property="og:url" content="http://satanwoo.github.io/2015/12/15/Regression-Model-1/index.html">
+<meta property="og:title" content="Check Pods Manifest.lock">
+<meta property="og:url" content="http://satanwoo.github.io/2016/02/27/check-manifest/index.html">
 <meta property="og:site_name" content="Hexo">
-<meta property="og:description" content="Regression Model是什么Regression Model是一种基本的数据分析模型，通俗点来说就是我们在中学时期学习的截距式直线方程。通过斜率和截距来定义一种诸如 y = kx + b的方程。一旦有了这样的方程，我们就可以通过我们现有的数据集，比如一堆x 来预测y。
-今天就让我们来研究研究这一种数据模型
-CenteringCentering是一种常用的数学用语，意为 集中化。什么意思呢">
-<meta property="og:updated_time" content="2015-12-14T17:36:17.000Z">
+<meta property="og:description" content="初次看到这个题目的你，可能还不了解这是个啥。但是，我想下面这个错误提示，你肯定会非常熟悉：
+error: The sandbox is not in sync with the  
+Podfile.lock. Run &apos;pod install&apos; or update 
+your CocoaPods installation.
+没错，当我们使用cocoapods的时候，经常会遇到的一个问题。其原因在于">
+<meta property="og:updated_time" content="2016-02-27T10:26:40.000Z">
 <meta name="twitter:card" content="summary">
-<meta name="twitter:title" content="Regression Model">
-<meta name="twitter:description" content="Regression Model是什么Regression Model是一种基本的数据分析模型，通俗点来说就是我们在中学时期学习的截距式直线方程。通过斜率和截距来定义一种诸如 y = kx + b的方程。一旦有了这样的方程，我们就可以通过我们现有的数据集，比如一堆x 来预测y。
-今天就让我们来研究研究这一种数据模型
-CenteringCentering是一种常用的数学用语，意为 集中化。什么意思呢">
+<meta name="twitter:title" content="Check Pods Manifest.lock">
+<meta name="twitter:description" content="初次看到这个题目的你，可能还不了解这是个啥。但是，我想下面这个错误提示，你肯定会非常熟悉：
+error: The sandbox is not in sync with the  
+Podfile.lock. Run &apos;pod install&apos; or update 
+your CocoaPods installation.
+没错，当我们使用cocoapods的时候，经常会遇到的一个问题。其原因在于">
   
     <link rel="alternative" href="/atom.xml" title="Hexo" type="application/atom+xml">
   
@@ -67,10 +73,10 @@ CenteringCentering是一种常用的数学用语，意为 集中化。什么意�
   </div>
 </header>
       <div class="outer">
-        <section id="main"><article id="post-Regression-Model-1" class="article article-type-post" itemscope itemprop="blogPost">
+        <section id="main"><article id="post-check-manifest" class="article article-type-post" itemscope itemprop="blogPost">
   <div class="article-meta">
-    <a href="/2015/12/15/Regression-Model-1/" class="article-date">
-  <time datetime="2015-12-14T16:31:35.000Z" itemprop="datePublished">2015-12-15</time>
+    <a href="/2016/02/27/check-manifest/" class="article-date">
+  <time datetime="2016-02-27T10:23:21.000Z" itemprop="datePublished">2016-02-27</time>
 </a>
     
   </div>
@@ -81,7 +87,7 @@ CenteringCentering是一种常用的数学用语，意为 集中化。什么意�
         
   
     <h1 class="article-title" itemprop="name">
-      Regression Model
+      Check Pods Manifest.lock
     </h1>
   
 
@@ -89,30 +95,44 @@ CenteringCentering是一种常用的数学用语，意为 集中化。什么意�
     
     <div class="article-entry" itemprop="articleBody">
       
-        <h3 id="Regression_Model是什么">Regression Model是什么</h3><p>Regression Model是一种基本的数据分析模型，通俗点来说就是我们在中学时期学习的截距式直线方程。通过斜率和截距来定义一种诸如 <code>y = kx + b</code>的方程。一旦有了这样的方程，我们就可以通过我们现有的数据集，比如一堆<code>x</code> 来预测y。</p>
-<p>今天就让我们来研究研究这一种数据模型</p>
-<h4 id="Centering">Centering</h4><p>Centering是一种常用的数学用语，意为 <em>集中化</em>。什么意思呢？就是说如果我有从x1, x2 … xn 这n个数据构成的数据集{x}，我可以求出他们的平均值为<em>XM</em>。我可以构建 <code>bi = xi - XM</code> 这样一个数列，这样的话，{b}这个数据集的平均值就为0，这一个过程就叫Centering。</p>
-<h4 id="Variances（方差）">Variances（方差）</h4><p>方式的定义是:</p>
-<blockquote>
-<p>求出一个数据集的平均数XM, 对于{x} 中的每一个数，求其与平均数差的平方。再这这些差的平房加在一起求和，最后用和除以n - 1，这里的n是数据集中数据的个数。</p>
-</blockquote>
-<p>而标准差就是方差的平方根。 <strong>通过构建<code>bi = xi / 标准差s</code> 可以得到{b}数据集，它的标准差为1，这一过程也叫做Scaling</strong></p>
-<h4 id="Normalization">Normalization</h4><p>将数据集先Centering再Scaling的过程叫做Normalization。</p>
-<h4 id="Covariance（协方差）">Covariance（协方差）</h4><p>协方差的定义其实和方差类似，只不过针对的是一对数据集{x, y}。</p>
-<blockquote>
-<p>求出数据集{x}的平均数M，求出数据集{y}的平均数N，对于每一个i，求和<code>(xi - M) * (yi - N)</code>，最后和除以<code>n - 1</code>，其中n是数据集中数据的个数。</p>
-</blockquote>
-<h4 id="Corrleation（两个数据集的关联）">Corrleation（两个数据集的关联）</h4><p>Correlation就是将两个数据集的协方差除以{x}的标准差和{y}的标准差的乘积。<br><strong>Correlation的值域从－1到1，越接近两端表示两个数据集关联度越大，越靠近0表示越小。</strong></p>
-<h3 id="重点">重点</h3><p>对于 y = kx + b 来说，可以通过如下公式求解方程：</p>
-<p><code>k = cor(y, x) * s(y) / s(x)</code>  以及 <code>b = mean(y) - k * mean(x)</code></p>
+        <p>初次看到这个题目的你，可能还不了解这是个啥。但是，我想下面这个错误提示，你肯定会非常熟悉：</p>
+<pre><code><span class="keyword">error</span>: The sandbox <span class="keyword">is</span> <span class="keyword">not</span> <span class="keyword">in</span> sync <span class="keyword">with</span> <span class="keyword">the</span>  
+Podfile.lock. Run 'pod install' <span class="keyword">or</span> update 
+your CocoaPods installation.
+</code></pre><p>没错，当我们使用<code>cocoapods</code>的时候，经常会遇到的一个问题。其原因在于我们本地的<code>manifest.lock</code>和通过<code>git</code>同步的<code>Pod.lock</code>的产生了差异。</p>
+<p><strong>注：manifest.lock简单可以理解为我们在本地执行一次<code>pod install</code>后生成的当前Podfile的状态的表征文件。而Pod.lock是同步他人更新过Podfile后的状态。</strong></p>
+<p>那么，这个差异报错的原因是什么呢？我们可以打开Xcode项目中对应的<code>Target</code>的<code>Build Phase</code>，可以发现，其中存在在一项名为<code>Check Pods Manifest.lock</code>，是一个<code>shell script</code>，内容如下：</p>
+<pre><code>// <span class="number">1.</span>
+diff <span class="string">"${PODS_ROOT}/../Podfile.lock"</span> <span class="string">"${PODS_ROOT}/Manifest.lock"</span> &gt; /dev/null
+
+// <span class="number">2.</span>
+<span class="keyword">if</span> <span class="string">[[ $? != 0 ]]</span> ; <span class="keyword">then</span>
+
+// <span class="number">3.</span>
+    cat &lt;&lt; EOM
+<span class="built_in">error</span>: The sandbox is <span class="keyword">not</span> <span class="keyword">in</span> sync with the Podfile.lock. Run <span class="string">'pod install'</span> <span class="keyword">or</span> update your CocoaPods installation.
+EOM
+    exit <span class="number">1</span>
+fi
+</code></pre><p>我们来解读下这段代码的意思：</p>
+<ol>
+<li><p>通过diff命令来检查<code>Podfile.lock</code>和<code>Manifest.lock</code>的区别。这个命令中的<code>&gt; /dev/null</code> 可以视为一个<strong>黑洞</strong>，等价于一个只读文件，所有写入它的内容都会永远丢失. 而尝试从它那儿读取内容则什么也读不到。由于在执行<code>diff</code>命令的过程中可能产生大量的标准输出，可能会干扰我们的的工作流程执行，所以我们将它们全部丢弃给<strong>黑洞</strong>，只关心<strong>返回值</strong>。</p>
+</li>
+<li><p><code>if [[ $? != 0 ]] then</code>这个命令指的上一个命令的返回值如果不等于0，就执行xxxx。其中$?也就代表着上一个命令<code>diff</code>的返回值。</p>
+</li>
+<li><p>好，如果返回值不为0，说明有差异，因此通过<code>cat &lt;&lt; EOM</code> 和 <code>EOM</code>将处于这两者之前的内容输出到标准输出。</p>
+</li>
+</ol>
+<h3 id="改造脚本">改造脚本</h3><p>好，既然我们已经读懂了上述的<code>shell script</code>，我们不如将这个错误的提示来进行整改，当有差异的情况下，自动去进行<code>pod install</code>。</p>
+<p>整体改造后的代码如下：</p>
 
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/12/15/Regression-Model-1/" data-id="cil4zgkwz000opoi1d0hslk0u" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/02/27/check-manifest/" data-id="cil4zgkwf000apoi1ule5lq2v" class="article-share-link">Share</a>
       
       
-  <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Math/">Math</a></li></ul>
+  <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/shell/">shell</a></li></ul>
 
     </footer>
   </div>
@@ -120,19 +140,10 @@ CenteringCentering是一种常用的数学用语，意为 集中化。什么意�
     
 <nav id="article-nav">
   
-    <a href="/2015/12/20/Learn-R-2/" id="article-nav-newer" class="article-nav-link-wrap">
-      <strong class="article-nav-caption">Newer</strong>
-      <div class="article-nav-title">
-        
-          一步步学R（2）
-        
-      </div>
-    </a>
   
-  
-    <a href="/2015/12/13/Learn-R-1/" id="article-nav-older" class="article-nav-link-wrap">
+    <a href="/2016/02/27/pod-install-plugin/" id="article-nav-older" class="article-nav-link-wrap">
       <strong class="article-nav-caption">Older</strong>
-      <div class="article-nav-title">一步步学R（1）</div>
+      <div class="article-nav-title">开发一个简单的Pod Install 插件</div>
     </a>
   
 </nav>
@@ -143,7 +154,7 @@ CenteringCentering是一种常用的数学用语，意为 集中化。什么意�
 
 <section id="comments">
   <!-- 多说评论框 start -->
-  <div class="ds-thread" data-thread-key="post-Regression-Model-1" data-title="Regression Model" data-url="http://satanwoo.github.io/2015/12/15/Regression-Model-1/"></div>
+  <div class="ds-thread" data-thread-key="post-check-manifest" data-title="Check Pods Manifest.lock" data-url="http://satanwoo.github.io/2016/02/27/check-manifest/"></div>
   <!-- 多说评论框 end -->
   <!-- 多说公共JS代码 start (一个网页只需插入一次) -->
   <script type="text/javascript">

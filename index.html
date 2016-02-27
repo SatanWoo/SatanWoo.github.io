@@ -62,6 +62,440 @@
       <div class="outer">
         <section id="main">
   
+    <article id="post-check-manifest" class="article article-type-post" itemscope itemprop="blogPost">
+  <div class="article-meta">
+    <a href="/2016/02/27/check-manifest/" class="article-date">
+  <time datetime="2016-02-27T10:23:21.000Z" itemprop="datePublished">2016-02-27</time>
+</a>
+    
+  </div>
+  <div class="article-inner">
+    
+    
+      <header class="article-header">
+        
+  
+    <h1 itemprop="name">
+      <a class="article-title" href="/2016/02/27/check-manifest/">Check Pods Manifest.lock</a>
+    </h1>
+  
+
+      </header>
+    
+    <div class="article-entry" itemprop="articleBody">
+      
+        <p>初次看到这个题目的你，可能还不了解这是个啥。但是，我想下面这个错误提示，你肯定会非常熟悉：</p>
+<pre><code><span class="keyword">error</span>: The sandbox <span class="keyword">is</span> <span class="keyword">not</span> <span class="keyword">in</span> sync <span class="keyword">with</span> <span class="keyword">the</span>  
+Podfile.lock. Run 'pod install' <span class="keyword">or</span> update 
+your CocoaPods installation.
+</code></pre><p>没错，当我们使用<code>cocoapods</code>的时候，经常会遇到的一个问题。其原因在于我们本地的<code>manifest.lock</code>和通过<code>git</code>同步的<code>Pod.lock</code>的产生了差异。</p>
+<p><strong>注：manifest.lock简单可以理解为我们在本地执行一次<code>pod install</code>后生成的当前Podfile的状态的表征文件。而Pod.lock是同步他人更新过Podfile后的状态。</strong></p>
+<p>那么，这个差异报错的原因是什么呢？我们可以打开Xcode项目中对应的<code>Target</code>的<code>Build Phase</code>，可以发现，其中存在在一项名为<code>Check Pods Manifest.lock</code>，是一个<code>shell script</code>，内容如下：</p>
+<pre><code>// <span class="number">1.</span>
+diff <span class="string">"${PODS_ROOT}/../Podfile.lock"</span> <span class="string">"${PODS_ROOT}/Manifest.lock"</span> &gt; /dev/null
+
+// <span class="number">2.</span>
+<span class="keyword">if</span> <span class="string">[[ $? != 0 ]]</span> ; <span class="keyword">then</span>
+
+// <span class="number">3.</span>
+    cat &lt;&lt; EOM
+<span class="built_in">error</span>: The sandbox is <span class="keyword">not</span> <span class="keyword">in</span> sync with the Podfile.lock. Run <span class="string">'pod install'</span> <span class="keyword">or</span> update your CocoaPods installation.
+EOM
+    exit <span class="number">1</span>
+fi
+</code></pre><p>我们来解读下这段代码的意思：</p>
+<ol>
+<li><p>通过diff命令来检查<code>Podfile.lock</code>和<code>Manifest.lock</code>的区别。这个命令中的<code>&gt; /dev/null</code> 可以视为一个<strong>黑洞</strong>，等价于一个只读文件，所有写入它的内容都会永远丢失. 而尝试从它那儿读取内容则什么也读不到。由于在执行<code>diff</code>命令的过程中可能产生大量的标准输出，可能会干扰我们的的工作流程执行，所以我们将它们全部丢弃给<strong>黑洞</strong>，只关心<strong>返回值</strong>。</p>
+</li>
+<li><p><code>if [[ $? != 0 ]] then</code>这个命令指的上一个命令的返回值如果不等于0，就执行xxxx。其中$?也就代表着上一个命令<code>diff</code>的返回值。</p>
+</li>
+<li><p>好，如果返回值不为0，说明有差异，因此通过<code>cat &lt;&lt; EOM</code> 和 <code>EOM</code>将处于这两者之前的内容输出到标准输出。</p>
+</li>
+</ol>
+<h3 id="改造脚本">改造脚本</h3><p>好，既然我们已经读懂了上述的<code>shell script</code>，我们不如将这个错误的提示来进行整改，当有差异的情况下，自动去进行<code>pod install</code>。</p>
+<p>整体改造后的代码如下：</p>
+
+      
+    </div>
+    <footer class="article-footer">
+      <a data-url="http://satanwoo.github.io/2016/02/27/check-manifest/" data-id="cil4zgkwf000apoi1ule5lq2v" class="article-share-link">Share</a>
+      
+      
+  <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/shell/">shell</a></li></ul>
+
+    </footer>
+  </div>
+  
+</article>
+
+
+  
+    <article id="post-pod-install-plugin" class="article article-type-post" itemscope itemprop="blogPost">
+  <div class="article-meta">
+    <a href="/2016/02/27/pod-install-plugin/" class="article-date">
+  <time datetime="2016-02-27T10:23:09.000Z" itemprop="datePublished">2016-02-27</time>
+</a>
+    
+  </div>
+  <div class="article-inner">
+    
+    
+      <header class="article-header">
+        
+  
+    <h1 itemprop="name">
+      <a class="article-title" href="/2016/02/27/pod-install-plugin/">开发一个简单的Pod Install 插件</a>
+    </h1>
+  
+
+      </header>
+    
+    <div class="article-entry" itemprop="articleBody">
+      
+        <p>前几天刚刚粗略了学习了一下Xcode的插件开发，一时心痒，就准备做个简单的插件练练手。</p>
+<p>哎哟我擦，正当我准备大展身手的时候，我突然想到我该做个啥呢?  我这真是有了程序员，只差一个好Idea了。</p>
+<p>好吧，正巧这个时候，我发现我和朋友协作的一个iOS项目在两个分支上同步开发，每次要合并后拉下分支，都发现Pod.lock文件都产生了变化，无法编译成功。每当这个时候，我都要进入<code>terminal</code>输入一大堆的<code>cd ..</code>进入对应的文件目录执行<code>pod install</code>命令，甚是繁琐。</p>
+<p>当然啦，你可以通过<code>alias</code> 配置快速的执行命令，但是，你仍然得切换出Xcode的窗口，对于我们这种效率控来说不能接受。</p>
+<p>所以，我就想到了，在Xcode中利用插件集成一下关于pod的一些功能，同时绑定快捷键提高操作效率。</p>
+<p>说干就干。</p>
+<p>首先我们利用Xcode的plugin template生成项目的一些基本流程结构。关于插件的具体思路可以参考我之前的一篇文章《DXXcodeConsoleUnicodePlugin源码解析》</p>
+<p>在这里，我们着重介绍一下利用 <code>NSTask</code> 去执行诸如<code>pod install</code>这样的命令。</p>
+<h4 id="实现思路">实现思路</h4><p>在实现真正的<code>Objective-C</code>代码之前，我们首先现在<code>terminal</code>中随便找个安全的目录敲入<code>pod install</code>来试试看结果，如下所说：</p>
+<pre><code>pod install
+[!] <span class="keyword">No</span> <span class="label">`Podfile'</span> found <span class="keyword">in</span> the project directory.
+</code></pre><p>从这个错误提示中我们可以大致了解，<code>pod install</code>的命令依赖于所谓的<code>Podfile</code>。于是，我们输入<code>pod install --help</code>查看其对应的帮助手册：</p>
+<pre><code>-<span class="ruby">-project-directory=<span class="regexp">/project/dir</span><span class="regexp">/   The path to the root of the project
+</span></span>                                       directory
+-<span class="ruby"><span class="regexp">-no-clean                          Leave SCM dirs like `.git` and `.svn`
+</span></span>                                       intact after downloading
+-<span class="ruby"><span class="regexp">-no-integrate                      Skip integration of the Pods libraries
+</span></span>                                       in the Xcode project(s)
+-<span class="ruby"><span class="regexp">-no-repo-update                    Skip running `pod repo update` before
+</span></span>                                       install
+-<span class="ruby"><span class="regexp">-silent                            Show nothing
+</span></span>-<span class="ruby"><span class="regexp">-verbose                           Show more debugging information
+</span></span>-<span class="ruby"><span class="regexp">-no-ansi                           Show output without ANSI codes
+</span></span>-<span class="ruby"><span class="regexp">-help                              Show help banner of specified command</span></span>
+</code></pre><p>从第一条帮助命令张，我们可以看到，我们需要通过<strong>–project-directory=</strong>来设置<code>pod install</code>的根目录，也即<code>Podfile</code>的所在。</p>
+<p>好，事情到这里，我们在编写插件前需要的准备工作就基本完成了，我们现在只需利用<code>NSTask</code>将我们在命令行中输入的命令执行即可。</p>
+<p>让我们来看看实现的代码：</p>
+<pre><code> <span class="comment">// 1.</span>
+ [<span class="keyword">self</span> searchMainProjectPath];
+
+ <span class="comment">// 2.</span>
+ <span class="built_in">NSTask</span> *podInstallAction = [[<span class="built_in">NSTask</span> alloc] init];
+ podInstallAction<span class="variable">.currentDirectoryPath</span> = <span class="keyword">self</span><span class="variable">.mainProjectPath</span>;
+ podInstallAction<span class="variable">.arguments</span> = @[<span class="string">@"install"</span>];
+ podInstallAction<span class="variable">.launchPath</span> = <span class="string">@"/usr/bin/pod"</span>;
+
+ <span class="comment">// 3.</span>
+ <span class="built_in">NSPipe</span> *pipeOut = [<span class="built_in">NSPipe</span> pipe];
+ [podInstallAction setStandardOutput:pipeOut];
+ <span class="built_in">NSFileHandle</span> *output = [pipeOut fileHandleForReading];
+
+ [output setReadabilityHandler:^(<span class="built_in">NSFileHandle</span> * _Nonnull fileHandler) {
+   <span class="built_in">NSData</span> *data = [fileHandler availableData];
+   <span class="built_in">NSString</span> *text = [[<span class="built_in">NSString</span> alloc] initWithData:data encoding:<span class="built_in">NSASCIIStringEncoding</span>];
+
+   <span class="built_in">NSLog</span>(<span class="string">@"text is %@"</span>, text);
+ }];
+
+[podInstallAction launch];
+[podInstallAction waitUntilExit];
+</code></pre><ol>
+<li>我们首先要寻找到当前项目的主目录，也就是<code>Podfile</code>的路径</li>
+<li>然后我们构建NSTask，将其的执行目录设置成我们的主目录，然后<code>/usr/bin</code>中调出<code>pod</code>的可执行文件，执行<code>pod install</code>。</li>
+<li>我们利用NSPipe将默认的NSTask的输出(stdout)重定向到我们的指定的地方，这样有助于我们查看log或者进行流程工程。</li>
+</ol>
+<p>到这里，基本上一个简单的小插件就完成了，但是我在这里想要强调一点关于主工程路径搜索的一些问题，我们首先来看代码：</p>
+<pre><code><span class="built_in">NSArray</span> *workspaceWindowControllers = [<span class="built_in">NSClassFromString</span>(<span class="string">@"IDEWorkspaceWindowController"</span>) workspaceWindowControllers];
+[workspaceWindowControllers enumerateObjectsUsingBlock:^(<span class="keyword">id</span> controller, <span class="built_in">NSUInteger</span> idx, <span class="built_in">BOOL</span> *stop) {
+  <span class="keyword">if</span> ([[controller valueForKey:<span class="string">@"window"</span>] isMainWindow]) {
+    <span class="keyword">id</span> workspace = [controller valueForKey:<span class="string">@"_workspace"</span>];
+    <span class="built_in">NSString</span> *filePath = [[workspace valueForKey:<span class="string">@"representingFilePath"</span>] valueForKey:<span class="string">@"pathString"</span>];
+    <span class="built_in">NSString</span> *projectName = [[filePath lastPathComponent] stringByDeletingPathExtension];
+    <span class="built_in">NSLog</span>(<span class="string">@"CocoaPodUI::ProjectName::%@"</span>, projectName);
+
+    <span class="built_in">NSString</span> *text = [[filePath stringByDeletingLastPathComponent] stringByAppendingPathComponent:<span class="string">@"Podfile"</span>];
+
+    <span class="keyword">self</span><span class="variable">.mainProjectPath</span> = [filePath stringByDeletingLastPathComponent];
+
+    <span class="built_in">NSLog</span>(<span class="string">@"pod ifle is %@"</span>, text);
+  }
+}];
+</code></pre><p><strong>基于Xcode的插件开发实际上利用了大量的私有头文件。由于Objective-C著名的runtime特性，因此，很多时候，我们可以利用key-value-coding的方式获取我们普通途径下无法得到的结果。<br>同时，当有一个类的方法是私有方法的时候，你可以利用一个<code>category</code>声明同样的函数签名，不需要实现，<code>Objective-C</code>的runtime会自动帮你转发对应的<code>message passing</code>。</strong>。</p>
+
+      
+    </div>
+    <footer class="article-footer">
+      <a data-url="http://satanwoo.github.io/2016/02/27/pod-install-plugin/" data-id="cil4zgkvx0003poi1bowxq1yd" class="article-share-link">Share</a>
+      
+      
+  <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
+
+    </footer>
+  </div>
+  
+</article>
+
+
+  
+    <article id="post-FBKVOController" class="article article-type-post" itemscope itemprop="blogPost">
+  <div class="article-meta">
+    <a href="/2016/02/27/FBKVOController/" class="article-date">
+  <time datetime="2016-02-27T10:21:55.000Z" itemprop="datePublished">2016-02-27</time>
+</a>
+    
+  </div>
+  <div class="article-inner">
+    
+    
+      <header class="article-header">
+        
+  
+    <h1 itemprop="name">
+      <a class="article-title" href="/2016/02/27/FBKVOController/">FBKVOController 源码解析</a>
+    </h1>
+  
+
+      </header>
+    
+    <div class="article-entry" itemprop="articleBody">
+      
+        <p>开发过iOS的app已经不计其数了，在不同的项目中采用的架构也各不相同，有传统的<strong>MVC</strong>，简化的<strong>VIPER</strong>，以及一些简单的<strong>MVVM</strong>。</p>
+<p>这其中，我最不推荐的就是<strong>VIPER</strong>，谁写谁知道，，绝对是增加了项目的复杂性。<strong>MVVM</strong>由于自己总是受限于传统的<code>Object-Oriented</code>的思路，总是想不出真正的Functional Programming的代码，因此，绝大多数情况，写着写着都回归到了<strong>MVC</strong>。</p>
+<p>其实，相较于网上大家总喜欢提到的<strong>Massive View Controller</strong>问题，我更想说的是这种传统架构中对于信息流的不友好。</p>
+<p>在一个典型的iOS的问题中，我们的代码执行流程，通常都是从View Controller的<strong>生命周期</strong>开始，如果是一个完全基于顺序执行的应用，那整个app的信息流是<strong>单向可跟踪的</strong>。但是往往事情并不会那么简单，我们会包含至少如下这些潜在打乱信息流的<em>坏蛋</em></p>
+<ul>
+<li>Delegate回调</li>
+<li>NSNotification</li>
+<li>UIView控件的Target-Action</li>
+<li>KVO</li>
+</ul>
+<p>在这里，你可能会以为我想谈谈<strong>ReactiveCocoa</strong>和<strong>RxSwift</strong>，那你错啦，那个开源项目我暂时还没有能力去深究，所以我想从KVO事件入手，读一读Facebook出品的<strong>FBKVOController</strong>。</p>
+<h4 id="FBKVOController">FBKVOController</h4><p>简单来说，FBKVOController是对KVO机制的一层封装，同时提供了线程安全的特性和并对如下这个<strong>臭名昭著</strong>的函数进行了封装，提供了干净的block的回调，避免了处理这个函数的逻辑散落的到处都是。</p>
+<pre><code>- (<span class="typename">void</span>)<span class="string">observeValueForKeyPath:</span>(NSString *)keyPath <span class="string">ofObject:</span>(id)object <span class="string">change:</span>(NSDictionary *)change <span class="string">context:</span>(<span class="typename">void</span> *)context
+</code></pre><h4 id="源码分析">源码分析</h4><p>整个项目的结构非常简单，包含如下四个文件：</p>
+<ul>
+<li>FBKVOController.h/.m</li>
+<li>NSObject+FBKVOController.h/.m</li>
+</ul>
+<p>其中，<code>NSObject+FBKVOController</code>只是通过<code>AssociateObject</code>给NSObject提供了一个<code>retain</code>及一个<code>非retain</code>型的KVOController。</p>
+<p>这两种不同类型的KVOController有啥区别，我们稍后再提，我们将重点投向<code>FBKVOController</code>这个文件。</p>
+<p>打开这个<code>FBKVOController.m</code>文件，哎呀，600多行文件，有点蛋疼。没事，配合头文件粗略扫一眼以后，可以发现其中很多方法都是<code>convenience method</code>。</p>
+<p>简单剥离一下数据结构以后，我们可以发现，主要的数据结构有如下三个。</p>
+<ul>
+<li>FBKVOInfo</li>
+<li>FBKVOSharedController</li>
+<li>FBKVOController</li>
+</ul>
+<h4 id="FBKVOController-1">FBKVOController</h4><p>既然我们前面通过<code>NSObject+FBKVOController</code>知道了每个对象都会有其对应的<code>FBKVOController</code>，那我们就先来看看这个类吧。</p>
+<pre><code><span class="comment">//1.</span>
+<span class="class"><span class="keyword">@implementation</span> <span class="title">FBKVOController</span></span>
+{
+  <span class="built_in">NSMapTable</span> *_objectInfosMap;
+  OSSpinLock _lock;
+}
+
+<span class="comment">//2.</span>
+- (instancetype)initWithObserver:(<span class="keyword">id</span>)observer retainObserved:(<span class="built_in">BOOL</span>)retainObserved
+{
+  <span class="keyword">self</span> = [<span class="keyword">super</span> init];
+  <span class="keyword">if</span> (<span class="literal">nil</span> != <span class="keyword">self</span>) {
+    <span class="comment">// 2.</span>
+    _observer = observer;
+
+    <span class="comment">// 3.</span>
+    <span class="built_in">NSPointerFunctionsOptions</span> keyOptions = retainObserved ? <span class="built_in">NSPointerFunctionsStrongMemory</span>|<span class="built_in">NSPointerFunctionsObjectPointerPersonality</span> : <span class="built_in">NSPointerFunctionsWeakMemory</span>|<span class="built_in">NSPointerFunctionsObjectPointerPersonality</span>;
+    _objectInfosMap = [[<span class="built_in">NSMapTable</span> alloc] initWithKeyOptions:keyOptions valueOptions:<span class="built_in">NSPointerFunctionsStrongMemory</span>|<span class="built_in">NSPointerFunctionsObjectPersonality</span> capacity:<span class="number">0</span>];
+
+    <span class="comment">// 4.</span>
+    _lock = OS_SPINLOCK_INIT;
+  }
+  <span class="keyword">return</span> <span class="keyword">self</span>;
+}
+</code></pre><ol>
+<li><p>首先我们看到，这个对象持有一个<code>OSSpinLock</code>及一个<code>NSMapTable</code>。其中<code>OSSpinLock</code>即为自旋锁，当多个线程竞争相同的<strong>critical section</strong>时，起到保护作用。<code>NSMapTable</code>可能大家接触不是很多，我们在后文会详细介绍，这里大家可以先理解为一个高级的NSDictionary。</p>
+</li>
+<li><p>在构造函数中，首先将传入的observer进行<code>weak</code>持有，这主要为了避免<strong>Retain Cycle</strong>。</p>
+</li>
+<li><p>这一段的内容可能大家不太熟悉，<code>NSPointerFunctionsOptions</code>简单来说就是定义<code>NSMapTable</code>中的key和value采用何种内存管理策略，包括<code>strong</code>强引用，<code>weak</code>弱引用以及<code>copy</code>（要支持NSCopying协议）</p>
+</li>
+<li><p>初始化自旋锁  </p>
+</li>
+</ol>
+<p>接下来，使我们通过<code>FBKVOController</code>来对一个对象的某个或者某些keypath进行观察。</p>
+<pre><code>- (<span class="typename">void</span>)<span class="string">observe:</span>(id)object <span class="string">keyPath:</span>(NSString *)keyPath <span class="string">options:</span>(NSKeyValueObservingOptions)options <span class="string">block:</span>(FBKVONotificationBlock)block
+{
+  NSAssert(<span class="number">0</span> != keyPath.length &amp;&amp; NULL != block, @<span class="string">"missing required parameters observe:%@ keyPath:%@ block:%p"</span>, object, keyPath, block);
+  <span class="keyword">if</span> (nil == object || <span class="number">0</span> == keyPath.length || NULL == block) {
+    <span class="keyword">return</span>;
+  }
+
+  <span class="comment">// 1. create info</span>
+  _FBKVOInfo *info = [[_FBKVOInfo alloc] <span class="string">initWithController:</span>self <span class="string">keyPath:</span>keyPath <span class="string">options:</span>options <span class="string">block:</span>block];
+
+  <span class="comment">// 2. observe object with info</span>
+  [self <span class="string">_observe:</span>object <span class="string">info:</span>info];
+}
+</code></pre><ol>
+<li>对于传入的参数，构建一个内部的FBKVOInfo数据结构</li>
+<li>调用<code>[self _observe:object info:info];</code></li>
+</ol>
+<p>接下来，我们来跟踪一下<code>[self _observe:object info:info];</code>，内容如下：</p>
+<pre><code>- (<span class="typename">void</span>)<span class="string">_observe:</span>(id)object <span class="string">info:</span>(_FBKVOInfo *)info
+{
+  <span class="comment">// lock</span>
+  OSSpinLockLock(&amp;_lock);
+
+  <span class="comment">// 1.</span>
+  NSMutableSet *infos = [_objectInfosMap <span class="string">objectForKey:</span>object];
+
+  <span class="comment">// 2. </span>
+  _FBKVOInfo *existingInfo = [infos <span class="string">member:</span>info];
+  <span class="keyword">if</span> (nil != existingInfo) {
+    NSLog(@<span class="string">"observation info already exists %@"</span>, existingInfo);
+
+    <span class="comment">// unlock and return</span>
+    OSSpinLockUnlock(&amp;_lock);
+    <span class="keyword">return</span>;
+  }
+
+  <span class="comment">// lazilly create set of infos</span>
+  <span class="keyword">if</span> (nil == infos) {
+    infos = [NSMutableSet set];
+    [_objectInfosMap <span class="string">setObject:</span>infos <span class="string">forKey:</span>object];
+  }
+
+  <span class="comment">// add info and oberve</span>
+  [infos <span class="string">addObject:</span>info];
+
+  <span class="comment">// unlock prior to callout</span>
+  OSSpinLockUnlock(&amp;_lock);
+
+  <span class="comment">// 3.</span>
+  [[_FBKVOSharedController sharedController] <span class="string">observe:</span>object <span class="string">info:</span>info];
+}
+</code></pre><p>抛开Facebook自身标记的注释，有三处比较值得我们注意：</p>
+<ol>
+<li><p>根据被观察的object获取其对应的<strong>infos set</strong>。这个主要作用在于避免多次对同一个keyPath添加多次观察，避免crash。<strong>因为每调用一次<code>addObserverForKeyPath</code>就要有一个对应的<code>removeObserverForKey</code>。</strong></p>
+</li>
+<li><p>从<strong>infos set</strong>判断是不是已经有了与此次info相同的观察。</p>
+</li>
+<li><p>如果以上都顺利通过，将观察的信息及关系注册到<code>_FBKVOSharedController</code>中。</p>
+</li>
+</ol>
+<p>至此，FBKVOController的任务基本都结束，<code>unObserve</code>相关的任务逻辑大同小异，不再赘述。</p>
+<h4 id="FBKVOSharedController">FBKVOSharedController</h4><p>初次看到这个类的时候，我的脑海中浮现了两个问题，FBKVOSharedController是干嘛的?为什么FBKVOController还需要将观察的信息转交呢？</p>
+<p><strong>其实我个人觉得这一层不是必要的</strong>，但是按照Facebook的理念来说就是将所有的观察信息统一交由一个<code>FBKVOSharedController</code>的<strong>单例</strong>进行维护。如果大家读过Facebook出品的<strong>Flux</strong>架构，也会发现，Facebook经常喜欢维护一个类似于中间件的注册表，在这里，<code>FBKVOSharedController</code>承担的也是类似的职责。</p>
+<p>于是，通过如下方法，我们像使用注册表一样将对KVOInfo注册。</p>
+<pre><code>- (<span class="typename">void</span>)<span class="string">observe:</span>(id)object <span class="string">info:</span>(_FBKVOInfo *)info
+{
+  <span class="keyword">if</span> (nil == info) {
+    <span class="keyword">return</span>;
+  }
+
+  <span class="comment">// register info</span>
+  OSSpinLockLock(&amp;_lock);
+  [_infos <span class="string">addObject:</span>info];
+  OSSpinLockUnlock(&amp;_lock);
+
+  <span class="comment">// 1.</span>
+  [object <span class="string">addObserver:</span>self <span class="string">forKeyPath:</span>info-&gt;_keyPath <span class="string">options:</span>info-&gt;_options <span class="string">context:</span>(<span class="typename">void</span> *)info];
+}
+</code></pre><ol>
+<li>代表所有的观察信息都首先由<code>FBKVOSharedController</code>进行接受，随后进行转发。</li>
+</ol>
+<p>实现<code>observeValueForKeyPath:ofObject:Change:context</code><br>来接收通知。</p>
+<pre><code>- (<span class="keyword">void</span>)observeValueForKeyPath:(<span class="built_in">NSString</span> *)keyPath ofObject:(<span class="keyword">id</span>)object change:(<span class="built_in">NSDictionary</span> *)change context:(<span class="keyword">void</span> *)context
+{
+  <span class="built_in">NSAssert</span>(context, <span class="string">@"missing context keyPath:%@ object:%@ change:%@"</span>, keyPath, object, change);
+
+  _FBKVOInfo *info;
+
+  {
+    <span class="comment">// 1. </span>
+    OSSpinLockLock(&amp;_lock);
+    info = [_infos member:(__bridge <span class="keyword">id</span>)context];
+    OSSpinLockUnlock(&amp;_lock);
+  }
+
+  <span class="keyword">if</span> (<span class="literal">nil</span> != info) {
+
+    <span class="comment">// take strong reference to controller</span>
+    FBKVOController *controller = info-&gt;_controller;
+    <span class="keyword">if</span> (<span class="literal">nil</span> != controller) {
+
+      <span class="comment">// take strong reference to observer</span>
+      <span class="keyword">id</span> observer = controller<span class="variable">.observer</span>;
+      <span class="keyword">if</span> (<span class="literal">nil</span> != observer) {
+
+        <span class="comment">// dispatch custom block or action, fall back to default action</span>
+        <span class="keyword">if</span> (info-&gt;_block) {
+          info-&gt;_block(observer, object, change);
+        } <span class="keyword">else</span> <span class="keyword">if</span> (info-&gt;_action) {
+<span class="preprocessor">#pragma clang diagnostic push</span>
+<span class="preprocessor">#pragma clang diagnostic ignored <span class="title">"-Warc-performSelector-leaks"</span></span>
+          [observer performSelector:info-&gt;_action withObject:change withObject:object];
+<span class="preprocessor">#pragma clang diagnostic pop</span>
+        } <span class="keyword">else</span> {
+          [observer observeValueForKeyPath:keyPath ofObject:object change:change context:info-&gt;_context];
+        }
+      }
+    }
+  }
+}
+</code></pre><ol>
+<li>根据context上下文获取对应的KVOInfo</li>
+<li>判断当前<code>info</code>的<code>observer</code>和<code>controller</code>，是否仍然存在（因为之前我们采用的weak持有）</li>
+<li>根据    <code>info</code>的<code>block</code>或者<code>selector</code>或者<code>override</code>进行消息转发。</li>
+</ol>
+<p>到这里，<code>FBKVOController</code>整体的实现就介绍完了，怎么样，是不是局部看自己都会实现，但是一结合起完整的设计思路，就觉得，不亏是Facebook呢。</p>
+<h3 id="NSMapTable">NSMapTable</h3><p>之前我们在前文中提到了<code>NSMapTable</code>，现在我们来详细介绍他一下。<br>我们在平常的开发中都使用过<code>NSDictionary</code>或者<code>NSMutableDictionary</code>，但是这两种数据结构有其的局限性。</p>
+<p>以<code>NSDictionary</code>为例，<code>NSDictionary</code>将<code>key</code>的<code>hash</code>值作为索引，存储对应的<code>value</code>。因此，<code>key</code>的要求是不能更改。所以，<code>NSDictionary</code>为了确保安全，对于<code>key</code>采用了<strong>copy</strong>的策略。</p>
+<p>默认情况下，支持<strong>NSCopying</strong>协议的类型都可以作为key。但是考虑到copy带来的开销，一般情况下我们都使用简单的诸如数字或者字符串作为key。</p>
+<p>那么，如果要使用<code>Object</code>作为key，想构建<strong>Object to Object</strong>的关系怎么办呢？这个时候就用到<code>NSMapTable</code>。我们可以通过NSFunctionsPointer来分别定义对key和value的储存关系，简单可以分类为<code>strong</code>,<code>weak</code>以及<code>copy</code>。而当利用<code>object</code>作为key的时候，可以定义评判相等的标准，如：<strong>use shifted pointer hash and direct equality, object description或者size</strong>。</p>
+<p>具体你需要去override如下几种方法：</p>
+<pre><code><span class="comment">// pointer personality functions</span>
+<span class="keyword">@property</span> (nullable) <span class="built_in">NSUInteger</span> (*hashFunction)(<span class="keyword">const</span> <span class="keyword">void</span> *item, <span class="built_in">NSUInteger</span> (* __nullable size)(<span class="keyword">const</span> <span class="keyword">void</span> *item));
+<span class="keyword">@property</span> (nullable) <span class="built_in">BOOL</span> (*isEqualFunction)(<span class="keyword">const</span> <span class="keyword">void</span> *item1, <span class="keyword">const</span> <span class="keyword">void</span>*item2, <span class="built_in">NSUInteger</span> (* __nullable size)(<span class="keyword">const</span> <span class="keyword">void</span> *item));
+<span class="keyword">@property</span> (nullable) <span class="built_in">NSUInteger</span> (*sizeFunction)(<span class="keyword">const</span> <span class="keyword">void</span> *item);
+<span class="keyword">@property</span> (nullable) <span class="built_in">NSString</span> * __nullable (*descriptionFunction)(<span class="keyword">const</span> <span class="keyword">void</span> *item);
+</code></pre><p>在<code>FBKVOController</code>自定义的可以作为key的结构<code>FBKVOInfo</code>，就复写了</p>
+<pre><code>- (<span class="type">NSUInteger</span>)hash
+{
+  <span class="keyword">return</span> [_keyPath hash];
+}
+
+- (<span class="type">BOOL</span>)isEqual:(id)<span class="class"><span class="keyword">object</span>
+</span>{
+  <span class="keyword">if</span> (nil == <span class="class"><span class="keyword">object</span>) {</span>
+    <span class="keyword">return</span> <span class="type">NO</span>;
+  }
+  <span class="keyword">if</span> (self == <span class="class"><span class="keyword">object</span>) {</span>
+    <span class="keyword">return</span> <span class="type">YES</span>;
+  }
+  <span class="keyword">if</span> (![<span class="class"><span class="keyword">object</span> <span class="title">isKindOfClass</span>:</span>[self <span class="class"><span class="keyword">class</span>]]) {</span>
+    <span class="keyword">return</span> <span class="type">NO</span>;
+  }
+  <span class="keyword">return</span> [_keyPath isEqualToString:((_FBKVOInfo *)<span class="class"><span class="keyword">object</span>)<span class="title">-&gt;_keyPath</span>];</span>
+}
+</code></pre>
+      
+    </div>
+    <footer class="article-footer">
+      <a data-url="http://satanwoo.github.io/2016/02/27/FBKVOController/" data-id="cil4zgkxq001dpoi15vb5ou54" class="article-share-link">Share</a>
+      
+      
+  <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
+
+    </footer>
+  </div>
+  
+</article>
+
+
+  
     <article id="post-DGRunKeeperSwitch" class="article article-type-post" itemscope itemprop="blogPost">
   <div class="article-meta">
     <a href="/2016/02/05/DGRunKeeperSwitch/" class="article-date">
@@ -164,7 +598,7 @@ selectedTitleLabelsContentView<span class="class">.layer</span><span class="clas
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/02/05/DGRunKeeperSwitch/" data-id="cik9sx1iz001ab0i1nu3gvmym" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/02/05/DGRunKeeperSwitch/" data-id="cil4zgkxv001hpoi1z95snfoi" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
@@ -420,7 +854,7 @@ NSLayoutConstraint *constraint = [NSLayoutConstraint <span class="string">constr
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/02/05/PureLayout/" data-id="cik9sx1ia000ob0i1a0mu161n" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/02/05/PureLayout/" data-id="cil4zgkx5000tpoi1y3lkhzsk" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
@@ -746,7 +1180,7 @@ extension Task {
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/12/30/Refactor-Mega-ViewController/" data-id="cik9sx1i6000mb0i1j16712e5" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/12/30/Refactor-Mega-ViewController/" data-id="cil4zgkx2000rpoi13cyszv1b" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
@@ -897,7 +1331,7 @@ extension Task {
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/12/20/Learn-R-2/" data-id="cik9sx1ig000sb0i1cll8g3vl" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/12/20/Learn-R-2/" data-id="cil4zgkxb000xpoi1xcsnilnw" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/R/">R</a></li></ul>
@@ -951,7 +1385,7 @@ extension Task {
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/12/15/Regression-Model-1/" data-id="cik9sx1i2000jb0i1xb8s1n4l" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/12/15/Regression-Model-1/" data-id="cil4zgkwz000opoi1d0hslk0u" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Math/">Math</a></li></ul>
@@ -1094,7 +1528,7 @@ $foo
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/12/13/Learn-R-1/" data-id="cik9sx1ii000vb0i1k3twzh3o" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/12/13/Learn-R-1/" data-id="cil4zgkxe0010poi1bxg1nzbj" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/R/">R</a></li></ul>
@@ -1200,644 +1634,10 @@ frame <span class="preprocessor">#<span class="number">20</span>: libdyld.dylib`
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/12/11/LLDB-1/" data-id="cik9sx1io0010b0i1s42n4xsn" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/12/11/LLDB-1/" data-id="cil4zgkxi0015poi18dushysu" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
-
-    </footer>
-  </div>
-  
-</article>
-
-
-  
-    <article id="post-TBAnnotationClustering" class="article article-type-post" itemscope itemprop="blogPost">
-  <div class="article-meta">
-    <a href="/2015/12/11/TBAnnotationClustering/" class="article-date">
-  <time datetime="2015-12-10T16:56:04.000Z" itemprop="datePublished">2015-12-11</time>
-</a>
-    
-  </div>
-  <div class="article-inner">
-    
-    
-      <header class="article-header">
-        
-  
-    <h1 itemprop="name">
-      <a class="article-title" href="/2015/12/11/TBAnnotationClustering/">TBAnnotationClustering源码解析</a>
-    </h1>
-  
-
-      </header>
-    
-    <div class="article-entry" itemprop="articleBody">
-      
-        <p>毕设这两天飞一般的加速，终于可以写写源码解析了，嘿嘿，这周读两个跟性能相关的源码，首先是一个跟地图相关的，今天来看看一个数据结构在iOS开发中的妙用。</p>
-<h3 id="TBAnnotationClustering">TBAnnotationClustering</h3><p>我们都知道，MapView的实现机制其实和UITableView类似，首先他们都是基于UIScrollView支持滑动的，此外，他们都采用了循环服用的机制了来保持内存的开销。</p>
-<p><strong>但是</strong>，两者之间有个很大的区别就是数量级的差距，UITableView就算充满整个屏幕，充其量也就是10多个同时可见的VisibleCell，因此就多维护一个大小是VisibleCells数量 ＋ 2的这样一个循环队列，进行复用。但是MapView就不一样了，地图上同时展示一段范围内几千个Point of Interest是非常有可能的，这一下子的内存开销和性能卡顿就非常不得了，因此我们需要一种合理的手段来避免，这就是我们今天要讲解的TBAnnotationClustering的由来。</p>
-<p><a href="https://github.com/thoughtbot/TBAnnotationClustering" target="_blank" rel="external">Github地址</a></p>
-<h3 id="Level_of_Detail">Level of Detail</h3><p>首先，让我们先介绍一下相关背景知识。</p>
-<p>根据图像渲染的理论我们可以知道，人的视野存在焦点区域和盲点区域，总是更倾向于关注处于视线左上角到视线中心部分的。因此，在现实应用中，如游戏场景，当场景需要展现的模型距离视线焦点非常近时，就采用高精度的模型来进行展示；而到模型处于较远位置时，比如体育游戏的场外观众，就可以采用低精度模型进行替换，减少渲染时候的计算量；而到模型所处位置基本可以考虑成为背景时，则会采用基本图元进行展示。通过这种方法，即保证了场景的真实观感，同时又大大减少了不必要的计算量。这也就是通常计算机图形学领域所谓的Level Of Detail技术。</p>
-<h3 id="QuadTree">QuadTree</h3><p>QuadTree可能很多人会比较陌生，但是一提到他的哥哥 － 二叉树，想必大家不会陌生，所以QuadTree又被称为四叉树，关于四叉树的定义，</p>
-<blockquote><br>A quadtree is a tree data structure in which each internal node has exactly four children.<br></blockquote>
-
-<p>四叉树被广泛的运用于空间划分。通过将空间递归划分不同层次的子结构，可以达到较高的空间数据插入和查询效果。</p>
-<p>下面就是一张比较经典的四叉树构造，首先先将一个大空间划分为四个字空间 a b c d。然后根据每一个子空间内的节点个数再进行细分。<strong>这里要强调一点，四叉树的细分没有具体要求，你可以按你的需求划分成每个节点能只包含一个，也可以根据平衡减少划分次数。</strong></p>
-<p><img src="http://img.blog.csdn.net/20131005154434687?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvemhvdXh1Z3VhbmcyMzY=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast"></p>
-<h3 id="TBAnnotationClustering源码讲解">TBAnnotationClustering源码讲解</h3><p>打开这个项目，粗略过一下项目结构，大致需要关注的代码如下：</p>
-<ul>
-<li>TBQuadTree.h/.m</li>
-<li>TBCoordinateQuadTree.h/.m</li>
-</ul>
-<p>让我们一个个来分析</p>
-<h4 id="TBQuadTree">TBQuadTree</h4><p>毫无疑问，从文件名称来看，我们就知道，这个类就代表基础的四叉树数据结构，首先让我们来看看数据结构的定义</p>
-<pre><code><span class="keyword">typedef</span> <span class="class"><span class="keyword">struct</span> <span class="title">TBQuadTreeNodeData</span> </span>{
-    <span class="built_in">double</span> x;
-    <span class="built_in">double</span> y;
-    <span class="keyword">void</span>* data;
-} TBQuadTreeNodeData;
-TBQuadTreeNodeData TBQuadTreeNodeDataMake(<span class="built_in">double</span> x, <span class="built_in">double</span> y, <span class="keyword">void</span>* data);
-</code></pre><p>这个毫无疑问，就是代表的坐标系的<strong>数据节点</strong>。 (x, y)表征坐标点，void *data自由的指向附加的数据。</p>
-<pre><code><span class="keyword">typedef</span> <span class="class"><span class="keyword">struct</span> <span class="title">TBBoundingBox</span> </span>{
-    <span class="built_in">double</span> x0; <span class="built_in">double</span> y0;
-    <span class="built_in">double</span> xf; <span class="built_in">double</span> yf;
-} TBBoundingBox;
-TBBoundingBox TBBoundingBoxMake(<span class="built_in">double</span> x0, <span class="built_in">double</span> y0, <span class="built_in">double</span> xf, <span class="built_in">double</span> yf);
-</code></pre><p>这个同样很简单，用两个对角点限定了一个长方形区域，也就是一个四叉树的节点究竟包含哪些范围。</p>
-<pre><code><span class="label">typedef</span> <span class="keyword">struct </span>quadTreeNode {
-    <span class="keyword">struct </span>quadTreeNode* northWest<span class="comment">;</span>
-    <span class="keyword">struct </span>quadTreeNode* northEast<span class="comment">;</span>
-    <span class="keyword">struct </span>quadTreeNode* southWest<span class="comment">;</span>
-    <span class="keyword">struct </span>quadTreeNode* southEast<span class="comment">;</span>
-    <span class="keyword">TBBoundingBox </span><span class="keyword">boundingBox;
-</span>    int <span class="keyword">bucketCapacity;
-</span>    TBQuadTreeNodeData *points<span class="comment">;</span>
-    int count<span class="comment">;</span>
-} TBQuadTreeNode<span class="comment">;</span>
-<span class="label">TBQuadTreeNode</span>* TBQuadTreeNodeMake(<span class="keyword">TBBoundingBox </span><span class="keyword">boundary, </span>int <span class="keyword">bucketCapacity);</span>
-</code></pre><p>这个稍微复杂点，是四叉树的树节点，其中</p>
-<ul>
-<li>northWest, northEast, southWest, southEast分别代表四叉树的四个子细分区域。</li>
-<li>bondingBox代表的当前这个树节点的涵盖区域。</li>
-<li>bucketCapacity表示这个树节点最大容纳的数据节点个数</li>
-<li>points 数据节点数组</li>
-<li>count 当前包含了数据节点。</li>
-</ul>
-<p><strong>再次强调，千万不要把树节点和数据节点搞混。树节点指的是四叉树上的数据结构，每个树节点最多有四个子树节点，但是可以有bucketCapacity大小的数据节点，数据节点仅仅是用来封装坐标系和其相关的数据的一个数据结构，非四叉树特有。</strong></p>
-<p>看完了数据定义，我们再来看看其实现部分。</p>
-<pre><code><span class="preprocessor">#<span class="keyword">pragma</span> mark - Constructors</span>
-
-<span class="function">TBQuadTreeNodeData <span class="title">TBQuadTreeNodeDataMake</span><span class="params">(<span class="keyword">double</span> x, <span class="keyword">double</span> y, <span class="keyword">void</span>* data)</span>
-</span>{
-    TBQuadTreeNodeData d; d.x = x; d.y = y; d.data = data;
-    <span class="keyword">return</span> d;
-}
-
-<span class="function">TBBoundingBox <span class="title">TBBoundingBoxMake</span><span class="params">(<span class="keyword">double</span> x0, <span class="keyword">double</span> y0, <span class="keyword">double</span> xf, <span class="keyword">double</span> yf)</span>
-</span>{
-    TBBoundingBox bb; bb.x0 = x0; bb.y0 = y0; bb.xf = xf; bb.yf = yf;
-    <span class="keyword">return</span> bb;
-}
-
-<span class="function">TBQuadTreeNode* <span class="title">TBQuadTreeNodeMake</span><span class="params">(TBBoundingBox boundary, <span class="keyword">int</span> bucketCapacity)</span>
-</span>{
-    TBQuadTreeNode* node = <span class="built_in">malloc</span>(<span class="keyword">sizeof</span>(TBQuadTreeNode));
-    node-&gt;northWest = <span class="literal">NULL</span>;
-    node-&gt;northEast = <span class="literal">NULL</span>;
-    node-&gt;southWest = <span class="literal">NULL</span>;
-    node-&gt;southEast = <span class="literal">NULL</span>;
-
-    node-&gt;boundingBox = boundary;
-    node-&gt;bucketCapacity = bucketCapacity;
-    node-&gt;count = <span class="number">0</span>;
-    node-&gt;points = <span class="built_in">malloc</span>(<span class="keyword">sizeof</span>(TBQuadTreeNodeData) * bucketCapacity);
-
-    <span class="keyword">return</span> node;
-}
-</code></pre><p>这三个构造函数，分别是构造<span style="color:red">数据节点</span>、长方形以及<span style="color:blue">四叉树节点</span>，默认情况下四叉树的节点<strong>并非满构造</strong>，而是初始化为空，根据需要插入新节点。</p>
-<pre><code><span class="label">#pragma</span> <span class="keyword">mark </span>- <span class="keyword">Bounding </span><span class="keyword">Box </span>Functions
-
-<span class="keyword">bool </span><span class="keyword">TBBoundingBoxContainsData(TBBoundingBox </span><span class="keyword">box, </span>TBQuadTreeNodeData <span class="preprocessor">data</span>)
-{
-    <span class="keyword">bool </span>containsX = <span class="keyword">box.x0 </span>&lt;= <span class="preprocessor">data</span>.x &amp;&amp; <span class="preprocessor">data</span>.x &lt;= <span class="keyword">box.xf;
-</span>    <span class="keyword">bool </span>containsY = <span class="keyword">box.y0 </span>&lt;= <span class="preprocessor">data</span>.y &amp;&amp; <span class="preprocessor">data</span>.y &lt;= <span class="keyword">box.yf;
-</span>
-    return containsX &amp;&amp; containsY<span class="comment">;</span>
-}
-
-<span class="keyword">bool </span><span class="keyword">TBBoundingBoxIntersectsBoundingBox(TBBoundingBox </span><span class="keyword">b1, </span><span class="keyword">TBBoundingBox </span><span class="keyword">b2)
-</span>{
-    return (<span class="keyword">b1.x0 </span>&lt;= <span class="keyword">b2.xf </span>&amp;&amp; <span class="keyword">b1.xf </span>&gt;= <span class="keyword">b2.x0 </span>&amp;&amp; <span class="keyword">b1.y0 </span>&lt;= <span class="keyword">b2.yf </span>&amp;&amp; <span class="keyword">b1.yf </span>&gt;= <span class="keyword">b2.y0);
-</span>}
-</code></pre><p>随后就是上面两个判断长方形包含和相交的方法了，包含自然是整个包围。而相交的补集是不相交，即在横坐标上一个长方形的xf另一个长方形的x0抑或是一个长方形的x0完全大于另一个长方形的xf，当然在y轴上也是同理，因此通过补集很容易就理解TBBoundingBoxIntersectsBoundingBox的实现了。</p>
-<p>然后来看看非常重要的几个函数，首先是<strong>TBQuadTreeNodeSubdivide</strong></p>
-<pre><code><span class="label">void</span> TBQuadTreeNodeSubdivide(TBQuadTreeNode* node)
-{
-    <span class="keyword">TBBoundingBox </span><span class="keyword">box </span>= node-&gt;<span class="keyword">boundingBox;
-</span>
-    double xMid = (<span class="keyword">box.xf </span>+ <span class="keyword">box.x0) </span>/ <span class="number">2</span>.<span class="number">0</span><span class="comment">;</span>
-    double yMid = (<span class="keyword">box.yf </span>+ <span class="keyword">box.y0) </span>/ <span class="number">2</span>.<span class="number">0</span><span class="comment">;</span>
-
-    <span class="keyword">TBBoundingBox </span>northWest = <span class="keyword">TBBoundingBoxMake(box.x0, </span><span class="keyword">box.y0, </span>xMid, yMid)<span class="comment">;</span>
-    node-&gt;northWest = TBQuadTreeNodeMake(northWest, node-&gt;<span class="keyword">bucketCapacity);
-</span>
-    <span class="keyword">TBBoundingBox </span>northEast = <span class="keyword">TBBoundingBoxMake(xMid, </span><span class="keyword">box.y0, </span><span class="keyword">box.xf, </span>yMid)<span class="comment">;</span>
-    node-&gt;northEast = TBQuadTreeNodeMake(northEast, node-&gt;<span class="keyword">bucketCapacity);
-</span>
-    <span class="keyword">TBBoundingBox </span>southWest = <span class="keyword">TBBoundingBoxMake(box.x0, </span>yMid, xMid, <span class="keyword">box.yf);
-</span>    node-&gt;southWest = TBQuadTreeNodeMake(southWest, node-&gt;<span class="keyword">bucketCapacity);
-</span>
-    <span class="keyword">TBBoundingBox </span>southEast = <span class="keyword">TBBoundingBoxMake(xMid, </span>yMid, <span class="keyword">box.xf, </span><span class="keyword">box.yf);
-</span>    node-&gt;southEast = TBQuadTreeNodeMake(southEast, node-&gt;<span class="keyword">bucketCapacity);
-</span>}
-</code></pre><p>这个函数负责将四叉树节点进行细分。首先获取当前节点负责的长方形区域的中点，然后根据中点到原有长方形的四个顶点，分成四个象限，进行划分。<strong>这个时候请注意</strong>，还只是进行四叉树节点的细分，还没重新更改数据节点的分布。</p>
-<pre><code><span class="keyword">bool</span> TBQuadTreeNodeInsertData(TBQuadTreeNode* node, TBQuadTreeNodeData data)
-{
-    <span class="keyword">if</span> (!TBBoundingBoxContainsData(node-&gt;boundingBox, data)) {
-        <span class="keyword">return</span> <span class="keyword">false</span>;
-    }
-
-    <span class="keyword">if</span> (node-&gt;count &lt; node-&gt;bucketCapacity) {
-        node-&gt;points[node-&gt;count++] = data;
-        <span class="keyword">return</span> <span class="keyword">true</span>;
-    }
-
-    <span class="keyword">if</span> (node-&gt;northWest == <span class="keyword">NULL</span>) {
-        TBQuadTreeNodeSubdivide(node);
-    }
-
-    <span class="keyword">if</span> (TBQuadTreeNodeInsertData(node-&gt;northWest, data)) <span class="keyword">return</span> <span class="keyword">true</span>;
-    <span class="keyword">if</span> (TBQuadTreeNodeInsertData(node-&gt;northEast, data)) <span class="keyword">return</span> <span class="keyword">true</span>;
-    <span class="keyword">if</span> (TBQuadTreeNodeInsertData(node-&gt;southWest, data)) <span class="keyword">return</span> <span class="keyword">true</span>;
-    <span class="keyword">if</span> (TBQuadTreeNodeInsertData(node-&gt;southEast, data)) <span class="keyword">return</span> <span class="keyword">true</span>;
-
-    <span class="keyword">return</span> <span class="keyword">false</span>;
-}
-</code></pre><p>这个函数则是真正的将数据插入到节点中。</p>
-<ul>
-<li>首先先判断这个数据是否落在该长方形中，不是直接滚蛋。</li>
-<li>如果当前包含的数据节点个数没有超过最大数目，直接应用在其中。</li>
-<li>如果四个子节点为空，就先创建</li>
-<li>然后再递归插入</li>
-</ul>
-<pre><code><span class="type">void</span> <span class="type">TBQuadTreeGatherDataInRange</span>(<span class="type">TBQuadTreeNode</span>* node, <span class="type">TBBoundingBox</span> <span class="type">range</span>, <span class="type">TBDataReturnBlock</span> <span class="keyword">block</span>)
-{
-    <span class="keyword">if</span> (!<span class="type">TBBoundingBoxIntersectsBoundingBox</span>(node-&gt;boundingBox, <span class="type">range</span>)) {
-        <span class="keyword">return</span>;
-    }
-
-    <span class="keyword">for</span> (<span class="type">int</span> i = <span class="number">0</span>; i &lt; node-&gt;count; i++) {
-        <span class="keyword">if</span> (<span class="type">TBBoundingBoxContainsData</span>(<span class="type">range</span>, node-&gt;points[i])) {
-            <span class="keyword">block</span>(node-&gt;points[i]);
-        }
-    }
-
-    <span class="keyword">if</span> (node-&gt;northWest == <span class="type">NULL</span>) {
-        <span class="keyword">return</span>;
-    }
-
-    <span class="type">TBQuadTreeGatherDataInRange</span>(node-&gt;northWest, <span class="type">range</span>, <span class="keyword">block</span>);
-    <span class="type">TBQuadTreeGatherDataInRange</span>(node-&gt;northEast, <span class="type">range</span>, <span class="keyword">block</span>);
-    <span class="type">TBQuadTreeGatherDataInRange</span>(node-&gt;southWest, <span class="type">range</span>, <span class="keyword">block</span>);
-    <span class="type">TBQuadTreeGatherDataInRange</span>(node-&gt;southEast, <span class="type">range</span>, <span class="keyword">block</span>);
-}
-</code></pre><p>这个就是通过DFS进行节点的遍历，一旦有落在range内的数据节点，就进行回调。</p>
-<p><strong>综上所述，就是一个基本的四叉树，可以很明显的看到，在四叉树的构建、遍历中，都用了树的递归，也就是俗称的DFS算法。</strong></p>
-<h4 id="TBCoordinateQuadTree">TBCoordinateQuadTree</h4><p>这个类呢，和实质上的四叉树或者性能优化并无太大关系，只是一层简单的封装，我们大致来了解一下就好。</p>
-<pre><code><span class="keyword">TBBoundingBox </span><span class="keyword">TBBoundingBoxForMapRect(MKMapRect </span>mapRect)
-{
-    CLLocationCoordinate2D topLeft = MKCoordinateForMapPoint(mapRect.origin)<span class="comment">;</span>
-    CLLocationCoordinate2D <span class="keyword">botRight </span>= MKCoordinateForMapPoint(MKMapPointMake(MKMapRectGetMaxX(mapRect), MKMapRectGetMaxY(mapRect)))<span class="comment">;</span>
-
-    CLLocationDegrees minLat = <span class="keyword">botRight.latitude;
-</span>    CLLocationDegrees maxLat = topLeft.latitude<span class="comment">;</span>
-
-    CLLocationDegrees minLon = topLeft.longitude<span class="comment">;</span>
-    CLLocationDegrees maxLon = <span class="keyword">botRight.longitude;
-</span>
-    return <span class="keyword">TBBoundingBoxMake(minLat, </span>minLon, maxLat, maxLon)<span class="comment">;</span>
-}
-
-<span class="label">MKMapRect</span> TBMapRectForBoundingBox(<span class="keyword">TBBoundingBox </span><span class="keyword">boundingBox)
-</span>{
-    MKMapPoint topLeft = MKMapPointForCoordinate(CLLocationCoordinate2DMake(<span class="keyword">boundingBox.x0, </span><span class="keyword">boundingBox.y0));
-</span>    MKMapPoint <span class="keyword">botRight </span>= MKMapPointForCoordinate(CLLocationCoordinate2DMake(<span class="keyword">boundingBox.xf, </span><span class="keyword">boundingBox.yf));
-</span>
-    return MKMapRectMake(topLeft.x, <span class="keyword">botRight.y, </span>fabs(<span class="keyword">botRight.x </span>- topLeft.x), fabs(<span class="keyword">botRight.y </span>- topLeft.y))<span class="comment">;</span>
-}
-</code></pre><p>这两个函数就是MKMapRect和我们的BoundingBox之间的转换，难度很小，但是很有意思啊。从中我们可以一窥MapView的一些实现。比如MapView不仅仅是传统的ContentView和ContainerView，更重要的其坐标系和传统的CGRect之间的无法换算，<strong>简而言之，就是，在MapView中，所有的东西都要拿经度纬度来谈。</strong></p>
-<pre><code>- (<span class="built_in">NSArray</span> *)clusteredAnnotationsWithinMapRect:(<span class="built_in">MKMapRect</span>)rect withZoomScale:(<span class="keyword">double</span>)zoomScale
-{
-     <span class="comment">// 1.</span>
-    <span class="keyword">double</span> TBCellSize = TBCellSizeForZoomScale(zoomScale);
-    <span class="keyword">double</span> scaleFactor = zoomScale / TBCellSize;
-
-     <span class="comment">// 2.</span>
-    <span class="built_in">NSInteger</span> minX = floor(<span class="built_in">MKMapRectGetMinX</span>(rect) * scaleFactor);
-    <span class="built_in">NSInteger</span> maxX = floor(<span class="built_in">MKMapRectGetMaxX</span>(rect) * scaleFactor);
-    <span class="built_in">NSInteger</span> minY = floor(<span class="built_in">MKMapRectGetMinY</span>(rect) * scaleFactor);
-    <span class="built_in">NSInteger</span> maxY = floor(<span class="built_in">MKMapRectGetMaxY</span>(rect) * scaleFactor);
-
-    <span class="built_in">NSMutableArray</span> *clusteredAnnotations = [[<span class="built_in">NSMutableArray</span> alloc] init];
-    <span class="keyword">for</span> (<span class="built_in">NSInteger</span> x = minX; x &lt;= maxX; x++) {
-        <span class="keyword">for</span> (<span class="built_in">NSInteger</span> y = minY; y &lt;= maxY; y++) {
-            <span class="built_in">MKMapRect</span> mapRect = <span class="built_in">MKMapRectMake</span>(x / scaleFactor, y / scaleFactor, <span class="number">1.0</span> / scaleFactor, <span class="number">1.0</span> / scaleFactor);
-
-            __block <span class="keyword">double</span> totalX = <span class="number">0</span>;
-            __block <span class="keyword">double</span> totalY = <span class="number">0</span>;
-            __block <span class="keyword">int</span> count = <span class="number">0</span>;
-
-            <span class="built_in">NSMutableArray</span> *names = [[<span class="built_in">NSMutableArray</span> alloc] init];
-            <span class="built_in">NSMutableArray</span> *phoneNumbers = [[<span class="built_in">NSMutableArray</span> alloc] init];
-
-              <span class="comment">// 3.</span>
-            TBQuadTreeGatherDataInRange(<span class="keyword">self</span><span class="variable">.root</span>, TBBoundingBoxForMapRect(mapRect), ^(TBQuadTreeNodeData data) {
-                totalX += data<span class="variable">.x</span>;
-                totalY += data<span class="variable">.y</span>;
-                count++;
-
-                TBHotelInfo hotelInfo = *(TBHotelInfo *)data<span class="variable">.data</span>;
-                [names addObject:[<span class="built_in">NSString</span> stringWithFormat:<span class="string">@"%s"</span>, hotelInfo<span class="variable">.hotelName</span>]];
-                [phoneNumbers addObject:[<span class="built_in">NSString</span> stringWithFormat:<span class="string">@"%s"</span>, hotelInfo<span class="variable">.hotelPhoneNumber</span>]];
-            });
-
-              <span class="comment">// 4.</span>
-            <span class="keyword">if</span> (count == <span class="number">1</span>) {
-                CLLocationCoordinate2D coordinate = CLLocationCoordinate2DMake(totalX, totalY);
-                TBClusterAnnotation *annotation = [[TBClusterAnnotation alloc] initWithCoordinate:coordinate count:count];
-                annotation<span class="variable">.title</span> = [names lastObject];
-                annotation<span class="variable">.subtitle</span> = [phoneNumbers lastObject];
-                [clusteredAnnotations addObject:annotation];
-            }
-
-           <span class="comment">// 5.</span>
-            <span class="keyword">if</span> (count &gt; <span class="number">1</span>) {
-                CLLocationCoordinate2D coordinate = CLLocationCoordinate2DMake(totalX / count, totalY / count);
-                TBClusterAnnotation *annotation = [[TBClusterAnnotation alloc] initWithCoordinate:coordinate count:count];
-                [clusteredAnnotations addObject:annotation];
-            }
-        }
-    }
-
-    <span class="keyword">return</span> [<span class="built_in">NSArray</span> arrayWithArray:clusteredAnnotations];
-}
-</code></pre><p>而上述的最后一个函数，就是根据传入的MKMapRect，返回簇类数组的。</p>
-<ul>
-<li>1.首先根据放缩比例，或者Cell大小。</li>
-<li>2.根据cell大小计算当前地图区域的范围所对应的minX - maxX，minY - maxY对应的网格。</li>
-</ul>
-<p>什么是网格？就是根据Cell大小将地图划分成了一块块区域，通过minX， maxX, minY - maxY找到对应的网格。类似于array[1][2]找到第二行第三列的网格（从0开始索引）。</p>
-<ul>
-<li>3.遍历每一个网格，获取当前网格对应的四叉树节点中的数据信息，并记录个数。</li>
-<li>4.如果个数是1，那么直接显示，包含数据节点的附加信息，比如在这里就是酒店名称和酒店电话。</li>
-<li>5.如果个数大于1的话，利用均值计算中心点，中心点是所有包含的数据节点平均值，同时信息只简单的显示个数。</li>
-</ul>
-<p>至此，整个代码就解读完整啦。</p>
-
-      
-    </div>
-    <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/12/11/TBAnnotationClustering/" data-id="cik9sx1hs000ab0i1bzq54vlh" class="article-share-link">Share</a>
-      
-      
-  <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
-
-    </footer>
-  </div>
-  
-</article>
-
-
-  
-    <article id="post-FDFullScreenPopGesture-Source-Code" class="article article-type-post" itemscope itemprop="blogPost">
-  <div class="article-meta">
-    <a href="/2015/11/26/FDFullScreenPopGesture-Source-Code/" class="article-date">
-  <time datetime="2015-11-26T03:38:42.000Z" itemprop="datePublished">2015-11-26</time>
-</a>
-    
-  </div>
-  <div class="article-inner">
-    
-    
-      <header class="article-header">
-        
-  
-    <h1 itemprop="name">
-      <a class="article-title" href="/2015/11/26/FDFullScreenPopGesture-Source-Code/">FDFullScreenPopGesture源码解析</a>
-    </h1>
-  
-
-      </header>
-    
-    <div class="article-entry" itemprop="articleBody">
-      
-        <p><em>嘿嘿，花了三天时间把自己的代码从700行缩减成了200行，终于有时间可以拜读新源码了，好开心。</em></p>
-<p>好了，废话不多话，今天我们要读了百度出品的一个开源项目FDFullScreenPopGesture。</p>
-<h2 id="项目介绍">项目介绍</h2><p><a href="https://github.com/forkingdog/FDFullscreenPopGesture" target="_blank" rel="external">FDFullScreenPopGesture</a>是一款无需改动即可整合进入现有项目的全局手势操作，使用这个即可以在左侧边缘拖拽的时候返回上一级的效果。</p>
-<p>看到这，有人会问，我们这个直接用UIPanGestureRecognizer不也能达到吗？<br>没错，仅仅是返回上一级这个需求确实很简单。但是iOS7上返回上一级时候，UINavigationBar的切换效果你能实现吗？</p>
-<p>而且，我要说的重点是<strong>FDFullscreenPopGesture</strong>实现思路很赞！！！</p>
-<h2 id="源码分析">源码分析</h2><h3 id="结构分析">结构分析</h3><p>整个FDFullscreenPopGesture其实可以主要拆分成三块：</p>
-<pre><code>-<span class="ruby">- _FDFullscreenPopGestureRecognizerDelegate
-</span>-<span class="ruby">- <span class="constant">UIViewController</span> (<span class="constant">FDFullscreenPopGesturePrivate</span>)
-</span>-<span class="ruby">- <span class="constant">UINavigationController</span> (<span class="constant">FDFullscreenPopGesture</span>)</span>
-</code></pre><ul>
-<li><p>_FDFullscreenPopGestureRecognizerDelegate虽然名字看起来像一个Protocol，但是它实质上是一个<strong>NSObject</strong>子类，同时实现了<strong>UIGestureRecognizerDelegate</strong>。这么做的好处是什么呢？不知道大家有没有经历过ViewController重构，以前很多时候，比如我们写UIScrollView，UITableView，他们的Delegate，DataSource都耦合进了ViewController，常常导致MassViewController灾难的发生。<strong>单独构建一个专门负责的Delgeate“处理器”是非常有效的手段</strong></p>
-</li>
-<li><p>UIViewController (FDFullscreenPopGesturePrivate)是一个Category，我们在这个分类里面主要进行<strong>viewWillAppear</strong>的Hook，具体做什么，后面章节我们细细道来。</p>
-</li>
-<li><p>UINavigationController (FDFullscreenPopGesture)也是一个分类，是进行<strong>pushViewController:animated:</strong>方法的hook，实现部分我们后续再看。</p>
-</li>
-</ul>
-<h3 id="源码分析-1">源码分析</h3><h4 id="_FDFullscreenPopGestureRecognizerDelegate">_FDFullscreenPopGestureRecognizerDelegate</h4><pre><code>- (<span class="built_in">BOOL</span>)gestureRecognizerShouldBegin:(<span class="built_in">UIPanGestureRecognizer</span> *)gestureRecognizer
-{
-    <span class="comment">// 1.</span>
-    <span class="keyword">if</span> (<span class="keyword">self</span><span class="variable">.navigationController</span><span class="variable">.viewControllers</span><span class="variable">.count</span> &lt;= <span class="number">1</span>) {
-        <span class="keyword">return</span> <span class="literal">NO</span>;
-    }
-
-    <span class="comment">// 2.</span>
-    <span class="built_in">UIViewController</span> *topViewController = <span class="keyword">self</span><span class="variable">.navigationController</span><span class="variable">.viewControllers</span><span class="variable">.lastObject</span>;
-    <span class="keyword">if</span> (topViewController<span class="variable">.fd_interactivePopDisabled</span>) {
-        <span class="keyword">return</span> <span class="literal">NO</span>;
-    }
-
-    <span class="comment">// 3. </span>
-    <span class="built_in">CGPoint</span> beginningLocation = [gestureRecognizer locationInView:gestureRecognizer<span class="variable">.view</span>];
-    <span class="built_in">CGFloat</span> maxAllowedInitialDistance = topViewController<span class="variable">.fd_interactivePopMaxAllowedInitialDistanceToLeftEdge</span>;
-    <span class="keyword">if</span> (maxAllowedInitialDistance &gt; <span class="number">0</span> &amp;&amp; beginningLocation<span class="variable">.x</span> &gt; maxAllowedInitialDistance) {
-        <span class="keyword">return</span> <span class="literal">NO</span>;
-    }
-
-    <span class="comment">// 4.</span>
-    <span class="keyword">if</span> ([[<span class="keyword">self</span><span class="variable">.navigationController</span> valueForKey:<span class="string">@"_isTransitioning"</span>] boolValue]) {
-        <span class="keyword">return</span> <span class="literal">NO</span>;
-    }
-
-    <span class="comment">// 5.</span>
-    <span class="built_in">CGPoint</span> translation = [gestureRecognizer translationInView:gestureRecognizer<span class="variable">.view</span>];
-    <span class="keyword">if</span> (translation<span class="variable">.x</span> &lt;= <span class="number">0</span>) {
-        <span class="keyword">return</span> <span class="literal">NO</span>;
-    }
-
-    <span class="keyword">return</span> <span class="literal">YES</span>;
-}
-</code></pre><p>整个类特别精简，它的职责就是维护一个UINavigationController然后根据一系列的状态判断该手势是否生效。这些状态包括</p>
-<ol>
-<li>当前UINavigationController的栈是否只剩最后一个ViewController了</li>
-<li>当前即将出栈的topViewController是否禁用了<strong>fd_interactivePopDisabled</strong>，该变量我们稍后会说</li>
-<li>当前手势的启动点是不是离左侧边缘太远了，毕竟我们是要模拟iOS原生的手势操作，原生的不支持全屏，我们为啥要支持！</li>
-<li>当前是否已经处在转场过程中。在这里，可以看到它使用了valueForKey这一<strong>Key-Value-Coding</strong>技术，它可以访问私有变量<strong>_isTransitioning</strong>哦！</li>
-<li>方向相反的滑动滚粗。</li>
-</ol>
-<h4 id="UIViewController_(FDFullscreenPopGesturePrivate)">UIViewController (FDFullscreenPopGesturePrivate)</h4><p>整个这个类也非常简单，就是通过 <strong>fd_viewWillAppear</strong> hook了 <strong>viewWillAppear</strong> 这个方法，然后插入了自己一段回调的block。</p>
-<pre><code>- (<span class="keyword">void</span>)fd_viewWillAppear:(<span class="built_in">BOOL</span>)animated
-{
-    <span class="comment">// Forward to primary implementation.</span>
-    [<span class="keyword">self</span> fd_viewWillAppear:animated];
-
-    <span class="keyword">if</span> (<span class="keyword">self</span><span class="variable">.fd_willAppearInjectBlock</span>) {
-        <span class="keyword">self</span><span class="variable">.fd_willAppearInjectBlock</span>(<span class="keyword">self</span>, animated);
-    }
-}
-</code></pre><h4 id="UINavigationController_(FDFullscreenPopGesture)">UINavigationController (FDFullscreenPopGesture)</h4><p>这个分类是整个项目的逻辑控制核心。它干了这么几件事：</p>
-<ul>
-<li>用 <strong>fd_pushViewController:animated:</strong> hook <strong>pushViewController:animated:</strong></li>
-<li><strong>禁用</strong>UINavgationController的<strong>interactivePopGestureRecognizer</strong></li>
-<li>构建了属于自己UIPanGestureRecognizer替换interactivePopGestureRecognizer，同时把手势的delegate赋值给了_FDFullscreenPopGestureRecognizerDelegate</li>
-</ul>
-<p>它的主要核心代码如下：</p>
-<pre><code>- (<span class="keyword">void</span>)fd_pushViewController:(<span class="built_in">UIViewController</span> *)viewController animated:(<span class="built_in">BOOL</span>)animated
-{
-    <span class="keyword">if</span> (![<span class="keyword">self</span><span class="variable">.interactivePopGestureRecognizer</span><span class="variable">.view</span><span class="variable">.gestureRecognizers</span> containsObject:<span class="keyword">self</span><span class="variable">.fd_fullscreenPopGestureRecognizer</span>]) {
-
-        <span class="comment">// 1.</span>
-        [<span class="keyword">self</span><span class="variable">.interactivePopGestureRecognizer</span><span class="variable">.view</span> addGestureRecognizer:<span class="keyword">self</span><span class="variable">.fd_fullscreenPopGestureRecognizer</span>];
-
-        <span class="comment">// 2.</span>
-        <span class="built_in">NSArray</span> *internalTargets = [<span class="keyword">self</span><span class="variable">.interactivePopGestureRecognizer</span> valueForKey:<span class="string">@"targets"</span>];
-        <span class="keyword">id</span> internalTarget = [internalTargets<span class="variable">.firstObject</span> valueForKey:<span class="string">@"target"</span>];
-        SEL internalAction = <span class="built_in">NSSelectorFromString</span>(<span class="string">@"handleNavigationTransition:"</span>);
-        <span class="keyword">self</span><span class="variable">.fd_fullscreenPopGestureRecognizer</span><span class="variable">.delegate</span> = <span class="keyword">self</span><span class="variable">.fd_popGestureRecognizerDelegate</span>;
-        [<span class="keyword">self</span><span class="variable">.fd_fullscreenPopGestureRecognizer</span> addTarget:internalTarget action:internalAction];
-
-        <span class="comment">// 3.</span>
-        <span class="keyword">self</span><span class="variable">.interactivePopGestureRecognizer</span><span class="variable">.enabled</span> = <span class="literal">NO</span>;
-    }
-
-    <span class="comment">// 4.</span>
-    [<span class="keyword">self</span> fd_setupViewControllerBasedNavigationBarAppearanceIfNeeded:viewController];
-
-    <span class="comment">// Forward to primary implementation.</span>
-    <span class="keyword">if</span> (![<span class="keyword">self</span><span class="variable">.viewControllers</span> containsObject:viewController]) {
-        [<span class="keyword">self</span> fd_pushViewController:viewController animated:animated];
-    }
-}
-</code></pre><p>整体来看这段源码，无非做了如下这些事：</p>
-<ol>
-<li>将UIPanGestureRecognizer添加到本来interactivePopGestureRecognizer所在的view上</li>
-<li><div style="color:red"><strong>这段是重点的重点</strong>，一定要往下看！！！</div><br>将PanGesture的target设置为<strong>internalTarget</strong>，action设置为<br><strong>handleNavigationTransition</strong>.</li>
-<li>禁用interactivePopGestureRecognizer</li>
-<li><p>根据是否需要隐藏UINavigationBar来调用fd_setupViewControllerBasedNavigationBarAppearanceIfNeeded:viewController进行之前提到过的<strong>fdwillAppearInjectBlock</strong>设置，代码如下：</p>
-<pre><code>- (void)fd_setupViewControllerBasedNavigationBarAppearanceIfNeeded:(UIViewController *)appearingViewController
-{
-    <span class="preprocessor">if</span> (!<span class="keyword">self.fd_viewControllerBasedNavigationBarAppearanceEnabled) </span>{
-        return<span class="comment">;</span>
-    }
-
-    __weak typeof(<span class="keyword">self) </span>weakSelf = <span class="keyword">self;
-</span>    _FDViewControllerWillAppearInjectBlock <span class="keyword">block </span>= ^(UIViewController *viewController, <span class="keyword">BOOL </span>animated) {
-        __strong typeof(weakSelf) <span class="keyword">strongSelf </span>= weakSelf<span class="comment">;</span>
-        <span class="preprocessor">if</span> (<span class="keyword">strongSelf) </span>{
-            [<span class="keyword">strongSelf </span>setNavigationBarHidden:viewController.fd_prefersNavigationBarHidden animated:animated]<span class="comment">;</span>
-        }
-    }<span class="comment">;</span>
-
-    // Setup will appear inject <span class="keyword">block </span>to appearing view controller.
-    // Setup disappearing view controller as well, <span class="keyword">because </span>not every view controller is <span class="keyword">added </span>into
-    // stack <span class="keyword">by </span><span class="keyword">pushing, </span>maybe <span class="keyword">by </span><span class="string">"-setViewControllers:"</span>.
-    appearingViewController.fd_willAppearInjectBlock = <span class="keyword">block;
-</span>    UIViewController *disappearingViewController = <span class="keyword">self.viewControllers.lastObject;
-</span>    <span class="preprocessor">if</span> (disappearingViewController &amp;&amp; !disappearingViewController.fd_willAppearInjectBlock) {
-        disappearingViewController.fd_willAppearInjectBlock = <span class="keyword">block;
-</span>    }
-}
-</code></pre></li>
-</ol>
-<p>这段代码就是将即将消失和展现的ViewController在viewWillAppear设置了一个自定义UINavigationBar的回调，用以根据进入的方式来展现NaviagtionBar，而不会出现突兀的“镂空”。</p>
-<p>到这，源码就结束了，可以回家收衣服喽！</p>
-<h3 id="重点">重点</h3><p>源码是不是很简单？有什么好分析的呢？<br>如果你读到这，哈哈，恭喜啦，重点分析来啦。</p>
-<p>首先感谢@J_雨的天才思路，大家可以阅读<a href="http://www.jianshu.com/p/d39f7d22db6c" target="_blank" rel="external">轻松学习之二——iOS利用Runtime自定义控制器POP手势动画</a>这篇文章，真的很赞</p>
-<p>之前我们在上文用红色标注了一段内容：</p>
-<div style="color:red"><br>将PanGesture的target设置为<strong>internalTarget</strong>，action设置为<br><strong>handleNavigationTransition</strong>。</div>
-
-<p>看起来很容易理解，可是大家有没有想过为什么action的名称是handleNavigationTransition呢？</p>
-<p>首先我们先打印看看NavigationController的interactivePopGestureRecognizer究竟是个什么玩意？</p>
-<pre><code>&lt;<span class="built_in">UIScreenEdgePanGestureRecognizer</span>: <span class="number">0x7fea78ec5950</span>; state = Possible; delaysTouchesBegan = <span class="literal">YES</span>; view = &lt;<span class="built_in">UILayoutContainerView</span> <span class="number">0x7fea78f77960</span>&gt;; target= &lt;(action=handleNavigationTransition:, target=&lt;_<span class="built_in">UINavigationInteractiveTransition</span> <span class="number">0x7fea78c1c640</span>&gt;)&gt;
-</code></pre><p>这是什么玩意？让我们分别来看看它答应出来的这些属性。</p>
-<ol>
-<li>state = Possible，很简单，就是一个UIGestureRecognizerState = UIGestureRecognizerStatePossible。</li>
-<li>view = UILayoutContainerView，不太懂，暂时也没觉得有需要，不管他。</li>
-<li>target =&lt;(action=handleNavigationTransition:, target=<_uinavigationinteractivetransition 0x7fea78c1c640="">)，这个看起来很有用，因为我们都知道，Gesture就是通过<strong>Target-Action</strong>的方式进行动作触发的。</_uinavigationinteractivetransition></li>
-</ol>
-<p>所以我们赶紧看看这个<strong>target</strong>是个啥玩意，使用如下命令：</p>
-<pre><code><span class="collection">[self.navigationController.interactivePopGestureRecognizer valueForKey:@<span class="string">"target"</span>]</span><span class="comment">;</span>
-</code></pre><p>卧槽，一运行，Crash了，报找不到这个Key。咋回事，难道我记错了KVC的用户，赶紧换成valueForKey:@”View”试试。</p>
-<p>哎！没错啊！成功得到了如下输出：</p>
-<pre><code>-<span class="string">[UILayoutContainerView objectAtIndexedSubscript:]</span>
-</code></pre><p>那咋回事，看来必须祭出屠龙刀Runtime了，嘿嘿，Objective-C面前，一切私有变量都是纸老虎。</p>
-<pre><code><span class="keyword">unsigned</span> <span class="keyword">int</span> count = <span class="number">0</span>;
-Ivar *var = class_copyIvarList([UIGestureRecognizer <span class="keyword">class</span>], &amp;count);
-<span class="keyword">for</span> (<span class="keyword">unsigned</span> <span class="keyword">int</span> i = <span class="number">0</span>; i &lt; count; i++) {
-     Ivar _var = *(var + i);
-     NSLog(@<span class="string">"%s"</span>, ivar_getTypeEncoding(_var));
-     NSLog(@<span class="string">"%s"</span>, ivar_getName(_var));
-}
-</code></pre><p>输出太长了，我们找我们想看的，</p>
-<pre><code><span class="number">2015</span>-<span class="number">11</span>-<span class="number">27</span> <span class="number">02</span>:<span class="number">10</span>:<span class="number">03.873</span> SamplePhotosApp[<span class="number">85305</span>:<span class="number">2664323</span>] _targets
-<span class="number">2015</span>-<span class="number">11</span>-<span class="number">27</span> <span class="number">02</span>:<span class="number">10</span>:<span class="number">03.873</span> SamplePhotosApp[<span class="number">85305</span>:<span class="number">2664323</span>] @<span class="string">"NSMutableArray"</span>
-</code></pre><p>卧槽，这丫叫_targets，好吧，赶紧改成valueForKey:@”targets”再试试。<br>哎，等等，不是_targets吗，怎么能用targets呢？</p>
-<p><strong>咳咳，吴老师又要来讲课了！对于KVC来说，它的查找顺序是key -&gt; property -&gt; ivar，也就是说，它会先按照是否有targets这个名称的key，然后targets这个property，最后再找_targets这个ivar。</strong></p>
-<p>通过输出log，我们可以发现_targets是个数组，维护了一个个自定义结构维护的target-action配对。</p>
-<p>因此，我们现在只要找到这个自定义结构是啥，里面包含了啥就可以了是吧。</p>
-<p><strong>当头一棒</strong>，很遗憾，苹果太阴了，直接重载了这个自定义结构的debugDescription，特喵的什么都看不到。</p>
-<p>事情到了这咋办呢？其实我也没想到，还好上述的参考文章告诉了我们可以依靠断点，通过断点，我们发发现了该自定义结构叫<strong>UIGestureRecognizerTarget</strong>，我们通过KVC获取其target和action即可。</p>
-<h3 id="补充：关于Method_Swizzling">补充：关于Method Swizzling</h3><pre><code><span class="keyword">Class</span> <span class="keyword">class</span> = [<span class="keyword">self</span> <span class="keyword">class</span>];
-
-SEL originalSelector = @<span class="keyword">selector</span>(pushViewController:animated:);
-SEL swizzledSelector = @<span class="keyword">selector</span>(fd_pushViewController:animated:);
-
-<span class="function"><span class="keyword">Method</span> <span class="title">originalMethod</span> = <span class="title">class_getInstanceMethod</span><span class="params">(<span class="keyword">class</span>, originalSelector)</span>;</span>
-<span class="function"><span class="keyword">Method</span> <span class="title">swizzledMethod</span> = <span class="title">class_getInstanceMethod</span><span class="params">(<span class="keyword">class</span>, swizzledSelector)</span>;</span>
-
-BOOL success = class_addMethod(<span class="keyword">class</span>, originalSelector, method_getImplementation(swizzledMethod), method_getTypeEncoding(swizzledMethod));
-<span class="keyword">if</span> (success) <span class="comment">{
-    class_replaceMethod(class, swizzledSelector, method_getImplementation(originalMethod), method_getTypeEncoding(originalMethod));
-}</span> <span class="keyword">else</span> <span class="comment">{
-    method_exchangeImplementations(originalMethod, swizzledMethod);
-}</span>
-</code></pre><p>有很多人都了解Method Swizzling，但是不知道为什么这里需要进行<strong>BOOL success = class_addMethod</strong>判断。</p>
-<p>其主要原因就是如果直接通过method_exchangeImplementations来进行的话，可能子类里并没有originalSelector所代表的方法，你直接和父类进行了交换，这是我们不希望看到的。</p>
-<p>因此通过addMethod来判断，如果加成功了，说明原先这个函数在子类中并不存在，我们现在添加了，只要再把swizzleSelector指向旧函数即可；而如果没成功，说明这个函数在子类中存在了，我们直接替换也不会影响父类。</p>
-
-      
-    </div>
-    <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/11/26/FDFullScreenPopGesture-Source-Code/" data-id="cik9sx1iv0016b0i1ycuxbcvf" class="article-share-link">Share</a>
-      
-      
-  <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
-
-    </footer>
-  </div>
-  
-</article>
-
-
-  
-    <article id="post-Fun-of-CAReplicationLayer" class="article article-type-post" itemscope itemprop="blogPost">
-  <div class="article-meta">
-    <a href="/2015/11/17/Fun-of-CAReplicationLayer/" class="article-date">
-  <time datetime="2015-11-16T17:54:05.000Z" itemprop="datePublished">2015-11-17</time>
-</a>
-    
-  </div>
-  <div class="article-inner">
-    
-    
-      <header class="article-header">
-        
-  
-    <h1 itemprop="name">
-      <a class="article-title" href="/2015/11/17/Fun-of-CAReplicationLayer/">Swift每日一练：妙用CAReplicationLayer</a>
-    </h1>
-  
-
-      </header>
-    
-    <div class="article-entry" itemprop="articleBody">
-      
-        <p>今天我们来学习一下一个在iOS常常被忽视的类 - CAReplicationLayer。我们要使用这个类来完成两个开起来很炫酷的加载效果。</p>
-<p>老样子，先上具体的效果一看<br><img src="http://7lrzqz.com1.z0.glb.clouddn.com/LearnCAReplicationLayer.gif"></p>
-<p>怎么样，效果还不错吧。一个是看起来有渐变效果的圆形加载，另外一个则是模仿Apple Music的柱状图加载。</p>
-<p>接下来，就让我们一起揭开实现的面纱吧！</p>
-<h3 id="CAReplicationLayer">CAReplicationLayer</h3><p>CAReplicationLayer是CALayer的子类，它与传统的CALayer系列不同，它基本不直接承担诸多效果，而是更多的承担一种“容器”的职责。</p>
-<p>怎么理解呢？大家可以把CAReplicationLayer看成一个工厂，你提供给他一个产品的模型，它就可以为了源源不断的复制出纺织品。回到iOS中来说就是，你提供一个CALayer给CAReplicationLayer，并告诉它你希望它复制几份，就打造出多个具有效果样式的Layer。<strong>不仅如此，动画效果也会被一同复制</strong></p>
-<p>因此，对于CAReplicationLayer，我们有几个特别需要关注的参数。</p>
-<ul>
-<li>instanceCount： 代表你希望将你提供它的Layer复制几份</li>
-<li>instanceDelay： 这个参数在编写动画的前提下特别有用，它表明对每一个复制(或者原生)出来的Layer，启动动画之间的时间差在多少。</li>
-<li>instanceTransform： 这个参数表示对于每一个Layer，它们之间的<strong>形变</strong>差距是多少。比如，每个Layer需要有相同的间隔。</li>
-</ul>
-<h3 id="渐变效果的圆形加载">渐变效果的圆形加载</h3><p>了解完CAReplicationLayer的基本知识以后，我们首先来看看圆形加载效果怎么实现。</p>
-<p>第一步，毫无疑问的，需要构建一个CAReplicationLayer。</p>
-<pre><code>let replicationLayer2 = <span class="function"><span class="title">CAReplicatorLayer</span><span class="params">()</span></span>
-</code></pre><p>第二部，需要一个样品，让我们的CAReplicationLayer复制生产</p>
-<pre><code>let circle = <span class="function"><span class="title">CAShapeLayer</span><span class="params">()</span></span>
-circle<span class="class">.path</span> = <span class="function"><span class="title">UIBezierPath</span><span class="params">(ovalInRect: CGRect(x: <span class="number">0</span>, y: <span class="number">0</span>, width: <span class="number">10</span>, height: <span class="number">10</span>)</span></span>)<span class="class">.CGPath</span>
-circle<span class="class">.lineWidth</span> = <span class="number">1</span>
-circle<span class="class">.fillColor</span> = UIColor.<span class="function"><span class="title">whiteColor</span><span class="params">()</span></span><span class="class">.CGColor</span>
-circle<span class="class">.transform</span> = <span class="function"><span class="title">CATransform3DMakeScale</span><span class="params">(<span class="number">0.1</span>, <span class="number">0.1</span>, <span class="number">0.1</span>)</span></span>
-</code></pre><p>在这里，我们构建了一个白色小球，把初始大小设置为了0.1。</p>
-<p>接下去，我们需要然CAReplicationLayer开始复制了，</p>
-<pre><code>replicationLayer2<span class="class">.instanceCount</span> = <span class="number">12</span>
-replicationLayer2<span class="class">.instanceTransform</span> = <span class="function"><span class="title">CATransform3DMakeRotation</span><span class="params">(CGFloat(<span class="number">2</span> * M_PI/<span class="number">12.0</span>)</span></span>, <span class="number">0.0</span>, <span class="number">0.0</span>, <span class="number">1.0</span>)
-</code></pre><p>从上述代码我们可以看出，我们首先构建了<strong>12</strong>个复制体，然后将这12个小球通过instanceTransform绕<strong>Z</strong>轴均匀的分度在圆周上。</p>
-<p>现在赶快run一下你的app，看看效果是不是正如我所说的！</p>
-<p>现在万事具备，只欠动画了！</p>
-<p>首先我们来定义如例子中的放缩动画</p>
-<pre><code><span class="component">func scaleAnimation() -&gt; CABasicAnimation {
-    let animation = CABasicAnimation(keyPath: "transform<span class="string">.scale")</span>
-    animation<span class="string">.duration</span> = 1.5
-    animation<span class="string">.fromValue</span> = 1.0
-    animation<span class="string">.toValue</span> = 0.1
-    animation<span class="string">.repeatCount</span> = Float<span class="string">.infinity</span>
-
-    return animation
-}</span>
-</code></pre><p>我们定义了一个针对scale属性、时常1.5s的动画，然后我们将这个动画添加到小球上。</p>
-<pre><code>circle.<span class="function"><span class="title">addAnimation</span><span class="params">(scaleAnimation()</span></span>, forKey: <span class="string">"scale"</span>)
-</code></pre><p>现在如果你跑一下代码的话，你会发现，所有的小球都同时启动了动画，和例子的效果不一致，怎么回事呢？</p>
-<p>嘿嘿，还记得我们之前提及的属性<strong>instanceDelay</strong>吗？没错，我们需要借助它的力量。</p>
-<pre><code>replicationLayer2.instanceDelay = <span class="number">1.5</span>/<span class="number">12</span>
-</code></pre><p>现在再看看？哈哈，效果拔群！</p>
-<h3 id="Apple_Music加载效果">Apple Music加载效果</h3><p>下面的代码，很清晰易懂，我就不逐条解析啦，有问题欢迎大家在下方评论！</p>
-<pre><code><span class="comment">// 1. 创建容器ReplicationLayer</span>
-let replicationLayer = CAReplicatorLayer()
-
-<span class="comment">// 2. 创建柱状图</span>
-let bar = CALayer()
-bar.frame = CGRect(<span class="string">x:</span> <span class="number">0</span>, <span class="string">y:</span> <span class="number">0</span>, <span class="string">width:</span> <span class="number">8</span>, <span class="string">height:</span> <span class="number">40</span>)
-bar.position = CGPoint(<span class="string">x:</span> <span class="number">10</span>, <span class="string">y:</span> <span class="number">75</span>)
-bar.backgroundColor = UIColor.purpleColor().CGColor
-
-<span class="comment">// 3. 复制生产3个，并添加水平间隔</span>
-replicationLayer.addSublayer(bar)
-replicationLayer.instanceCount = <span class="number">3</span>
-replicationLayer.instanceTransform = CATransform3DMakeTranslation(<span class="number">20</span>, <span class="number">0</span>, <span class="number">0</span>)
-
-<span class="comment">// 4. 创建动画，构造时间差</span>
-func jumpAnimation(<span class="string">bar:</span>CALayer) -&gt; CABasicAnimation {
-    let animation = CABasicAnimation(<span class="string">keyPath:</span> <span class="string">"position.y"</span>)
-    animation.toValue = bar.position.y - <span class="number">35.0</span>
-    animation.duration = <span class="number">0.45</span>
-    animation.autoreverses = <span class="literal">true</span>
-    animation.repeatCount = Float.infinity
-
-    <span class="keyword">return</span> animation
-}
-
-bar.addAnimation(jumpAnimation(bar), <span class="string">forKey:</span> <span class="string">"jump"</span>)
-replicationLayer.instanceDelay = <span class="number">0.3</span>
-</code></pre>
-      
-    </div>
-    <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/11/17/Fun-of-CAReplicationLayer/" data-id="cik9sx1is0014b0i1k6phzstp" class="article-share-link">Share</a>
-      
-      
-  <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Swift/">Swift</a></li></ul>
 
     </footer>
   </div>
@@ -1861,7 +1661,7 @@ replicationLayer.instanceDelay = <span class="number">0.3</span>
   <div class="widget-wrap">
     <h3 class="widget-title">Tags</h3>
     <div class="widget">
-      <ul class="tag-list"><li class="tag-list-item"><a class="tag-list-link" href="/tags/Android/">Android</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/JavaScript/">JavaScript</a><span class="tag-list-count">2</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Math/">Math</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/R/">R</a><span class="tag-list-count">2</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Swift/">Swift</a><span class="tag-list-count">4</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/iOS/">iOS</a><span class="tag-list-count">11</span></li></ul>
+      <ul class="tag-list"><li class="tag-list-item"><a class="tag-list-link" href="/tags/Android/">Android</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/JavaScript/">JavaScript</a><span class="tag-list-count">2</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Math/">Math</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/R/">R</a><span class="tag-list-count">2</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Swift/">Swift</a><span class="tag-list-count">4</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/iOS/">iOS</a><span class="tag-list-count">13</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/shell/">shell</a><span class="tag-list-count">1</span></li></ul>
     </div>
   </div>
 
@@ -1870,7 +1670,7 @@ replicationLayer.instanceDelay = <span class="number">0.3</span>
   <div class="widget-wrap">
     <h3 class="widget-title">Tag Cloud</h3>
     <div class="widget tagcloud">
-      <a href="/tags/Android/" style="font-size: 10px;">Android</a> <a href="/tags/JavaScript/" style="font-size: 13.33px;">JavaScript</a> <a href="/tags/Math/" style="font-size: 10px;">Math</a> <a href="/tags/R/" style="font-size: 13.33px;">R</a> <a href="/tags/Swift/" style="font-size: 16.67px;">Swift</a> <a href="/tags/iOS/" style="font-size: 20px;">iOS</a>
+      <a href="/tags/Android/" style="font-size: 10px;">Android</a> <a href="/tags/JavaScript/" style="font-size: 13.33px;">JavaScript</a> <a href="/tags/Math/" style="font-size: 10px;">Math</a> <a href="/tags/R/" style="font-size: 13.33px;">R</a> <a href="/tags/Swift/" style="font-size: 16.67px;">Swift</a> <a href="/tags/iOS/" style="font-size: 20px;">iOS</a> <a href="/tags/shell/" style="font-size: 10px;">shell</a>
     </div>
   </div>
 
@@ -1879,7 +1679,7 @@ replicationLayer.instanceDelay = <span class="number">0.3</span>
   <div class="widget-wrap">
     <h3 class="widget-title">Archives</h3>
     <div class="widget">
-      <ul class="archive-list"><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/02/">February 2016</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/12/">December 2015</a><span class="archive-list-count">6</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/11/">November 2015</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/10/">October 2015</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/09/">September 2015</a><span class="archive-list-count">4</span></li></ul>
+      <ul class="archive-list"><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/02/">February 2016</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/12/">December 2015</a><span class="archive-list-count">6</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/11/">November 2015</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/10/">October 2015</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/09/">September 2015</a><span class="archive-list-count">4</span></li></ul>
     </div>
   </div>
 
@@ -1891,23 +1691,23 @@ replicationLayer.instanceDelay = <span class="number">0.3</span>
       <ul>
         
           <li>
+            <a href="/2016/02/27/check-manifest/">Check Pods Manifest.lock</a>
+          </li>
+        
+          <li>
+            <a href="/2016/02/27/pod-install-plugin/">开发一个简单的Pod Install 插件</a>
+          </li>
+        
+          <li>
+            <a href="/2016/02/27/FBKVOController/">FBKVOController 源码解析</a>
+          </li>
+        
+          <li>
             <a href="/2016/02/05/DGRunKeeperSwitch/">DGRunKeeperSwitch 源码解析</a>
           </li>
         
           <li>
             <a href="/2016/02/05/PureLayout/">PureLayout 源码解析</a>
-          </li>
-        
-          <li>
-            <a href="/2015/12/30/Refactor-Mega-ViewController/">重构你的ViewController</a>
-          </li>
-        
-          <li>
-            <a href="/2015/12/20/Learn-R-2/">一步步学R（2）</a>
-          </li>
-        
-          <li>
-            <a href="/2015/12/15/Regression-Model-1/">Regression Model</a>
           </li>
         
       </ul>
