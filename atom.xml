@@ -4,7 +4,7 @@
   
   <link href="/atom.xml" rel="self"/>
   <link href="http://satanwoo.github.io/"/>
-  <updated>2016-02-27T10:26:40.000Z</updated>
+  <updated>2016-02-27T10:30:35.000Z</updated>
   <id>http://satanwoo.github.io/</id>
   
   <author>
@@ -19,7 +19,7 @@
     <link href="http://satanwoo.github.io/2016/02/27/check-manifest/"/>
     <id>http://satanwoo.github.io/2016/02/27/check-manifest/</id>
     <published>2016-02-27T10:23:21.000Z</published>
-    <updated>2016-02-27T10:26:40.000Z</updated>
+    <updated>2016-02-27T10:30:35.000Z</updated>
     <content type="html"><![CDATA[<p>初次看到这个题目的你，可能还不了解这是个啥。但是，我想下面这个错误提示，你肯定会非常熟悉：</p>
 <pre><code><span class="keyword">error</span>: The sandbox <span class="keyword">is</span> <span class="keyword">not</span> <span class="keyword">in</span> sync <span class="keyword">with</span> <span class="keyword">the</span>  
 Podfile.lock. Run 'pod install' <span class="keyword">or</span> update 
@@ -50,7 +50,16 @@ fi
 </ol>
 <h3 id="改造脚本">改造脚本</h3><p>好，既然我们已经读懂了上述的<code>shell script</code>，我们不如将这个错误的提示来进行整改，当有差异的情况下，自动去进行<code>pod install</code>。</p>
 <p>整体改造后的代码如下：</p>
-]]></content>
+<pre><code><span class="comment">// 1.</span>
+diff <span class="string">"<span class="subst">${PODS_ROOT}</span>/../Podfile.lock"</span> <span class="string">"<span class="subst">${PODS_ROOT}</span>/Manifest.lock"</span> &gt; /dev/<span class="keyword">null</span>
+
+<span class="comment">// 2.</span>
+<span class="keyword">if</span> [[ $? != <span class="number">0</span> ]] ; then
+
+<span class="comment">// 3.</span>
+    pod install --project-directory=<span class="string">"<span class="subst">${PODS_ROOT}</span>/../"</span>
+fi
+</code></pre>]]></content>
     <summary type="html">
     <![CDATA[<p>初次看到这个题目的你，可能还不了解这是个啥。但是，我想下面这个错误提示，你肯定会非常熟悉：</p>
 <pre><code><span class="keyword">error</span>: The sandbox <span class="keyword">is</sp]]>
