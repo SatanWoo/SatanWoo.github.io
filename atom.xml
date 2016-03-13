@@ -4,7 +4,7 @@
   
   <link href="/atom.xml" rel="self"/>
   <link href="http://satanwoo.github.io/"/>
-  <updated>2016-03-13T16:23:12.000Z</updated>
+  <updated>2016-03-13T16:48:41.000Z</updated>
   <id>http://satanwoo.github.io/</id>
   
   <author>
@@ -15,11 +15,11 @@
   <generator uri="http://hexo.io/">Hexo</generator>
   
   <entry>
-    <title><![CDATA[RxSwift]]></title>
+    <title><![CDATA[RxSwift的第一印象]]></title>
     <link href="http://satanwoo.github.io/2016/03/14/RxSwift/"/>
     <id>http://satanwoo.github.io/2016/03/14/RxSwift/</id>
     <published>2016-03-13T16:21:50.000Z</published>
-    <updated>2016-03-13T16:23:12.000Z</updated>
+    <updated>2016-03-13T16:48:41.000Z</updated>
     <content type="html"><![CDATA[<p><strong>声明：本文由本人独立翻译完成，同步发表在稀土掘金</strong></p>
 <p>去年整整一年，我都在试图理解响应式编程的原理是什么，并且试图验证如果在我的app中使用这种编程范式是否会带来好处。于是，我查询了许多相关的解决方案，从<a href="https://github.com/ReactiveCocoa/ReactiveCocoa" target="_blank" rel="external">ReactiveCocoa</a> &amp; Objective-C开始，及其Swift版本<a href="https://blog.alltheflow.com/reactive-swift-upgrading-to-reactivecocoa-3-0/" target="_blank" rel="external">ReactiveCocoa with Swift</a>，再到我朋友实现的一个轻量级的框架<a href="https://github.com/bvic23/VinceRP" target="_blank" rel="external">VinceRP</a>。上述这些都是令人赞叹不已的项目，ReactiveCocoa的项目成熟度非常高，但是十分复杂；而VinceRP的实现非常容易，所以理解起来非常简单。</p>
 <p>在学习的过程中，我写了一系列关于<a href="https://blog.alltheflow.com/tag/reactive" target="_blank" rel="external">我学习响应式编程的经历</a>的文章，所以经常会被读者问到一些关于<a href="https://github.com/ReactiveX/RxSwift" target="_blank" rel="external">RxSwift</a>的问题。惭愧地说，我还从没有使用RxSwift来编写一个项目。实际上我还从来没用过任何语言的<a href="http://reactivex.io/languages.html" target="_blank" rel="external">Rx</a>框架，所以我一直认为，对于那些曾在别的开发环境中有使用Rx经历的人来说，理解RxSwift是非常容易的。既然如此，我也是时候来尝试一把了。</p>
@@ -85,11 +85,11 @@
   </entry>
   
   <entry>
-    <title><![CDATA[SizeUp]]></title>
+    <title><![CDATA[逆向工程SizeUp]]></title>
     <link href="http://satanwoo.github.io/2016/03/14/SizeUp/"/>
     <id>http://satanwoo.github.io/2016/03/14/SizeUp/</id>
     <published>2016-03-13T16:20:57.000Z</published>
-    <updated>2016-03-13T16:21:37.000Z</updated>
+    <updated>2016-03-13T16:48:31.000Z</updated>
     <content type="html"><![CDATA[<p>这几天把《汇编语言》好好复习一遍，心里痒痒，就想找个软件来逆向破解一发。破啥好呢？网上逆向工程的教程一大堆，主要都是<em>Sketch</em>啦，<em>Reveal</em>啦，那我照着做一遍也没啥意思啊，体现不出我中国iOS第12人的特点啊。干脆我找个小众一点的软件破解吧。于是，我就盯上了我每天都非常喜欢使用的<strong>SizeUp</strong>，这是一款非常快速的窗口管理软件，可以通过快捷键将窗口扩展到指定的大小和位置，配合外接显示屏简直酷炫到飞起。</p>
 <p><img src="http://7lrzqz.com1.z0.glb.clouddn.com/%E5%B1%8F%E5%B9%95%E5%BF%AB%E7%85%A7%202016-03-09%20%E4%B8%8B%E5%8D%8810.46.45.png" alt=""></p>
 <p>但是这个App有个很大的问题，虽然它是免费的，但是它每次启动的时候，包括你使用的过程中，都会时不时蹦出一个提示你购买的弹框，而且弹框上的取消按钮一定要过5秒才能点击关闭，真是让人蛋疼。</p>
