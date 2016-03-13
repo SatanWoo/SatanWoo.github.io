@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  
+  <title>SizeUp | Hexo</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+  <meta name="description" content="这几天把《汇编语言》好好复习一遍，心里痒痒，就想找个软件来逆向破解一发。破啥好呢？网上逆向工程的教程一大堆，主要都是Sketch啦，Reveal啦，那我照着做一遍也没啥意思啊，体现不出我中国iOS第12人的特点啊。干脆我找个小众一点的软件破解吧。于是，我就盯上了我每天都非常喜欢使用的SizeUp，这是一款非常快速的窗口管理软件，可以通过快捷键将窗口扩展到指定的大小和位置，配合外接显示屏简直酷炫到飞">
+<meta property="og:type" content="article">
+<meta property="og:title" content="SizeUp">
+<meta property="og:url" content="http://satanwoo.github.io/2016/03/14/SizeUp/index.html">
+<meta property="og:site_name" content="Hexo">
+<meta property="og:description" content="这几天把《汇编语言》好好复习一遍，心里痒痒，就想找个软件来逆向破解一发。破啥好呢？网上逆向工程的教程一大堆，主要都是Sketch啦，Reveal啦，那我照着做一遍也没啥意思啊，体现不出我中国iOS第12人的特点啊。干脆我找个小众一点的软件破解吧。于是，我就盯上了我每天都非常喜欢使用的SizeUp，这是一款非常快速的窗口管理软件，可以通过快捷键将窗口扩展到指定的大小和位置，配合外接显示屏简直酷炫到飞">
+<meta property="og:image" content="http://7lrzqz.com1.z0.glb.clouddn.com/%E5%B1%8F%E5%B9%95%E5%BF%AB%E7%85%A7%202016-03-09%20%E4%B8%8B%E5%8D%8810.46.45.png">
+<meta property="og:image" content="http://7lrzqz.com1.z0.glb.clouddn.com/%E5%B1%8F%E5%B9%95%E5%BF%AB%E7%85%A7%202016-03-13%20%E4%B8%8B%E5%8D%8811.22.04.png">
+<meta property="og:image" content="http://7lrzqz.com1.z0.glb.clouddn.com/%E5%B1%8F%E5%B9%95%E5%BF%AB%E7%85%A7%202016-03-13%20%E4%B8%8B%E5%8D%8811.24.09.png">
+<meta property="og:image" content="http://7lrzqz.com1.z0.glb.clouddn.com/%E5%B1%8F%E5%B9%95%E5%BF%AB%E7%85%A7%202016-03-13%20%E4%B8%8B%E5%8D%8811.24.28.png">
+<meta property="og:image" content="http://7lrzqz.com1.z0.glb.clouddn.com/%E5%B1%8F%E5%B9%95%E5%BF%AB%E7%85%A7%202016-03-13%20%E4%B8%8B%E5%8D%8811.51.30.png">
+<meta property="og:image" content="http://7lrzqz.com1.z0.glb.clouddn.com/%E5%B1%8F%E5%B9%95%E5%BF%AB%E7%85%A7%202016-03-14%20%E4%B8%8A%E5%8D%8812.00.45.png">
+<meta property="og:updated_time" content="2016-03-13T16:21:37.000Z">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="SizeUp">
+<meta name="twitter:description" content="这几天把《汇编语言》好好复习一遍，心里痒痒，就想找个软件来逆向破解一发。破啥好呢？网上逆向工程的教程一大堆，主要都是Sketch啦，Reveal啦，那我照着做一遍也没啥意思啊，体现不出我中国iOS第12人的特点啊。干脆我找个小众一点的软件破解吧。于是，我就盯上了我每天都非常喜欢使用的SizeUp，这是一款非常快速的窗口管理软件，可以通过快捷键将窗口扩展到指定的大小和位置，配合外接显示屏简直酷炫到飞">
+  
+    <link rel="alternative" href="/atom.xml" title="Hexo" type="application/atom+xml">
+  
+  
+    <link rel="icon" href="/favicon.png">
+  
+  <link rel="stylesheet" href="/css/style.css" type="text/css">
+  
+
+</head>
+<body>
+  <div id="container">
+    <div id="wrap">
+      <header id="header">
+  <div id="banner"></div>
+  <div id="header-outer" class="outer">
+    <div id="header-title" class="inner">
+      <h1 id="logo-wrap">
+        <a href="/" id="logo">Hexo</a>
+      </h1>
+      
+    </div>
+    <div id="header-inner" class="inner">
+      <nav id="main-nav">
+        <a id="main-nav-toggle" class="nav-icon"></a>
+        
+          <a class="main-nav-link" href="/">Home</a>
+        
+          <a class="main-nav-link" href="/archives">Archives</a>
+        
+          <a class="main-nav-link" href="/sitemap.xml">map</a>
+        
+      </nav>
+      <nav id="sub-nav">
+        
+          <a id="nav-rss-link" class="nav-icon" href="/atom.xml" title="RSS Feed"></a>
+        
+        <a id="nav-search-btn" class="nav-icon" title="Search"></a>
+      </nav>
+      <div id="search-form-wrap">
+        <form action="//google.com/search" method="get" accept-charset="UTF-8" class="search-form"><input type="search" name="q" results="0" class="search-form-input" placeholder="Search"><button type="submit" class="search-form-submit">&#xF002;</button><input type="hidden" name="sitesearch" value="http://satanwoo.github.io"></form>
+      </div>
+    </div>
+  </div>
+</header>
+      <div class="outer">
+        <section id="main"><article id="post-SizeUp" class="article article-type-post" itemscope itemprop="blogPost">
+  <div class="article-meta">
+    <a href="/2016/03/14/SizeUp/" class="article-date">
+  <time datetime="2016-03-13T16:20:57.000Z" itemprop="datePublished">2016-03-14</time>
+</a>
+    
+  </div>
+  <div class="article-inner">
+    
+    
+      <header class="article-header">
+        
+  
+    <h1 class="article-title" itemprop="name">
+      SizeUp
+    </h1>
+  
+
+      </header>
+    
+    <div class="article-entry" itemprop="articleBody">
+      
+        <p>这几天把《汇编语言》好好复习一遍，心里痒痒，就想找个软件来逆向破解一发。破啥好呢？网上逆向工程的教程一大堆，主要都是<em>Sketch</em>啦，<em>Reveal</em>啦，那我照着做一遍也没啥意思啊，体现不出我中国iOS第12人的特点啊。干脆我找个小众一点的软件破解吧。于是，我就盯上了我每天都非常喜欢使用的<strong>SizeUp</strong>，这是一款非常快速的窗口管理软件，可以通过快捷键将窗口扩展到指定的大小和位置，配合外接显示屏简直酷炫到飞起。</p>
+<p><img src="http://7lrzqz.com1.z0.glb.clouddn.com/%E5%B1%8F%E5%B9%95%E5%BF%AB%E7%85%A7%202016-03-09%20%E4%B8%8B%E5%8D%8810.46.45.png" alt=""></p>
+<p>但是这个App有个很大的问题，虽然它是免费的，但是它每次启动的时候，包括你使用的过程中，都会时不时蹦出一个提示你购买的弹框，而且弹框上的取消按钮一定要过5秒才能点击关闭，真是让人蛋疼。</p>
+<p><img src="http://7lrzqz.com1.z0.glb.clouddn.com/%E5%B1%8F%E5%B9%95%E5%BF%AB%E7%85%A7%202016-03-13%20%E4%B8%8B%E5%8D%8811.22.04.png" alt=""></p>
+<p>所以，我就讲逆向的目标定在了将这个<strong>可恶的</strong>弹窗给干掉。</p>
+<h4 id="准备工作">准备工作</h4><p>首先破解必须要准备的就是逆向工具了，由于这是个Mac app，所以我们无需使用到iPhone。所以，我简单的将SizeUp进行了一次备份就开始了。</p>
+<p>逆向一个app，我们当然要去分析其汇编代码，因此必不可少的工具就是IDA或者<strong>Hopper</strong>。在这里，请允许我个人强烈推荐Hopper，那傻瓜式的操作，非常适合我这种高智商人才，哇哈哈。Hopper也是支持免费的，但是免费版不能重新生成可执行文件，所以我先从网上下载了一个破解版的Hopper。</p>
+<h4 id="逆向开始">逆向开始</h4><p>首先我们将SizeUp拖入Hopper，得到一系列的汇编代码。这么多的代码我们从哪里下手呢? 答案是<strong>关键字</strong>。在弹窗提示我们购买的界面中，出现了很多关键字，比如<code>license</code>抑或是<code>demo</code>。首先让我们从license开始尝试。我们在Hopper界面左上侧的搜索框中输入license，会得到如下结果：</p>
+<p><img src="http://7lrzqz.com1.z0.glb.clouddn.com/%E5%B1%8F%E5%B9%95%E5%BF%AB%E7%85%A7%202016-03-13%20%E4%B8%8B%E5%8D%8811.24.09.png" alt=""></p>
+<p>从结果来看，我们大致猜测SizeUp的逻辑如下：</p>
+<ol>
+<li>初始化程序</li>
+<li>检查存储的license</li>
+<li>（如果有）多个，检查最好的一个（可能是有效期最长的）</li>
+<li>和服务器进行验证</li>
+</ol>
+<p>上述这段逻辑主要来自于高亮的<code>+[License xxx]</code>函数调用。</p>
+<p>从上述这段逻辑，我们可以看出，想要伪造license是不可能的了，这是因为牵涉了服务器验证。所以我们只能把想法转变成，干掉本地相关的逻辑。本地逻辑不外乎判断某种分支条件，根据结果进行某些页面的跳转，<strong>比如弹出Demo界面</strong>。</p>
+<p>好，现在我们来试试<strong>Demo</strong>关键字，搜索结果如下：</p>
+<p><img src="http://7lrzqz.com1.z0.glb.clouddn.com/%E5%B1%8F%E5%B9%95%E5%BF%AB%E7%85%A7%202016-03-13%20%E4%B8%8B%E5%8D%8811.24.28.png" alt=""></p>
+<p>从这个关键字的搜索结果来看，我们得到了不少有价值的信息，比如<strong>DemoDialogController</strong>。哈哈哈哈，苹果经典的MVC设计模式这时候起了很大的作用，搞过开发的人一般都会知道Controller一般对应的就是一个ViewController。如果你不信，我们继续往下看，可以看到一个<code>-[DemoDialogController showDemoDialog]</code>，这个提示够明显了吧，这分明就是说：老子就是那个界面，你快来把我干掉吧。</p>
+<p>好，大功告成一半了，我们已经找到了我们要干掉的界面，现在我们只要干掉分支判断逻辑就好了。于是，我们继续跟着Demo关键字走，不久，我们发现了<code>+[License isDemo]</code>这个嫌疑犯。卧槽，这时候，我这天赋异禀的大脑中形成了这样一段代码：</p>
+<pre><code><span class="tag">if</span> ([License isDemo]) {
+    <span class="attr_selector">[[[DemoDialogController alloc]</span> <span class="tag">init</span>] <span class="tag">showDemoDialog</span>]
+} <span class="tag">else</span> {
+    <span class="comment">// Follow your heart</span>
+}
+</code></pre><p>是不是和我猜测的一样呢？</p>
+<p>去掉前面的函数压栈，我们来着重看看这段代码：</p>
+<p><img src="http://7lrzqz.com1.z0.glb.clouddn.com/%E5%B1%8F%E5%B9%95%E5%BF%AB%E7%85%A7%202016-03-13%20%E4%B8%8B%E5%8D%8811.51.30.png" alt=""></p>
+<pre><code><span class="keyword">mov</span> <span class="literal">edx</span>, <span class="number">0x1</span>
+<span class="keyword">test</span> <span class="literal">al</span>, <span class="literal">al</span>
+<span class="keyword">je</span> <span class="number">0x1000008bd9</span>
+....
+....
+<span class="keyword">mov</span> <span class="literal">eax</span>, <span class="literal">edx</span>
+</code></pre><p>这段代码不熟悉汇编的人可能不太懂，我将其转换一下。</p>
+<pre><code>edx = <span class="literal">true</span>(YES)
+<span class="keyword">if</span> al == <span class="number">0</span>
+{
+    <span class="keyword">goto</span> <span class="number">0x1000008bd9</span>
+}
+
+... <span class="number">0x1000008bd9</span>:
+val = edx(<span class="literal">true</span>)
+<span class="keyword">return</span> val
+</code></pre><p>理解了吧，就是首先将0x1（即YES）放入<code>edx</code>寄存器，然后判断<code>al</code>代表的某种分支条件是不是0，如果是0，通过<code>je</code>命令跳转到<code>0x1000008bd9</code>地址。这个地址后面的指令就是讲<code>edx</code>的值塞入<code>eax</code>中，而<code>eax</code>是<strong>ARM指令集中默认存放函数返回值的寄存器</strong>。</p>
+<p>事情到这，是不是基本理清思路了？我们只需要将je跳转的条件极其后面语句干掉就好了。我在这里采用了更暴力的做法，直接在函数一开始就讲false塞入<code>eax</code>寄存器，然后直接调用<code>ret</code>进行返回。</p>
+<p><img src="http://7lrzqz.com1.z0.glb.clouddn.com/%E5%B1%8F%E5%B9%95%E5%BF%AB%E7%85%A7%202016-03-14%20%E4%B8%8A%E5%8D%8812.00.45.png" alt=""></p>
+<h4 id="结语">结语</h4><p>是不是逆向工程看起来也没那么难呢？其实，SizeUp这种利用函数返回至做文章的逆向是最简单的，下次我们来挑战下更难的逆向目标！</p>
+
+      
+    </div>
+    <footer class="article-footer">
+      <a data-url="http://satanwoo.github.io/2016/03/14/SizeUp/" data-id="cilqrsv1d000ol5i1f9dby1px" class="article-share-link">Share</a>
+      
+      
+  <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Reverse-Engineering/">Reverse Engineering</a></li></ul>
+
+    </footer>
+  </div>
+  
+    
+<nav id="article-nav">
+  
+    <a href="/2016/03/14/RxSwift/" id="article-nav-newer" class="article-nav-link-wrap">
+      <strong class="article-nav-caption">Newer</strong>
+      <div class="article-nav-title">
+        
+          RxSwift
+        
+      </div>
+    </a>
+  
+  
+    <a href="/2016/03/14/DXXcodeConsoleUnicodePlugin/" id="article-nav-older" class="article-nav-link-wrap">
+      <strong class="article-nav-caption">Older</strong>
+      <div class="article-nav-title">DXXcodeConsoleUnicodePlugin源码解析</div>
+    </a>
+  
+</nav>
+
+  
+</article>
+
+
+<section id="comments">
+  <!-- 多说评论框 start -->
+  <div class="ds-thread" data-thread-key="post-SizeUp" data-title="SizeUp" data-url="http://satanwoo.github.io/2016/03/14/SizeUp/"></div>
+  <!-- 多说评论框 end -->
+  <!-- 多说公共JS代码 start (一个网页只需插入一次) -->
+  <script type="text/javascript">
+  var duoshuoQuery = {short_name:'satanwoo'};
+    (function() {
+      var ds = document.createElement('script');
+      ds.type = 'text/javascript';ds.async = true;
+      ds.src = (document.location.protocol == 'https:' ? 'https:' : 'http:') + '//static.duoshuo.com/embed.js';
+      ds.charset = 'UTF-8';
+      (document.getElementsByTagName('head')[0] 
+       || document.getElementsByTagName('body')[0]).appendChild(ds);
+    })();
+    </script>
+  <!-- 多说公共JS代码 end -->
+</section>
+</section>
+        
+          <aside id="sidebar">
+  
+    
+  
+    
+  <div class="widget-wrap">
+    <h3 class="widget-title">Tags</h3>
+    <div class="widget">
+      <ul class="tag-list"><li class="tag-list-item"><a class="tag-list-link" href="/tags/Android/">Android</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/JavaScript/">JavaScript</a><span class="tag-list-count">2</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Math/">Math</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/R/">R</a><span class="tag-list-count">2</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Reverse-Engineering/">Reverse Engineering</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Swift/">Swift</a><span class="tag-list-count">5</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/iOS/">iOS</a><span class="tag-list-count">14</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/shell/">shell</a><span class="tag-list-count">1</span></li></ul>
+    </div>
+  </div>
+
+  
+    
+  <div class="widget-wrap">
+    <h3 class="widget-title">Tag Cloud</h3>
+    <div class="widget tagcloud">
+      <a href="/tags/Android/" style="font-size: 10px;">Android</a> <a href="/tags/JavaScript/" style="font-size: 13.33px;">JavaScript</a> <a href="/tags/Math/" style="font-size: 10px;">Math</a> <a href="/tags/R/" style="font-size: 13.33px;">R</a> <a href="/tags/Reverse-Engineering/" style="font-size: 10px;">Reverse Engineering</a> <a href="/tags/Swift/" style="font-size: 16.67px;">Swift</a> <a href="/tags/iOS/" style="font-size: 20px;">iOS</a> <a href="/tags/shell/" style="font-size: 10px;">shell</a>
+    </div>
+  </div>
+
+  
+    
+  <div class="widget-wrap">
+    <h3 class="widget-title">Archives</h3>
+    <div class="widget">
+      <ul class="archive-list"><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/03/">March 2016</a><span class="archive-list-count">3</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/02/">February 2016</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/12/">December 2015</a><span class="archive-list-count">6</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/11/">November 2015</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/10/">October 2015</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/09/">September 2015</a><span class="archive-list-count">4</span></li></ul>
+    </div>
+  </div>
+
+  
+    
+  <div class="widget-wrap">
+    <h3 class="widget-title">Recents</h3>
+    <div class="widget">
+      <ul>
+        
+          <li>
+            <a href="/2016/03/14/RxSwift/">RxSwift</a>
+          </li>
+        
+          <li>
+            <a href="/2016/03/14/SizeUp/">SizeUp</a>
+          </li>
+        
+          <li>
+            <a href="/2016/03/14/DXXcodeConsoleUnicodePlugin/">DXXcodeConsoleUnicodePlugin源码解析</a>
+          </li>
+        
+          <li>
+            <a href="/2016/02/27/check-manifest/">Check Pods Manifest.lock</a>
+          </li>
+        
+          <li>
+            <a href="/2016/02/27/pod-install-plugin/">开发一个简单的Pod Install 插件</a>
+          </li>
+        
+      </ul>
+    </div>
+  </div>
+
+  
+</aside>
+        
+      </div>
+      <footer id="footer">
+  
+  <div class="outer">
+    <div id="footer-info" class="inner">
+      &copy; 2016 John Doe<br>
+      Powered by <a href="http://hexo.io/" target="_blank">Hexo</a>
+    </div>
+  </div>
+</footer>
+    </div>
+    <nav id="mobile-nav">
+  
+    <a href="/" class="mobile-nav-link">Home</a>
+  
+    <a href="/archives" class="mobile-nav-link">Archives</a>
+  
+    <a href="/sitemap.xml" class="mobile-nav-link">map</a>
+  
+</nav>
+    
+
+
+  <link rel="stylesheet" href="/fancybox/jquery.fancybox.css" type="text/css">
+  <script src="/fancybox/jquery.fancybox.pack.js" type="text/javascript"></script>
+
+
+<script src="/js/script.js" type="text/javascript"></script>
+
+  </div>
+</body>
+</html>

@@ -62,6 +62,326 @@
       <div class="outer">
         <section id="main">
   
+    <article id="post-RxSwift" class="article article-type-post" itemscope itemprop="blogPost">
+  <div class="article-meta">
+    <a href="/2016/03/14/RxSwift/" class="article-date">
+  <time datetime="2016-03-13T16:21:50.000Z" itemprop="datePublished">2016-03-14</time>
+</a>
+    
+  </div>
+  <div class="article-inner">
+    
+    
+      <header class="article-header">
+        
+  
+    <h1 itemprop="name">
+      <a class="article-title" href="/2016/03/14/RxSwift/">RxSwift</a>
+    </h1>
+  
+
+      </header>
+    
+    <div class="article-entry" itemprop="articleBody">
+      
+        <p><strong>声明：本文由本人独立翻译完成，同步发表在稀土掘金</strong></p>
+<p>去年整整一年，我都在试图理解响应式编程的原理是什么，并且试图验证如果在我的app中使用这种编程范式是否会带来好处。于是，我查询了许多相关的解决方案，从<a href="https://github.com/ReactiveCocoa/ReactiveCocoa" target="_blank" rel="external">ReactiveCocoa</a> &amp; Objective-C开始，及其Swift版本<a href="https://blog.alltheflow.com/reactive-swift-upgrading-to-reactivecocoa-3-0/" target="_blank" rel="external">ReactiveCocoa with Swift</a>，再到我朋友实现的一个轻量级的框架<a href="https://github.com/bvic23/VinceRP" target="_blank" rel="external">VinceRP</a>。上述这些都是令人赞叹不已的项目，ReactiveCocoa的项目成熟度非常高，但是十分复杂；而VinceRP的实现非常容易，所以理解起来非常简单。</p>
+<p>在学习的过程中，我写了一系列关于<a href="https://blog.alltheflow.com/tag/reactive" target="_blank" rel="external">我学习响应式编程的经历</a>的文章，所以经常会被读者问到一些关于<a href="https://github.com/ReactiveX/RxSwift" target="_blank" rel="external">RxSwift</a>的问题。惭愧地说，我还从没有使用RxSwift来编写一个项目。实际上我还从来没用过任何语言的<a href="http://reactivex.io/languages.html" target="_blank" rel="external">Rx</a>框架，所以我一直认为，对于那些曾在别的开发环境中有使用Rx经历的人来说，理解RxSwift是非常容易的。既然如此，我也是时候来尝试一把了。</p>
+<h2 id="Rx">Rx</h2><p>Rx是最常使用的一个响应式编程框架。它与其他RP框架的一大不同是它的跨平台特性，同时，它有着最大的开源社区，无数的文档以及有参考价值的问题讨论，许许多多的人不断地对其进行改进。</p>
+<h2 id="Swift">Swift</h2><p>这门语言在去年一年中飞速的成长，并且现在也进行了<a href="https://github.com/apple/swift" target="_blank" rel="external">开源</a>了。一些像RxSwift之类的项目也随着其一起成长。因此，没有什么理由可以再阻止你去使用这些框架。当然，一些重大的改动仍然被列在radar上，但它们很可能在短时间内不会被解决，这就意味着这个项目会不断地被改进，这不是很好吗？</p>
+<h2 id="使用RxSwift开发一个app">使用RxSwift开发一个app</h2><p>如果你从未阅读过<a href="https://blog.alltheflow.com" target="_blank" rel="external">我的博客</a>，可能你现在会猜我使用RxSwift开发了一个app。没错，你是对的。这是个很耗时的习惯，但是我不喜欢依赖于一个理想的环境，所以通常我都会写一个例子来让我有那么一点感觉。通过这种方式，我可以学会如何让成功得运行这个框架。（意译：这里我想说一点个人感受，对于解决问题来说，你所选用的框架只是万千可用方案中的一种，因此，方案的选择是因人而异的。而这些选择所带来的多样性，正是我如此热爱编程的一大原因。）</p>
+<p>我所写的这个应用名叫<a href="https://github.com/alltheflow/iCopyPasta" target="_blank" rel="external">iCopyPasta</a>，是一个在去年<a href="http://2015.funswiftconf.com/" target="_blank" rel="external">Functional Swift Conf</a>上展示的免费Mac剪贴板应用<a href="https://github.com/alltheflow/copypasta" target="_blank" rel="external">CopyPasta</a>的iOS姐妹版。显而易见，它们并不是一个完整的产品所以并不可以被用来上架。我现在每天都使用Mac版本的CopyPasta，但是我可能存在某些偏见。我的计划是将来会发布Mac版本和iOS版本的CopyPasta应用，并可能会将这两个版本进行打通。</p>
+<blockquote>
+<p>难道这不是我一直以来的计划吗？  </p>
+</blockquote>
+<h3 id="Observables">Observables</h3><p>我首先对<a href="https://developer.apple.com/library/prerelease/ios/documentation/UIKit/Reference/UIPasteboard_Class/index.html" target="_blank" rel="external"><code>UIPasteboard</code></a>注册了观察者。 这些观察者会对你拷贝东西时出现在<code>UIPasteboard</code>中的<code>字符串</code>和<code>图像</code>类型进行观察。</p>
+<pre><code><span class="keyword">let</span> pasteboard = <span class="type">NSNotificationCenter</span>.defaultCenter().rx_notification(<span class="string">"UIPasteboardChangedNotification"</span>, object: <span class="literal">nil</span>)
+<span class="number">_</span> = pasteboard.<span class="built_in">map</span> { [<span class="keyword">weak</span> <span class="keyword">self</span>] (notification: <span class="type">NSNotification</span>) -&gt; <span class="type">PasteboardItem</span>? <span class="keyword">in</span>
+    <span class="keyword">if</span> <span class="keyword">let</span> pb = notification.object <span class="keyword">as</span>? <span class="type">UIPasteboard</span> {
+        <span class="keyword">if</span> <span class="keyword">let</span> string = pb.valueForPasteboardType(kUTTypeUTF8PlainText <span class="keyword">as</span> <span class="type">String</span>) {
+            <span class="keyword">return</span> <span class="keyword">self</span>?.pasteboardItem(string)
+        }
+        <span class="keyword">if</span> <span class="keyword">let</span> image = pb.valueForPasteboardType(kUTTypeImage <span class="keyword">as</span> <span class="type">String</span>) {
+            <span class="keyword">return</span> <span class="keyword">self</span>?.pasteboardItem(image)
+        }
+    }
+    <span class="keyword">return</span> <span class="literal">nil</span>
+}
+</code></pre><p>之前我的方法是直接对<code>UIPasteboard</code>中的<code>字符串</code>和<code>图像</code>直接进行观察，但是这个方法是不正确的。原因在于<code>UIPasteboard</code>可能不是一个KVO安全的类型（具体请看下方的评论）。参考别人的建议后，我使用RxSwift另一个非常棒的功能<a href="https://github.com/ReactiveX/RxSwift/blob/83bac6db0cd4f7dd3e706afc6747bd5797ea16ff/RxCocoa/Common/Observables/NSNotificationCenter%2BRx.swift#L23" target="_blank" rel="external"><code>rx_notification</code></a>来监听<code>UIPasteboardChangedNotification</code></p>
+<pre><code>.subscribeNext { [<span class="keyword">weak</span> <span class="keyword">self</span>] pasteboardItem <span class="keyword">in</span>
+    <span class="keyword">if</span> <span class="keyword">let</span> item = pasteboardItem {
+        <span class="keyword">self</span>?.addPasteboardItem(item)
+    }
+}
+</code></pre><p>这里的<code>pasteboard</code>是一个<code>Observable&lt;NSNotification&gt;</code>，这也是为什么可以很容易得订阅其<code>.Next</code>事件同时相应地去更新<code>tableView</code>。而<code>map</code>则是从监听到的通知所涉及的对象中获取字符串或者图像，并将获取到的结果转换成<a href="https://github.com/alltheflow/iCopyPasta/blob/master/iCopyPasta/PasteboardItem.swift#L41" target="_blank" rel="external"><code>PasteboardItem</code></a>。</p>
+<h3 id="Dispose_bags">Dispose bags</h3><p>订阅信号会产生<code>Disposable</code>。如果不终止订阅，那么这些生成的<code>Disposable</code>将会一直存在，这无疑是非常耗内存的。所以，你要么对这些订阅调用<code>dispose</code>，要么你可以像我一样，使用<a href="https://github.com/ReactiveX/RxSwift/blob/master/Documentation/GettingStarted.md#dispose-bags" target="_blank" rel="external">dispose bags</a>来自动销毁相关的订阅。</p>
+<pre><code>.<span class="function"><span class="title">addDisposableTo</span><span class="params">(disposeBag)</span></span>
+</code></pre><h3 id="UIKit/Appkit_bindings">UIKit/Appkit bindings</h3><p>你可以很容易地通过<a href="https://github.com/ReactiveX/RxSwift/blob/b00d35a5ef13dbcf57257f47fb14a60a2c924d19/RxCocoa/iOS/UITableView%2BRx.swift#L46" target="_blank" rel="external"><code>rx_itemsWithCellIdentifier</code></a>将<a href="https://github.com/ReactiveX/RxSwift/blob/master/Documentation/GettingStarted.md#observables-aka-sequences" target="_blank" rel="external"><code>Observable</code></a>序列绑定到table view上。<code>element</code>来自于我定义的<a href="https://github.com/alltheflow/iCopyPasta/blob/master/iCopyPasta/PasteboardItem.swift#L41" target="_blank" rel="external"><code>PasteboardItem</code></a>枚举类型，这也是为什么我会采用Switch来处理这个对象，这样可以根据其具体的枚举值来显示不同的样式。</p>
+<pre><code>pasteViewModel.pasteboardItems()
+    .bindTo(tableView.rx_itemsWithCellIdentifier(<span class="string">"pasteCell"</span>, cellType: UITableViewCell.self)) { (row, element, cell) <span class="keyword">in</span>
+     <span class="keyword">switch</span> element {
+     <span class="keyword">case</span> .Text(let <span class="keyword">string</span>):
+         cell.textLabel?.<span class="keyword">text</span> = String(<span class="keyword">string</span>)
+     <span class="keyword">case</span> .Image(let <span class="keyword">image</span>):
+         cell.imageView?.<span class="keyword">image</span> = <span class="keyword">image</span>
+}.addDisposableTo(disposeBag)
+</code></pre><p>另外一个很棒的补充是<a href="https://github.com/ReactiveX/RxSwift/blob/b00d35a5ef13dbcf57257f47fb14a60a2c924d19/RxCocoa/iOS/UITableView%2BRx.swift#L204" target="_blank" rel="external"><code>rx_modelSelected</code></a>。你可以通过它来获取你触发选择事件时对应的<code>element</code>。简单来说，它是一个对<code>tableView:didSelectRowAtIndexPath:</code>的封装，可以将代码变得非常简洁。</p>
+<pre><code><span class="tag">tableView</span>
+    <span class="class">.rx_modelSelected</span>(PasteboardItem)
+    <span class="class">.subscribeNext</span> { <span class="attr_selector">[weak self]</span> <span class="tag">element</span> <span class="tag">in</span>
+        <span class="tag">self</span>?<span class="class">.pasteViewModel</span><span class="class">.addItemsToPasteboard</span>(element)
+    }<span class="class">.addDisposableTo</span>(disposeBag)
+</code></pre><p>你可以通过如下链接来查看所以关于UIKit/AppKit（RxCocoa）的扩展<a href="https://github.com/ReactiveX/RxSwift/blob/master/Documentation/API.md#rxcocoa-extensions" target="_blank" rel="external">RxSwift’s GitHub</a>。</p>
+<h2 id="总体感受">总体感受</h2><p>到目前为止，我还只是探索了RxSwift能力的一小部分，但是我已经感受到RxSwift是一个非常棒的框架。如果能够更深入理解它的机制并学会基于它的设计思路进行思考，那肯定会更好。</p>
+<p>我非常喜欢一些像<a href="https://github.com/ReactiveX/RxSwift/tree/master/Rx.playground" target="_blank" rel="external">Rx.playground</a>，<a href="http://rxmarbles.com/" target="_blank" rel="external">RxMarbles</a>这样的资料及<a href="https://github.com/ReactiveX" target="_blank" rel="external">great community</a>这样的社区。这些资料给了我很多的灵感，所以我也乐于将我的学习经验分享给<a href="http://bitrise.io" target="_blank" rel="external">bitrise.io</a>的用户。还有一些比较重要的内容，比如<a href="https://github.com/ReactiveX/RxSwift/blob/master/Documentation/Schedulers.md#custom-schedulers" target="_blank" rel="external">schedulers</a>还未被涉及，但是绝对值得研究一番。</p>
+<p>对我来说，我还需要一段时间来更好地理解Rx。与我尝试ReactiveCocoa只有个把小时不同，我现在可以每天都在工作中使用RxSwift，并且坚持使用超过了一年。这都得感谢<a href="https://twitter.com/bvic23" target="_blank" rel="external">在Prezi的伙伴们</a>.</p>
+<p>作为一个曾经学习过ReactiveCocoa的人来说，我现在更倾向于使用RxSwift，可能是因为我现在自认为已经对于RxSwift已经足够了解，并且使用它可以很快得完成我的编码任务。当然，在将来我可能会同时使用两者，但是我认为对于两者之间任一框架的熟练使用不代表会在学习另外一个框架的时候给你带来很大的优势。它们在几个方面有着<a href="https://stackoverflow.com/questions/32542846/reactivecocoa-vs-rxswift-pros-and-cons/32581824#32581824" target="_blank" rel="external">不同</a>。同时，这两个框架（概括来说应该是所有的响应式编程框架）都有着陡峭的学习曲线。对于我来说，我已经度过了学习ReactiveCocoa最难的那段时光，但如果你是一个初学者，我建议你自己动手尝试这两种框架，甚至更多。</p>
+<h2 id="深入阅读">深入阅读</h2><p>如果你还在思考应该使用哪个响应式编程的框架，那么我建议你去读一读Ash Furrow所写的关于如何挑选响应式编程框架的<a href="https://ashfurrow.com/blog/reactivecocoa-vs-rxswift/" target="_blank" rel="external">文章</a>。</p>
+<p>你也可以看看其他一些在iOS中使用响应式编程的<a href="https://gist.github.com/JaviLorbada/4a7bd6129275ebefd5a6" target="_blank" rel="external">视频及文章</a>，这些内容都非常得棒，相信你会受益匪浅。</p>
+
+      
+    </div>
+    <footer class="article-footer">
+      <a data-url="http://satanwoo.github.io/2016/03/14/RxSwift/" data-id="cilqrsv1h000rl5i16xiuee7f" class="article-share-link">Share</a>
+      
+      
+  <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Swift/">Swift</a></li></ul>
+
+    </footer>
+  </div>
+  
+</article>
+
+
+  
+    <article id="post-SizeUp" class="article article-type-post" itemscope itemprop="blogPost">
+  <div class="article-meta">
+    <a href="/2016/03/14/SizeUp/" class="article-date">
+  <time datetime="2016-03-13T16:20:57.000Z" itemprop="datePublished">2016-03-14</time>
+</a>
+    
+  </div>
+  <div class="article-inner">
+    
+    
+      <header class="article-header">
+        
+  
+    <h1 itemprop="name">
+      <a class="article-title" href="/2016/03/14/SizeUp/">SizeUp</a>
+    </h1>
+  
+
+      </header>
+    
+    <div class="article-entry" itemprop="articleBody">
+      
+        <p>这几天把《汇编语言》好好复习一遍，心里痒痒，就想找个软件来逆向破解一发。破啥好呢？网上逆向工程的教程一大堆，主要都是<em>Sketch</em>啦，<em>Reveal</em>啦，那我照着做一遍也没啥意思啊，体现不出我中国iOS第12人的特点啊。干脆我找个小众一点的软件破解吧。于是，我就盯上了我每天都非常喜欢使用的<strong>SizeUp</strong>，这是一款非常快速的窗口管理软件，可以通过快捷键将窗口扩展到指定的大小和位置，配合外接显示屏简直酷炫到飞起。</p>
+<p><img src="http://7lrzqz.com1.z0.glb.clouddn.com/%E5%B1%8F%E5%B9%95%E5%BF%AB%E7%85%A7%202016-03-09%20%E4%B8%8B%E5%8D%8810.46.45.png" alt=""></p>
+<p>但是这个App有个很大的问题，虽然它是免费的，但是它每次启动的时候，包括你使用的过程中，都会时不时蹦出一个提示你购买的弹框，而且弹框上的取消按钮一定要过5秒才能点击关闭，真是让人蛋疼。</p>
+<p><img src="http://7lrzqz.com1.z0.glb.clouddn.com/%E5%B1%8F%E5%B9%95%E5%BF%AB%E7%85%A7%202016-03-13%20%E4%B8%8B%E5%8D%8811.22.04.png" alt=""></p>
+<p>所以，我就讲逆向的目标定在了将这个<strong>可恶的</strong>弹窗给干掉。</p>
+<h4 id="准备工作">准备工作</h4><p>首先破解必须要准备的就是逆向工具了，由于这是个Mac app，所以我们无需使用到iPhone。所以，我简单的将SizeUp进行了一次备份就开始了。</p>
+<p>逆向一个app，我们当然要去分析其汇编代码，因此必不可少的工具就是IDA或者<strong>Hopper</strong>。在这里，请允许我个人强烈推荐Hopper，那傻瓜式的操作，非常适合我这种高智商人才，哇哈哈。Hopper也是支持免费的，但是免费版不能重新生成可执行文件，所以我先从网上下载了一个破解版的Hopper。</p>
+<h4 id="逆向开始">逆向开始</h4><p>首先我们将SizeUp拖入Hopper，得到一系列的汇编代码。这么多的代码我们从哪里下手呢? 答案是<strong>关键字</strong>。在弹窗提示我们购买的界面中，出现了很多关键字，比如<code>license</code>抑或是<code>demo</code>。首先让我们从license开始尝试。我们在Hopper界面左上侧的搜索框中输入license，会得到如下结果：</p>
+<p><img src="http://7lrzqz.com1.z0.glb.clouddn.com/%E5%B1%8F%E5%B9%95%E5%BF%AB%E7%85%A7%202016-03-13%20%E4%B8%8B%E5%8D%8811.24.09.png" alt=""></p>
+<p>从结果来看，我们大致猜测SizeUp的逻辑如下：</p>
+<ol>
+<li>初始化程序</li>
+<li>检查存储的license</li>
+<li>（如果有）多个，检查最好的一个（可能是有效期最长的）</li>
+<li>和服务器进行验证</li>
+</ol>
+<p>上述这段逻辑主要来自于高亮的<code>+[License xxx]</code>函数调用。</p>
+<p>从上述这段逻辑，我们可以看出，想要伪造license是不可能的了，这是因为牵涉了服务器验证。所以我们只能把想法转变成，干掉本地相关的逻辑。本地逻辑不外乎判断某种分支条件，根据结果进行某些页面的跳转，<strong>比如弹出Demo界面</strong>。</p>
+<p>好，现在我们来试试<strong>Demo</strong>关键字，搜索结果如下：</p>
+<p><img src="http://7lrzqz.com1.z0.glb.clouddn.com/%E5%B1%8F%E5%B9%95%E5%BF%AB%E7%85%A7%202016-03-13%20%E4%B8%8B%E5%8D%8811.24.28.png" alt=""></p>
+<p>从这个关键字的搜索结果来看，我们得到了不少有价值的信息，比如<strong>DemoDialogController</strong>。哈哈哈哈，苹果经典的MVC设计模式这时候起了很大的作用，搞过开发的人一般都会知道Controller一般对应的就是一个ViewController。如果你不信，我们继续往下看，可以看到一个<code>-[DemoDialogController showDemoDialog]</code>，这个提示够明显了吧，这分明就是说：老子就是那个界面，你快来把我干掉吧。</p>
+<p>好，大功告成一半了，我们已经找到了我们要干掉的界面，现在我们只要干掉分支判断逻辑就好了。于是，我们继续跟着Demo关键字走，不久，我们发现了<code>+[License isDemo]</code>这个嫌疑犯。卧槽，这时候，我这天赋异禀的大脑中形成了这样一段代码：</p>
+<pre><code><span class="tag">if</span> ([License isDemo]) {
+    <span class="attr_selector">[[[DemoDialogController alloc]</span> <span class="tag">init</span>] <span class="tag">showDemoDialog</span>]
+} <span class="tag">else</span> {
+    <span class="comment">// Follow your heart</span>
+}
+</code></pre><p>是不是和我猜测的一样呢？</p>
+<p>去掉前面的函数压栈，我们来着重看看这段代码：</p>
+<p><img src="http://7lrzqz.com1.z0.glb.clouddn.com/%E5%B1%8F%E5%B9%95%E5%BF%AB%E7%85%A7%202016-03-13%20%E4%B8%8B%E5%8D%8811.51.30.png" alt=""></p>
+<pre><code><span class="keyword">mov</span> <span class="literal">edx</span>, <span class="number">0x1</span>
+<span class="keyword">test</span> <span class="literal">al</span>, <span class="literal">al</span>
+<span class="keyword">je</span> <span class="number">0x1000008bd9</span>
+....
+....
+<span class="keyword">mov</span> <span class="literal">eax</span>, <span class="literal">edx</span>
+</code></pre><p>这段代码不熟悉汇编的人可能不太懂，我将其转换一下。</p>
+<pre><code>edx = <span class="literal">true</span>(YES)
+<span class="keyword">if</span> al == <span class="number">0</span>
+{
+    <span class="keyword">goto</span> <span class="number">0x1000008bd9</span>
+}
+
+... <span class="number">0x1000008bd9</span>:
+val = edx(<span class="literal">true</span>)
+<span class="keyword">return</span> val
+</code></pre><p>理解了吧，就是首先将0x1（即YES）放入<code>edx</code>寄存器，然后判断<code>al</code>代表的某种分支条件是不是0，如果是0，通过<code>je</code>命令跳转到<code>0x1000008bd9</code>地址。这个地址后面的指令就是讲<code>edx</code>的值塞入<code>eax</code>中，而<code>eax</code>是<strong>ARM指令集中默认存放函数返回值的寄存器</strong>。</p>
+<p>事情到这，是不是基本理清思路了？我们只需要将je跳转的条件极其后面语句干掉就好了。我在这里采用了更暴力的做法，直接在函数一开始就讲false塞入<code>eax</code>寄存器，然后直接调用<code>ret</code>进行返回。</p>
+<p><img src="http://7lrzqz.com1.z0.glb.clouddn.com/%E5%B1%8F%E5%B9%95%E5%BF%AB%E7%85%A7%202016-03-14%20%E4%B8%8A%E5%8D%8812.00.45.png" alt=""></p>
+<h4 id="结语">结语</h4><p>是不是逆向工程看起来也没那么难呢？其实，SizeUp这种利用函数返回至做文章的逆向是最简单的，下次我们来挑战下更难的逆向目标！</p>
+
+      
+    </div>
+    <footer class="article-footer">
+      <a data-url="http://satanwoo.github.io/2016/03/14/SizeUp/" data-id="cilqrsv1d000ol5i1f9dby1px" class="article-share-link">Share</a>
+      
+      
+  <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Reverse-Engineering/">Reverse Engineering</a></li></ul>
+
+    </footer>
+  </div>
+  
+</article>
+
+
+  
+    <article id="post-DXXcodeConsoleUnicodePlugin" class="article article-type-post" itemscope itemprop="blogPost">
+  <div class="article-meta">
+    <a href="/2016/03/14/DXXcodeConsoleUnicodePlugin/" class="article-date">
+  <time datetime="2016-03-13T16:18:52.000Z" itemprop="datePublished">2016-03-14</time>
+</a>
+    
+  </div>
+  <div class="article-inner">
+    
+    
+      <header class="article-header">
+        
+  
+    <h1 itemprop="name">
+      <a class="article-title" href="/2016/03/14/DXXcodeConsoleUnicodePlugin/">DXXcodeConsoleUnicodePlugin源码解析</a>
+    </h1>
+  
+
+      </header>
+    
+    <div class="article-entry" itemprop="articleBody">
+      
+        <h4 id="Xcode插件开发">Xcode插件开发</h4><p>嘿嘿，今天带大家学习一下基于Xcode的插件开发。可能很多人一听到插件开发，想到的都是Sublime Text，Atom这样轻量级的编辑器的扩展插件，但是实际上，无论是VisualStudio, Eclipse以及Xcode这样重量级的IDE，都是支持自定义的插件开发的。学习好了Xcode的插件开发，不仅可以打造度身定做的<strong>神器</strong>，也有助于你将来进行<strong>Mac OS</strong>的应用开发。</p>
+<h4 id="DXXcodeConsoleUnicodePlugin">DXXcodeConsoleUnicodePlugin</h4><p>DXXcodeConsoleUnicodePlugin是一个帮助你自动将<code>\u6061</code>这样的unicode码转换成对应的汉字的插件。</p>
+<p>这个有什么用呢？想想看，我们在网络传输的时候，服务器如果返回的数据是中文（<strong>或者非ASCII码</strong>），通过NSLog在console输出的内容是不直观的，基本都是类似<code>\u6061</code>这种，这对于我们开发调试来说是非常困难的。</p>
+<p>因此，这款插件可以自动帮助我们将检测到的Unicode字符进行转换，直接输出成我们想要的对应内容。怎么样？让我们赶快来一探究竟吧！</p>
+<p><strong> 在开始探讨实现之前，我个人首先强调一点，基于Unicode检测对应的字符是一个非常难的问题。不仅仅是中文，韩文、日文、big-5字符等等都属于Unicode，这些字符集之间好常常有交集。现有比较好的开源实现是</strong>Mozilla的UcharSet**。</p>
+<h4 id="实现">实现</h4><p>首先打开工程，文件结构如下：</p>
+<ul>
+<li>DXXcodeConsoleUnicodePlugin.h/.m</li>
+<li>RegExCategories.h/.m</li>
+</ul>
+<p>其中，<code>DXXcodeConsoleUnicodePlugin</code>是入口。同传统的iOS/Mac OS开发不同，插件开发并不存在传统意义上的main函数，更多的是利用所谓的<code>Template Method</code>设计模式将你需要的自定义部分进行复写。</p>
+<p>于是，我们可以看到如下三段函数：</p>
+<pre><code>+ (<span class="keyword">void</span>)pluginDidLoad:(<span class="built_in">NSBundle</span> *)plugin
+{
+  <span class="keyword">static</span> <span class="built_in">dispatch_once_t</span> onceToken;
+  <span class="built_in">NSString</span> *currentApplicationName = [[<span class="built_in">NSBundle</span> mainBundle] infoDictionary][<span class="string">@"CFBundleName"</span>];
+  <span class="keyword">if</span> ([currentApplicationName isEqual:<span class="string">@"Xcode"</span>]) {
+    <span class="built_in">dispatch_once</span>(&amp;onceToken, ^{
+      sharedPlugin = [[<span class="keyword">self</span> alloc] initWithBundle:plugin];
+
+      [[<span class="built_in">NSNotificationCenter</span> defaultCenter] addObserver:<span class="keyword">self</span>
+                                               selector:<span class="keyword">@selector</span>(menuDidChange)
+                                                   name:<span class="built_in">NSMenuDidChangeItemNotification</span>
+                                                 object:<span class="literal">nil</span>];
+    });
+  }
+}
+
+- (<span class="keyword">id</span>)initWithBundle:(<span class="built_in">NSBundle</span> *)plugin
+{
+  <span class="keyword">if</span> (<span class="keyword">self</span> = [<span class="keyword">super</span> init]) {
+    <span class="comment">// reference to plugin's bundle, for resource acccess</span>
+    <span class="keyword">self</span><span class="variable">.bundle</span> = plugin;
+
+    <span class="comment">// Create menu items, initialize UI, etc.</span>
+
+    <span class="comment">// Sample Menu Item:</span>
+    [<span class="keyword">self</span> createMenu];
+
+    I<span class="built_in">MP_IDEConsoleItem_initWithAdaptorType</span> = ReplaceInstanceMethod(<span class="built_in">NSClassFromString</span>(<span class="string">@"IDEConsoleItem"</span>), <span class="keyword">@selector</span>(initWithAdaptorType:content:kind:),
+                                                                   [XcodeConsoleUnicode_IDEConsoleItem class], <span class="keyword">@selector</span>(initWithAdaptorType:content:kind:));
+  }
+
+  <span class="keyword">return</span> <span class="keyword">self</span>;
+}
+
+- (<span class="keyword">void</span>)createMenu
+{
+  <span class="built_in">NSMenuItem</span> *menuItem = [[<span class="built_in">NSApp</span> mainMenu] itemWithTitle:<span class="string">@"Edit"</span>];
+  <span class="keyword">if</span> (menuItem &amp;&amp; !<span class="keyword">self</span><span class="variable">.convertInConsoleItem</span>) {
+    [[menuItem submenu] addItem:[<span class="built_in">NSMenuItem</span> separatorItem]];
+
+    <span class="built_in">NSMenuItem</span> *convertItem = [[<span class="built_in">NSMenuItem</span> alloc] initWithTitle:<span class="string">@"ConvertUnicode"</span> action:<span class="keyword">@selector</span>(convertAction) keyEquivalent:<span class="string">@"c"</span>];
+    [convertItem setKeyEquivalentModifierMask:<span class="built_in">NSAlternateKeyMask</span>];
+    [convertItem setTarget:<span class="keyword">self</span>];
+    [[menuItem submenu] addItem:convertItem];
+
+    <span class="keyword">self</span><span class="variable">.convertInConsoleItem</span> = [[<span class="built_in">NSMenuItem</span> alloc] initWithTitle:<span class="string">@"ConvertUnicodeInConsole"</span>
+                                                           action:<span class="keyword">@selector</span>(convertUnicodeInConsoleAction)
+                                                    keyEquivalent:<span class="string">@""</span>];
+    [<span class="keyword">self</span><span class="variable">.convertInConsoleItem</span> setTarget:<span class="keyword">self</span>];
+    [[menuItem submenu] addItem:<span class="keyword">self</span><span class="variable">.convertInConsoleItem</span>];
+
+    sIsConvertInConsoleEnabled = [[<span class="built_in">NSUserDefaults</span> standardUserDefaults] boolForKey:sConvertInConsoleEnableKey];
+    <span class="keyword">if</span> (sIsConvertInConsoleEnabled) {
+      <span class="keyword">self</span><span class="variable">.convertInConsoleItem</span><span class="variable">.state</span> = <span class="built_in">NSOnState</span>;
+    } <span class="keyword">else</span> {
+      <span class="keyword">self</span><span class="variable">.convertInConsoleItem</span><span class="variable">.state</span> = <span class="built_in">NSOffState</span>;
+    }
+  }
+}
+</code></pre><p>上面三段函数我们一一进行解析。</p>
+<ol>
+<li><p><code>pluginDidLoad</code>，大家可以理解为插件的程序入口，在这个入口中我们通过单例进行我们自己开发的插件加载。**之所以使用单例是因为这个<code>pluginDidLoad</code>可能会由于加载多个插件而被多次触发。</p>
+</li>
+<li><p><code>initWithBundle</code>函数是我们自定义插件的构造函数，我们通过它进行自己任务的创建和调用。</p>
+</li>
+<li><p><code>createMenu</code>则是对Xcode编辑器上的菜单添加属于我们自己的选项。</p>
+</li>
+</ol>
+<p>在这里，作者在<strong>Edit</strong>菜单下创建了属于自己的<strong>ConvertUnicode</strong>以及<strong>ConvertUnicodeInConsole</strong>，并对这些选项进行了快捷键绑定。</p>
+<p>这些东西，除了自定义的菜单项及操作需要我们自己写以外，我们都可以通过<code>Plugin Template</code>这个插件自动生成。</p>
+<p>到现在，我们还没有看到任何实质性的转换内容，别急，在<code>initWithBundle</code>中，作者通过<strong>Method Swizzling</strong>将<code>IDEConsoleItem</code>的<code>- (id)initWithAdaptorType:(id)arg1 content:(id)arg2 kind:(int)arg3</code>和自己实现的<code>XcodeConsoleUnicode_IDEConsoleItem</code>进行的调换。</p>
+<p>然后在替换后的方法中，实现解析，代码如下：</p>
+<pre><code>- (<span class="keyword">id</span>)initWithAdaptorType:(<span class="keyword">id</span>)arg1 content:(<span class="keyword">id</span>)arg2 kind:(<span class="keyword">int</span>)arg3
+{
+  <span class="keyword">id</span> item = I<span class="built_in">MP_IDEConsoleItem_initWithAdaptorType</span>(<span class="keyword">self</span>, _cmd, arg1, arg2, arg3);
+
+  <span class="keyword">if</span> (sIsConvertInConsoleEnabled) {
+    <span class="built_in">NSString</span> *logText = [item valueForKey:<span class="string">@"content"</span>];
+    <span class="built_in">NSString</span> *resultText = [DXXcodeConsoleUnicodePlugin convertUnicode:logText];
+    [item setValue:resultText forKey:<span class="string">@"content"</span>];
+  }
+
+  <span class="keyword">return</span> item;
+}
+</code></pre><p>这个方法非常简单，通过原方法获取console中的<strong>item</strong>，并获取对应的<strong>content</strong>进行解析。而解析也仅仅是采用了<code>UTF8StringEncoding</code>直接进行转换。</p>
+<h4 id="补充知识：NSRegularExpression和正则表达式">补充知识：NSRegularExpression和正则表达式</h4><p>在本文的实现当中，作者对于中文字符的Unicode的表达方式<strong>\u4582</strong>这样的格式，采用了正则表达式进行了提取。在传统的Unicode的格式中，<strong>单独一个<code>\</code></strong>表示为转义字符，不能直接表达一般字符。所以，在正则表达式中，我们需要采用<strong><code>\\</code></strong>来表示一个<code>\</code>。同时，对于4582这样的字符，我们当然可以认为其模式为四个连续的字符，所以我们可以采用<code>\w{4}</code>。（<strong>切记，不能采用<code>\W</code></strong>。大写的<code>\W</code>表征的是非字符。）然后<code>{4}</code>表示前面的模式重复<strong>4次</strong>，即<code>\w</code>连续出现4次。</p>
+<p>好了，综上所述，我们不难写出针对中文Unicode提取的正则表达式：<strong><code>\\u\w{4}</code></strong></p>
+<p>但是，在作者的代码中，作者的正则表达式却是：<code>\\\\[uU]\\w{4}</code>，那这个是怎么回事呢？<br>原因在于， 对于在字符串形式出现的正则表达式，首先解析的是字符串规则，然后才是正则表达式引擎的解析。</p>
+<p>所以，<code>\\\\</code>被字符串解析成<code>\\</code>，然后正则解析成<code>\</code>。然后对于<code>[uU]</code>，是一个组，表示或者u或者U，因为有些输出的文本里，对于U的大小写并没有规定，所以两种情况都需要考虑。</p>
+<p>后面的就不再赘述了，原理一致。大家有兴趣的自己深入学习下吧。</p>
+
+      
+    </div>
+    <footer class="article-footer">
+      <a data-url="http://satanwoo.github.io/2016/03/14/DXXcodeConsoleUnicodePlugin/" data-id="cilqrsv2e001ml5i1uoin7nm5" class="article-share-link">Share</a>
+      
+      
+  <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
+
+    </footer>
+  </div>
+  
+</article>
+
+
+  
     <article id="post-check-manifest" class="article article-type-post" itemscope itemprop="blogPost">
   <div class="article-meta">
     <a href="/2016/02/27/check-manifest/" class="article-date">
@@ -127,7 +447,7 @@ fi
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/02/27/check-manifest/" data-id="cil4zlpze000awvi1t9eszuop" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/02/27/check-manifest/" data-id="cilqrsv0v000al5i1d0haqamu" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/shell/">shell</a></li></ul>
@@ -237,7 +557,7 @@ fi
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/02/27/pod-install-plugin/" data-id="cil4zlpz50003wvi1z5ol4wi2" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/02/27/pod-install-plugin/" data-id="cilqrsv0e0003l5i16fqjw9x4" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
@@ -493,7 +813,7 @@ fi
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/02/27/FBKVOController/" data-id="cil4zlq0n001dwvi1225ko8t5" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/02/27/FBKVOController/" data-id="cilqrsv27001il5i1gua1ne0e" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
@@ -607,7 +927,7 @@ selectedTitleLabelsContentView<span class="class">.layer</span><span class="clas
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/02/05/DGRunKeeperSwitch/" data-id="cil4zlq0s001hwvi1rfu2ub50" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/02/05/DGRunKeeperSwitch/" data-id="cilqrsv2i001ol5i1zej4bkiv" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
@@ -863,7 +1183,7 @@ NSLayoutConstraint *constraint = [NSLayoutConstraint <span class="string">constr
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/02/05/PureLayout/" data-id="cil4zlq03000twvi1tyizhcu6" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/02/05/PureLayout/" data-id="cilqrsv1p000yl5i1zex8ys5u" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
@@ -1189,7 +1509,7 @@ extension Task {
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/12/30/Refactor-Mega-ViewController/" data-id="cil4zlq01000rwvi1yrg7d2f8" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/12/30/Refactor-Mega-ViewController/" data-id="cilqrsv1m000wl5i1sa16xzrc" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
@@ -1340,313 +1660,10 @@ extension Task {
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/12/20/Learn-R-2/" data-id="cil4zlq09000xwvi171vk1jz2" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/12/20/Learn-R-2/" data-id="cilqrsv1t0012l5i1lodkt3uh" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/R/">R</a></li></ul>
-
-    </footer>
-  </div>
-  
-</article>
-
-
-  
-    <article id="post-Regression-Model-1" class="article article-type-post" itemscope itemprop="blogPost">
-  <div class="article-meta">
-    <a href="/2015/12/15/Regression-Model-1/" class="article-date">
-  <time datetime="2015-12-14T16:31:35.000Z" itemprop="datePublished">2015-12-15</time>
-</a>
-    
-  </div>
-  <div class="article-inner">
-    
-    
-      <header class="article-header">
-        
-  
-    <h1 itemprop="name">
-      <a class="article-title" href="/2015/12/15/Regression-Model-1/">Regression Model</a>
-    </h1>
-  
-
-      </header>
-    
-    <div class="article-entry" itemprop="articleBody">
-      
-        <h3 id="Regression_Model是什么">Regression Model是什么</h3><p>Regression Model是一种基本的数据分析模型，通俗点来说就是我们在中学时期学习的截距式直线方程。通过斜率和截距来定义一种诸如 <code>y = kx + b</code>的方程。一旦有了这样的方程，我们就可以通过我们现有的数据集，比如一堆<code>x</code> 来预测y。</p>
-<p>今天就让我们来研究研究这一种数据模型</p>
-<h4 id="Centering">Centering</h4><p>Centering是一种常用的数学用语，意为 <em>集中化</em>。什么意思呢？就是说如果我有从x1, x2 … xn 这n个数据构成的数据集{x}，我可以求出他们的平均值为<em>XM</em>。我可以构建 <code>bi = xi - XM</code> 这样一个数列，这样的话，{b}这个数据集的平均值就为0，这一个过程就叫Centering。</p>
-<h4 id="Variances（方差）">Variances（方差）</h4><p>方式的定义是:</p>
-<blockquote>
-<p>求出一个数据集的平均数XM, 对于{x} 中的每一个数，求其与平均数差的平方。再这这些差的平房加在一起求和，最后用和除以n - 1，这里的n是数据集中数据的个数。</p>
-</blockquote>
-<p>而标准差就是方差的平方根。 <strong>通过构建<code>bi = xi / 标准差s</code> 可以得到{b}数据集，它的标准差为1，这一过程也叫做Scaling</strong></p>
-<h4 id="Normalization">Normalization</h4><p>将数据集先Centering再Scaling的过程叫做Normalization。</p>
-<h4 id="Covariance（协方差）">Covariance（协方差）</h4><p>协方差的定义其实和方差类似，只不过针对的是一对数据集{x, y}。</p>
-<blockquote>
-<p>求出数据集{x}的平均数M，求出数据集{y}的平均数N，对于每一个i，求和<code>(xi - M) * (yi - N)</code>，最后和除以<code>n - 1</code>，其中n是数据集中数据的个数。</p>
-</blockquote>
-<h4 id="Corrleation（两个数据集的关联）">Corrleation（两个数据集的关联）</h4><p>Correlation就是将两个数据集的协方差除以{x}的标准差和{y}的标准差的乘积。<br><strong>Correlation的值域从－1到1，越接近两端表示两个数据集关联度越大，越靠近0表示越小。</strong></p>
-<h3 id="重点">重点</h3><p>对于 y = kx + b 来说，可以通过如下公式求解方程：</p>
-<p><code>k = cor(y, x) * s(y) / s(x)</code>  以及 <code>b = mean(y) - k * mean(x)</code></p>
-
-      
-    </div>
-    <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/12/15/Regression-Model-1/" data-id="cil4zlpzx000owvi1azilhupb" class="article-share-link">Share</a>
-      
-      
-  <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Math/">Math</a></li></ul>
-
-    </footer>
-  </div>
-  
-</article>
-
-
-  
-    <article id="post-Learn-R-1" class="article article-type-post" itemscope itemprop="blogPost">
-  <div class="article-meta">
-    <a href="/2015/12/13/Learn-R-1/" class="article-date">
-  <time datetime="2015-12-13T07:03:36.000Z" itemprop="datePublished">2015-12-13</time>
-</a>
-    
-  </div>
-  <div class="article-inner">
-    
-    
-      <header class="article-header">
-        
-  
-    <h1 itemprop="name">
-      <a class="article-title" href="/2015/12/13/Learn-R-1/">一步步学R（1）</a>
-    </h1>
-  
-
-      </header>
-    
-    <div class="article-entry" itemprop="articleBody">
-      
-        <h3 id="系列连载">系列连载</h3><p><a href="http://satanwoo.github.io/2015/12/13/Learn-R-1/">一步步学R（1）</a><br><a href="http://satanwoo.github.io/2015/12/20/Learn-R-2/">一步步学R（2）</a></p>
-<p>嘿嘿，作为一名天才，当然要掌握一定的数据分析能力啦，所以从今天起，我们来一步步学习R这门有意思的语言。</p>
-<p>这一系列的文章的开发环境都是基于Mac的。</p>
-<h3 id="安装">安装</h3><ol>
-<li>首先你要安装R语言的环境 <a href="https://cran.r-project.org/" target="_blank" rel="external">安装点我</a></li>
-<li>可选：安装RStudio（类似于Matlab），安装之前必须已经安装了R <a href="https://www.rstudio.com/" target="_blank" rel="external">安装点我</a></li>
-</ol>
-<h3 id="基础知识">基础知识</h3><h4 id="R里面的基础类型">R里面的基础类型</h4><ul>
-<li>Character，如 “a”，”haha”</li>
-<li>Number（实数），如 5， 5.5</li>
-<li><p>Integer（整数），如 5，6</p>
-<p>  <strong>要注意的是，默认情况，所有的整数类型都为实数，如果要特定为整数，需要加L，如5L</strong></p>
-</li>
-<li><p>Logical，如TRUE, FALSE</p>
-<p>  <strong>FALSE = 0，TRUE为一切非0数，可以简写为F/T</strong></p>
-</li>
-<li><p>Complex（复数），如 5 + 7i</p>
-</li>
-</ul>
-<h4 id="操作">操作</h4><p><code>x &lt;- 5</code> 表示将5赋值给x<br><code>x</code>      表示输出x，效果等同于<code>print(x)</code></p>
-<h4 id="向量">向量</h4><p>虽然向量不是一个基本类型，但是却是R语言中非常关键的一种数据结构</p>
-<p><code>x &lt;- 5</code> 这句语句虽然表面上看起来是定义了一个<strong>Number</strong>类型的x，值为5。但是实质上却是构建了一个大小为1的向量，通过<code>x</code>语句我们可以得到一下结果：</p>
-<pre><code>&gt; x
-[<span class="number">1</span>] <span class="number">5</span>
-</code></pre><p>所以<code>x</code> 等同于语句 <code>x[1]</code>，会输出5。</p>
-<p><strong>注意：R语言里面的数据索引从1开始</strong></p>
-<p>除了默认构造的向量以外，我们可以通过<code>vector(class, size)</code>来构建指定类型和大小的向量，如：</p>
-<pre><code>&gt; k &lt;- <span class="function"><span class="title">vector</span><span class="params">(<span class="string">'logical'</span>, <span class="number">5</span>L)</span></span>
-&gt; z &lt;- <span class="function"><span class="title">vector</span><span class="params">(<span class="string">"complex"</span>, <span class="number">7</span>)</span></span>
-</code></pre><p>以上两句我们分别构建了一个名为k的logical向量，大小5以及一个复数向量，大小为7。</p>
-<p><strong>注意：在R的向量里，同一个向量只能包含相同类型的对象，如果包含了不相同，会进行隐式转换，如果不能转换就会报错。</strong></p>
-<p>如：</p>
-<pre><code>&gt; k &lt;- <span class="function"><span class="title">c</span><span class="params">(T, <span class="string">"a"</span>)</span></span>
-&gt; k
-[<span class="number">1</span>] <span class="string">"TRUE"</span> <span class="string">"a"</span> 
-</code></pre><p>当然也可以强制转换：</p>
-<p><code>as.character</code>， <code>as.logical</code>， <code>as.numeric</code>，<code>as.complex</code>，<code>as.integer</code></p>
-<h4 id="list">list</h4><p>list是一种可以同时保存多个类型对象的数据结构，通过<code>list(a, b, c, d)</code>进行构建。</p>
-<h4 id="Matrix">Matrix</h4><p>matrix就是多维向量，通过函数<code>matrix(data, nrows, ncols)</code> 构建，默认是按列排列数据，可以通过更改byrow=T来按照行来构建。</p>
-<h4 id="Factor">Factor</h4><p>简单理解，就是分类定义的数组，比如，<code>x &lt;- factor(c(&#39;yes&#39;, &#39;no&#39;, &#39;yes&#39;, &#39;no&#39;, &#39;yes&#39;))</code>  ，虽然看起来构建了一个和Character类型的向量差不多，但是实质上，我们可以通过</p>
-<pre><code>&gt; x &lt;- <span class="function"><span class="title">factor</span><span class="params">(c(<span class="string">'yes'</span>, <span class="string">'no'</span>, <span class="string">'yes'</span>)</span></span>)
-&gt; <span class="function"><span class="title">levels</span><span class="params">(x)</span></span>
-[<span class="number">1</span>] <span class="string">"no"</span>  <span class="string">"yes"</span>
-</code></pre><p>这个向量代表了几种分类。</p>
-<h4 id="Missing_Values">Missing Values</h4><p>Na和NaN, <strong>NaN仅代表数值计算的不存在，而Na是代表一切的不存在，即Na包含NaN</strong><br>我们可以通过<code>is.Na</code>和<code>is.NaN</code>来进行判断。</p>
-<h4 id="Data_Frames">Data Frames</h4><p>Data Frames简单理解就是一个表格，但是与Matrix不同的是，她可以包含不同类型的data，也就是说，<strong>DataFrames的每一列都是一个list</strong>。</p>
-<pre><code>&gt; k &lt;- data.<span class="function"><span class="title">frame</span><span class="params">(foo = <span class="number">1</span>:<span class="number">3</span>, w = c(T, F, F)</span></span>, row<span class="class">.names</span> = <span class="function"><span class="title">c</span><span class="params">(<span class="string">'1'</span>, <span class="string">'a'</span>, <span class="string">'k'</span>)</span></span>)
-&gt; k
-  foo     w
-<span class="number">1</span>   <span class="number">1</span>  TRUE
-<span class="tag">a</span>   <span class="number">2</span> FALSE
-k   <span class="number">3</span> FALSE
-</code></pre><p><strong>需要注意的是，每一个list的长度，都必须完全一样</strong>。</p>
-<h4 id="Names（别名）">Names（别名）</h4><p>对于一个向量、list或者matrix等等，我们都可以为里面的元素加上别名，如:</p>
-<pre><code>&gt; x &lt;- <span class="number">1</span>:<span class="number">3</span>
-&gt; <span class="function"><span class="title">names</span><span class="params">(x)</span></span> &lt;- <span class="function"><span class="title">c</span><span class="params">(T, F, <span class="string">"ha"</span>)</span></span>
-&gt; x
- TRUE FALSE    ha 
-    <span class="number">1</span>     <span class="number">2</span>     <span class="number">3</span> 
-</code></pre><p>其中，这些别名都会以字符串的形式存在，因此，你可以通过x[“TRUE”]来访问元素1。</p>
-<hr>
-<h3 id="进阶的R_哈哈哈">进阶的R 哈哈哈</h3><h4 id="Partical_Matching">Partical Matching</h4><p>R里面有个很酷的特性叫做Partial Matching。比如你定义了如下的list：<code>x &lt;- list(caonikljslkdfj = 5)</code>，每次都要输入<code>caonikljslkdfj</code>势必很麻烦，因此你可以使用<strong>$</strong>来获取，如<code>x$c</code> 即可以得到5了。</p>
-<h4 id="Subset">Subset</h4><p>在R里面，获取数据或者构建数据简直就是a piece of cake。(哈哈哈，英语好就是屌啊)</p>
-<p>比如有这样一个向量<code>x &lt;- c(1, 2, 3, 4, 5)</code>，</p>
-<p>你可以<code>x[1]</code> 来获取元素1，也可以通过<code>x[1:3]</code>来获取元素1到元素3。同样，你也可以通过<code>x[x &gt; 2]</code> 来获取元素中值比2大的元素。</p>
-<p>你也可以通过logical来构建另外的向量，如：</p>
-<pre><code>&gt; u &lt;- x &gt; <span class="number">2</span>
-&gt; u
-[<span class="number">1</span>] <span class="literal">FALSE</span> <span class="literal">FALSE</span>  <span class="literal">TRUE</span>  <span class="literal">TRUE</span>  <span class="literal">TRUE</span>
-</code></pre><p>而对于Matrix类型来说，<code>c &lt;- matrix(1:3, nrows = 3, ncols = 1)</code>，你可以使用<code>c[1, ]</code>来获取第一行所有列的数据，或者<code>c[,1]</code>来获取第一列所有行的数据。</p>
-<h4 id="[]_vs_[[]]_vs_$">[] vs [[]] vs $</h4><p>首先，这三个符号都可以获取元素，但是区别在于：</p>
-<ul>
-<li>[]返回的是和变量本身类型相同的东西，如果对list使用[]，那么返回的就是list，如果对向量使用，返回的就是向量，无关取出的元素本身的类型。</li>
-<li>[]可以获取多个元素，而[[]]和$不行。</li>
-<li>$可以模糊匹配（Partial Matching），而[[]]不行，如果要启用模糊匹配，得使用[[name, exact = F]]</li>
-<li>$不可以使用计算值，[[]]可以</li>
-</ul>
-<p>是不是很拗口？让我们来看几个例子，在看例子之前强调一点，</p>
-<p><strong>元素并非特指一个，而是一个基本的数据结构，比如对于向量 <code>x &lt;- 1:5</code>来说，里面的元素1到元素5分别都是一个元素。而对于<code>c&lt;- list(foo = 1:3, bar = 0.5)</code>来说，foo和bar都分别是一个元素，尽管foo本身仍然是个向量。</strong></p>
-<h5 id="例子">例子</h5><p>对于<code>c &lt;- list(foo = 1:3, bar = 0.6)</code>定义的一个list，我们分别使用：</p>
-<pre><code>&gt; c[<span class="string">"foo"</span>]
-$foo
-[<span class="number">1</span>] <span class="number">1</span> <span class="number">2</span> <span class="number">3</span>
-
-&gt; c[[<span class="string">"foo"</span>]]
-[<span class="number">1</span>] <span class="number">1</span> <span class="number">2</span> <span class="number">3</span>
-&gt; c$foo
-[<span class="number">1</span>] <span class="number">1</span> <span class="number">2</span> <span class="number">3</span>
-</code></pre><p>可以看到，通过［］取出的foo元素仍然是list，而[[]]和$取出的都是向量元素本身了。</p>
-<p>再比如计算变量的差别：</p>
-<pre><code>&gt; name &lt;- <span class="string">"foo"</span>
-&gt; c[[name]]
-[<span class="number">1</span>] <span class="number">1</span> <span class="number">2</span> <span class="number">3</span>
-&gt; c$name
-<span class="literal">NULL</span>
-</code></pre><p>可以看到，[[]]可以使用计算变量，而$不可以。<strong>这点其实和JavaScript里面的dot和[]操作符很类似的</strong></p>
-<p>模糊匹配差别：</p>
-<pre><code>&gt; c$f
-[<span class="number">1</span>] <span class="number">1</span> <span class="number">2</span> <span class="number">3</span>
-&gt; c[[<span class="string">"f"</span>]]
-<span class="literal">NULL</span>
-&gt; c[[<span class="string">"f"</span>, exact = F]]
-[<span class="number">1</span>] <span class="number">1</span> <span class="number">2</span> <span class="number">3</span>
-</code></pre><h4 id="向量化操作">向量化操作</h4><p><strong>R里面的所有计算操作都是并行的</strong>。</p>
-<p>因此，如果要计算两个Matrix的乘积，需要使用<code>%*%</code>，否则如果直接使用<code>*</code>就是对应位置的元素相乘而已。</p>
-
-      
-    </div>
-    <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/12/13/Learn-R-1/" data-id="cil4zlq0b0010wvi1g3r7qvzy" class="article-share-link">Share</a>
-      
-      
-  <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/R/">R</a></li></ul>
-
-    </footer>
-  </div>
-  
-</article>
-
-
-  
-    <article id="post-LLDB-1" class="article article-type-post" itemscope itemprop="blogPost">
-  <div class="article-meta">
-    <a href="/2015/12/11/LLDB-1/" class="article-date">
-  <time datetime="2015-12-11T08:50:04.000Z" itemprop="datePublished">2015-12-11</time>
-</a>
-    
-  </div>
-  <div class="article-inner">
-    
-    
-      <header class="article-header">
-        
-  
-    <h1 itemprop="name">
-      <a class="article-title" href="/2015/12/11/LLDB-1/">浅入浅出LLDB（1）</a>
-    </h1>
-  
-
-      </header>
-    
-    <div class="article-entry" itemprop="articleBody">
-      
-        <p>这周开始好好钻研一下LLDB相关的知识，这是一系列的文章。有些初级知识可能大家都有所涉猎，嘿嘿，懂得自然懂，看我的博客，什么时候会收获小。</p>
-<h3 id="基础语法">基础语法</h3><p>1.<code>help</code> 有啥不会，就直接输入help，你会得到如下的一系列信息，</p>
-<pre><code>command           -- A <span class="keyword">set</span> <span class="keyword">of</span> commands <span class="keyword">for</span> managing <span class="keyword">or</span> customizing the
-                   debugger commands.
-disassemble       -- Disassemble bytes <span class="keyword">in</span> the current <span class="keyword">function</span>, <span class="keyword">or</span> elsewhere
-                   <span class="keyword">in</span> the executable program <span class="keyword">as</span> specified <span class="keyword">by</span> the user.
-</code></pre><p>2.<code>print</code> 输出变量值<br>比如，对于如下的程序语句 <code>let haha = 5;</code> 你只要在LLDB里面输入 <code>print haha</code> 就可以得到如下输出结果。</p>
-<pre><code>(lldb) p haha
-(Int) <span class="variable">$R0</span> = <span class="number">5</span>
-</code></pre><p><strong>请注意</strong>，在<a href="http://objccn.io/issue-19-2/" target="_blank" rel="external">与调试器共舞- LLDB 的华尔兹</a>一文中曾经提出会输出类似于 <code>$0 = 5</code>，并指出<strong>$0是当前的输出值</strong>。这个说话其实是不严谨的，正确的说法是，应该是<strong>当前的haha的值5存在了R0寄存器里。</strong></p>
-<p>比如，当我们构建如下的程序语句时，</p>
-<pre><code><span class="keyword">let</span> haha = <span class="number">5</span>;
-<span class="keyword">let</span> <span class="keyword">object</span> = <span class="string">"jkjksdjf"</span>;
-</code></pre><p>我们在分别<code>print haha</code>以及    <code>print object</code>就会分别得到<code>(Int) $R0 = 5</code>和<code>(String) $R1 = &quot;jkjksdjf&quot;</code></p>
-<p>这说明haha的值和object的值分别以int型和string型存在了R0和R1寄存器之中。</p>
-<p><strong>当然，图快速的话</strong>，可以像我上面一样将print简写成p。</p>
-<p>3.<code>po</code><br>输出变量值  </p>
-<p>哎，有人奇怪了，po也是输出变量值，那和p有啥区别啊？本质上没啥区别，如果真要说，就是<strong>po = e -O –</strong>，具体我们后续再说啦。</p>
-<p>4.<code>breakpoubt l</code> 输出所有的断点，可以得到如下的结果</p>
-<pre><code>Current breakpoints:
-<span class="number">1</span>: file = <span class="string">'xxx/ViewController.swift'</span>, line = <span class="number">19</span>, locations = <span class="number">1</span>, resolved = <span class="number">1</span>, hit count = <span class="number">1</span>
-
-<span class="number">1.1</span>: where = xxx<span class="class">.ViewController</span><span class="class">.viewDidLoad</span> (xxx.ViewController)() -&gt; () + <span class="number">131</span> at ViewController<span class="class">.swift</span>:<span class="number">19</span>, <span class="tag">address</span> = <span class="number">0</span>x0000000108d0a443, resolved, hit count = <span class="number">1</span> 
-</code></pre><p>其中 <strong>1: file</strong>的这个1就是ID号。<br>那这里的1.1是什么鬼？<strong>嘿嘿，当里使用Symbolic Breakpoint的时候，你一个断点很有可能截获了多个地方，比如AViewController和BViewController的viewDidLoad都被加上了断点，这个时候就需要靠诸如1.1和1.2之类的细分ID来进行区别了。</strong></p>
-<p>当然，有人会问，输出这个断点有什么用啊。嘿嘿，当你使用<strong>Xcode Symbolic Breakpoint</strong>的时候，你就会发现究竟在多少个地方下了断点了。</p>
-<p><strong>同样的</strong>，你可以将breakpoint简写成br。</p>
-<p>5.<code>br delete ID</code> 这里的ID就是之前的断点的ID号<br>通过这个命令，可以删除ID对应的断点</p>
-<p>6.<code>br e ID</code> 启用一个ID号对应的断点</p>
-<p>7.<code>br di ID</code> 禁用一个ID号对应的断点</p>
-<p>8.<code>b xxx.swift:lineY</code> 在xxx文件的第lineY行设置一个断点<br>如 <code>b ViewController.swift:10</code> 就是在ViewController的第10号下了一个断点。</p>
-<p><strong>需要注意的是，</strong>通过b命令设置的断点，无法直观的在Xcode界面上显示出来，而<code>br delete</code>删除一个断点可以直接在Xcode上看出效果。</p>
-<p>9.<code>br set -n functionName</code> 对functionName设置Symbolic Breakpoint<br>如<code>br set -n viewDidLoad</code> 就是对所有的viewDidLoad设置了Symboloc Breakpoint</p>
-<p>10.<code>br mod -C &quot;Condition&quot; ID</code> 对ID号对应的breakpoint添加条件触发<br>假设我们有下面这样的一段代码</p>
-<pre><code><span class="number">1.</span> <span class="comment">//ViewController.swift</span>
-<span class="number">2.</span> <span class="keyword">for</span> var value in money {
-<span class="number">3.</span>     totalValue += value
-<span class="number">4.</span> }
-</code></pre><p>我们首先先使用<code>b ViewController.swift:3</code>设置一个断点，然后使用<code>br l</code>查询到对应的ID为3。<br>然后我们使用<code>br mod -C &quot;totalValue &gt; 50&quot; 3</code>对这个断点设置条件触发，条件为<strong>当totalValue 大于50时候才触发</strong>。</p>
-<p>当然，可能有些人会问，如果我不想删除断点，只是想移除条件触发怎么办？很简单，只要输入<code>br mod -C &quot;&quot; ID</code>，将其中的Condition部分设置为空即可。</p>
-<p>11.<code>continue</code> 继续运行程序<br>12.<code>n</code>        step over单步调试<br>13.<code>s</code>        step in进行函数<br>14.<code>finish</code>   step out退出函数</p>
-<h3 id="大杀器">大杀器</h3><p>上面的命令是不是很多，一个个敲实在是太麻烦，那如果我想对一个断点执行多条语句怎么办？<br>嘿嘿，大杀器来了。</p>
-<p><code>br com add ID</code> 对ID对应的断点进入交互式指定。如：</p>
-<pre><code><span class="keyword">br</span> <span class="keyword">com</span> <span class="built_in">add</span> <span class="number">2</span>
-&gt; bt
-&gt; <span class="keyword">continue</span>
-&gt; DONE
-</code></pre><p> 上面的语句指的是，对2号断点进行交互式指定，当这个断点触发的时候，首先执行<code>bt</code>(具体bt命令的意思我们后续再说，粗略理解就是backtrace输出调用栈，可以简单看下面的例子)，然后执行<code>continue</code>，最后通过关键字<strong>Done</strong>退出指定，这里的Done类似于shell里面的exit。</p>
-<pre><code>frame <span class="preprocessor">#<span class="number">0</span>: xxx`xxx.ViewController.viewDidLoad (self=<span class="number">0x00007faf52439c20</span>)() -&gt; () + <span class="number">470</span> at ViewController.swift:<span class="number">27</span></span>
-frame <span class="preprocessor">#<span class="number">1</span>: xxx`@objc xxx.ViewController.viewDidLoad (xxx.ViewController)() -&gt; () + <span class="number">34</span> at ViewController.swift:<span class="number">0</span></span>
-frame <span class="preprocessor">#<span class="number">2</span>: UIKit`-[UIViewController loadViewIfRequired] + <span class="number">1198</span></span>
-frame <span class="preprocessor">#<span class="number">3</span>: UIKit`-[UIViewController view] + <span class="number">27</span></span>
-frame <span class="preprocessor">#<span class="number">4</span>: UIKit`-[UIWindow addRootViewControllerViewIfPossible] + <span class="number">61</span></span>
-frame <span class="preprocessor">#<span class="number">5</span>: UIKit`-[UIWindow _setHidden:forced:] + <span class="number">282</span></span>
-frame <span class="preprocessor">#<span class="number">6</span>: UIKit`-[UIWindow makeKeyAndVisible] + <span class="number">42</span></span>
-frame <span class="preprocessor">#<span class="number">7</span>: UIKit`-[UIApplication _callInitializationDelegatesForMainScene:transitionContext:] + <span class="number">4131</span></span>
-frame <span class="preprocessor">#<span class="number">8</span>: UIKit`-[UIApplication _runWithMainScene:transitionContext:completion:] + <span class="number">1760</span></span>
-frame <span class="preprocessor">#<span class="number">9</span>: UIKit`-[UIApplication workspaceDidEndTransaction:] + <span class="number">188</span></span>
-frame <span class="preprocessor">#<span class="number">10</span>: FrontBoardServices`-[FBSSerialQueue _performNext] + <span class="number">192</span></span>
-frame <span class="preprocessor">#<span class="number">11</span>: FrontBoardServices`-[FBSSerialQueue _performNextFromRunLoopSource] + <span class="number">45</span></span>
-frame <span class="preprocessor">#<span class="number">12</span>: CoreFoundation`__CFRUNLOOP_IS_CALLING_OUT_TO_A_SOURCE0_PERFORM_FUNCTION__ + <span class="number">17</span></span>
-frame <span class="preprocessor">#<span class="number">13</span>: CoreFoundation`__CFRunLoopDoSources0 + <span class="number">556</span></span>
-frame <span class="preprocessor">#<span class="number">14</span>: CoreFoundation`__CFRunLoopRun + <span class="number">867</span></span>
-frame <span class="preprocessor">#<span class="number">15</span>: CoreFoundation`CFRunLoopRunSpecific + <span class="number">488</span></span>
-frame <span class="preprocessor">#<span class="number">16</span>: UIKit`-[UIApplication _run] + <span class="number">402</span></span>
-frame <span class="preprocessor">#<span class="number">17</span>: UIKit`UIApplicationMain + <span class="number">171</span></span>
-frame <span class="preprocessor">#<span class="number">18</span>: xxx`main + <span class="number">109</span> at AppDelegate.swift:<span class="number">12</span></span>
-frame <span class="preprocessor">#<span class="number">19</span>: libdyld.dylib`start + <span class="number">1</span></span>
-frame <span class="preprocessor">#<span class="number">20</span>: libdyld.dylib`start + <span class="number">1</span></span>
-</code></pre>
-      
-    </div>
-    <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/12/11/LLDB-1/" data-id="cil4zlq0f0015wvi1wcfuo418" class="article-share-link">Share</a>
-      
-      
-  <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
 
     </footer>
   </div>
@@ -1670,7 +1687,7 @@ frame <span class="preprocessor">#<span class="number">20</span>: libdyld.dylib`
   <div class="widget-wrap">
     <h3 class="widget-title">Tags</h3>
     <div class="widget">
-      <ul class="tag-list"><li class="tag-list-item"><a class="tag-list-link" href="/tags/Android/">Android</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/JavaScript/">JavaScript</a><span class="tag-list-count">2</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Math/">Math</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/R/">R</a><span class="tag-list-count">2</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Swift/">Swift</a><span class="tag-list-count">4</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/iOS/">iOS</a><span class="tag-list-count">13</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/shell/">shell</a><span class="tag-list-count">1</span></li></ul>
+      <ul class="tag-list"><li class="tag-list-item"><a class="tag-list-link" href="/tags/Android/">Android</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/JavaScript/">JavaScript</a><span class="tag-list-count">2</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Math/">Math</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/R/">R</a><span class="tag-list-count">2</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Reverse-Engineering/">Reverse Engineering</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Swift/">Swift</a><span class="tag-list-count">5</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/iOS/">iOS</a><span class="tag-list-count">14</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/shell/">shell</a><span class="tag-list-count">1</span></li></ul>
     </div>
   </div>
 
@@ -1679,7 +1696,7 @@ frame <span class="preprocessor">#<span class="number">20</span>: libdyld.dylib`
   <div class="widget-wrap">
     <h3 class="widget-title">Tag Cloud</h3>
     <div class="widget tagcloud">
-      <a href="/tags/Android/" style="font-size: 10px;">Android</a> <a href="/tags/JavaScript/" style="font-size: 13.33px;">JavaScript</a> <a href="/tags/Math/" style="font-size: 10px;">Math</a> <a href="/tags/R/" style="font-size: 13.33px;">R</a> <a href="/tags/Swift/" style="font-size: 16.67px;">Swift</a> <a href="/tags/iOS/" style="font-size: 20px;">iOS</a> <a href="/tags/shell/" style="font-size: 10px;">shell</a>
+      <a href="/tags/Android/" style="font-size: 10px;">Android</a> <a href="/tags/JavaScript/" style="font-size: 13.33px;">JavaScript</a> <a href="/tags/Math/" style="font-size: 10px;">Math</a> <a href="/tags/R/" style="font-size: 13.33px;">R</a> <a href="/tags/Reverse-Engineering/" style="font-size: 10px;">Reverse Engineering</a> <a href="/tags/Swift/" style="font-size: 16.67px;">Swift</a> <a href="/tags/iOS/" style="font-size: 20px;">iOS</a> <a href="/tags/shell/" style="font-size: 10px;">shell</a>
     </div>
   </div>
 
@@ -1688,7 +1705,7 @@ frame <span class="preprocessor">#<span class="number">20</span>: libdyld.dylib`
   <div class="widget-wrap">
     <h3 class="widget-title">Archives</h3>
     <div class="widget">
-      <ul class="archive-list"><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/02/">February 2016</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/12/">December 2015</a><span class="archive-list-count">6</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/11/">November 2015</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/10/">October 2015</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/09/">September 2015</a><span class="archive-list-count">4</span></li></ul>
+      <ul class="archive-list"><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/03/">March 2016</a><span class="archive-list-count">3</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/02/">February 2016</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/12/">December 2015</a><span class="archive-list-count">6</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/11/">November 2015</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/10/">October 2015</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/09/">September 2015</a><span class="archive-list-count">4</span></li></ul>
     </div>
   </div>
 
@@ -1700,23 +1717,23 @@ frame <span class="preprocessor">#<span class="number">20</span>: libdyld.dylib`
       <ul>
         
           <li>
+            <a href="/2016/03/14/RxSwift/">RxSwift</a>
+          </li>
+        
+          <li>
+            <a href="/2016/03/14/SizeUp/">SizeUp</a>
+          </li>
+        
+          <li>
+            <a href="/2016/03/14/DXXcodeConsoleUnicodePlugin/">DXXcodeConsoleUnicodePlugin源码解析</a>
+          </li>
+        
+          <li>
             <a href="/2016/02/27/check-manifest/">Check Pods Manifest.lock</a>
           </li>
         
           <li>
             <a href="/2016/02/27/pod-install-plugin/">开发一个简单的Pod Install 插件</a>
-          </li>
-        
-          <li>
-            <a href="/2016/02/27/FBKVOController/">FBKVOController 源码解析</a>
-          </li>
-        
-          <li>
-            <a href="/2016/02/05/DGRunKeeperSwitch/">DGRunKeeperSwitch 源码解析</a>
-          </li>
-        
-          <li>
-            <a href="/2016/02/05/PureLayout/">PureLayout 源码解析</a>
           </li>
         
       </ul>

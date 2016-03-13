@@ -62,6 +62,309 @@
       <div class="outer">
         <section id="main">
   
+    <article id="post-Regression-Model-1" class="article article-type-post" itemscope itemprop="blogPost">
+  <div class="article-meta">
+    <a href="/2015/12/15/Regression-Model-1/" class="article-date">
+  <time datetime="2015-12-14T16:31:35.000Z" itemprop="datePublished">2015-12-15</time>
+</a>
+    
+  </div>
+  <div class="article-inner">
+    
+    
+      <header class="article-header">
+        
+  
+    <h1 itemprop="name">
+      <a class="article-title" href="/2015/12/15/Regression-Model-1/">Regression Model</a>
+    </h1>
+  
+
+      </header>
+    
+    <div class="article-entry" itemprop="articleBody">
+      
+        <h3 id="Regression_Model是什么">Regression Model是什么</h3><p>Regression Model是一种基本的数据分析模型，通俗点来说就是我们在中学时期学习的截距式直线方程。通过斜率和截距来定义一种诸如 <code>y = kx + b</code>的方程。一旦有了这样的方程，我们就可以通过我们现有的数据集，比如一堆<code>x</code> 来预测y。</p>
+<p>今天就让我们来研究研究这一种数据模型</p>
+<h4 id="Centering">Centering</h4><p>Centering是一种常用的数学用语，意为 <em>集中化</em>。什么意思呢？就是说如果我有从x1, x2 … xn 这n个数据构成的数据集{x}，我可以求出他们的平均值为<em>XM</em>。我可以构建 <code>bi = xi - XM</code> 这样一个数列，这样的话，{b}这个数据集的平均值就为0，这一个过程就叫Centering。</p>
+<h4 id="Variances（方差）">Variances（方差）</h4><p>方式的定义是:</p>
+<blockquote>
+<p>求出一个数据集的平均数XM, 对于{x} 中的每一个数，求其与平均数差的平方。再这这些差的平房加在一起求和，最后用和除以n - 1，这里的n是数据集中数据的个数。</p>
+</blockquote>
+<p>而标准差就是方差的平方根。 <strong>通过构建<code>bi = xi / 标准差s</code> 可以得到{b}数据集，它的标准差为1，这一过程也叫做Scaling</strong></p>
+<h4 id="Normalization">Normalization</h4><p>将数据集先Centering再Scaling的过程叫做Normalization。</p>
+<h4 id="Covariance（协方差）">Covariance（协方差）</h4><p>协方差的定义其实和方差类似，只不过针对的是一对数据集{x, y}。</p>
+<blockquote>
+<p>求出数据集{x}的平均数M，求出数据集{y}的平均数N，对于每一个i，求和<code>(xi - M) * (yi - N)</code>，最后和除以<code>n - 1</code>，其中n是数据集中数据的个数。</p>
+</blockquote>
+<h4 id="Corrleation（两个数据集的关联）">Corrleation（两个数据集的关联）</h4><p>Correlation就是将两个数据集的协方差除以{x}的标准差和{y}的标准差的乘积。<br><strong>Correlation的值域从－1到1，越接近两端表示两个数据集关联度越大，越靠近0表示越小。</strong></p>
+<h3 id="重点">重点</h3><p>对于 y = kx + b 来说，可以通过如下公式求解方程：</p>
+<p><code>k = cor(y, x) * s(y) / s(x)</code>  以及 <code>b = mean(y) - k * mean(x)</code></p>
+
+      
+    </div>
+    <footer class="article-footer">
+      <a data-url="http://satanwoo.github.io/2015/12/15/Regression-Model-1/" data-id="cilqrsv1j000tl5i17womfh12" class="article-share-link">Share</a>
+      
+      
+  <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Math/">Math</a></li></ul>
+
+    </footer>
+  </div>
+  
+</article>
+
+
+  
+    <article id="post-Learn-R-1" class="article article-type-post" itemscope itemprop="blogPost">
+  <div class="article-meta">
+    <a href="/2015/12/13/Learn-R-1/" class="article-date">
+  <time datetime="2015-12-13T07:03:36.000Z" itemprop="datePublished">2015-12-13</time>
+</a>
+    
+  </div>
+  <div class="article-inner">
+    
+    
+      <header class="article-header">
+        
+  
+    <h1 itemprop="name">
+      <a class="article-title" href="/2015/12/13/Learn-R-1/">一步步学R（1）</a>
+    </h1>
+  
+
+      </header>
+    
+    <div class="article-entry" itemprop="articleBody">
+      
+        <h3 id="系列连载">系列连载</h3><p><a href="http://satanwoo.github.io/2015/12/13/Learn-R-1/">一步步学R（1）</a><br><a href="http://satanwoo.github.io/2015/12/20/Learn-R-2/">一步步学R（2）</a></p>
+<p>嘿嘿，作为一名天才，当然要掌握一定的数据分析能力啦，所以从今天起，我们来一步步学习R这门有意思的语言。</p>
+<p>这一系列的文章的开发环境都是基于Mac的。</p>
+<h3 id="安装">安装</h3><ol>
+<li>首先你要安装R语言的环境 <a href="https://cran.r-project.org/" target="_blank" rel="external">安装点我</a></li>
+<li>可选：安装RStudio（类似于Matlab），安装之前必须已经安装了R <a href="https://www.rstudio.com/" target="_blank" rel="external">安装点我</a></li>
+</ol>
+<h3 id="基础知识">基础知识</h3><h4 id="R里面的基础类型">R里面的基础类型</h4><ul>
+<li>Character，如 “a”，”haha”</li>
+<li>Number（实数），如 5， 5.5</li>
+<li><p>Integer（整数），如 5，6</p>
+<p>  <strong>要注意的是，默认情况，所有的整数类型都为实数，如果要特定为整数，需要加L，如5L</strong></p>
+</li>
+<li><p>Logical，如TRUE, FALSE</p>
+<p>  <strong>FALSE = 0，TRUE为一切非0数，可以简写为F/T</strong></p>
+</li>
+<li><p>Complex（复数），如 5 + 7i</p>
+</li>
+</ul>
+<h4 id="操作">操作</h4><p><code>x &lt;- 5</code> 表示将5赋值给x<br><code>x</code>      表示输出x，效果等同于<code>print(x)</code></p>
+<h4 id="向量">向量</h4><p>虽然向量不是一个基本类型，但是却是R语言中非常关键的一种数据结构</p>
+<p><code>x &lt;- 5</code> 这句语句虽然表面上看起来是定义了一个<strong>Number</strong>类型的x，值为5。但是实质上却是构建了一个大小为1的向量，通过<code>x</code>语句我们可以得到一下结果：</p>
+<pre><code>&gt; x
+[<span class="number">1</span>] <span class="number">5</span>
+</code></pre><p>所以<code>x</code> 等同于语句 <code>x[1]</code>，会输出5。</p>
+<p><strong>注意：R语言里面的数据索引从1开始</strong></p>
+<p>除了默认构造的向量以外，我们可以通过<code>vector(class, size)</code>来构建指定类型和大小的向量，如：</p>
+<pre><code>&gt; k &lt;- <span class="function"><span class="title">vector</span><span class="params">(<span class="string">'logical'</span>, <span class="number">5</span>L)</span></span>
+&gt; z &lt;- <span class="function"><span class="title">vector</span><span class="params">(<span class="string">"complex"</span>, <span class="number">7</span>)</span></span>
+</code></pre><p>以上两句我们分别构建了一个名为k的logical向量，大小5以及一个复数向量，大小为7。</p>
+<p><strong>注意：在R的向量里，同一个向量只能包含相同类型的对象，如果包含了不相同，会进行隐式转换，如果不能转换就会报错。</strong></p>
+<p>如：</p>
+<pre><code>&gt; k &lt;- <span class="function"><span class="title">c</span><span class="params">(T, <span class="string">"a"</span>)</span></span>
+&gt; k
+[<span class="number">1</span>] <span class="string">"TRUE"</span> <span class="string">"a"</span> 
+</code></pre><p>当然也可以强制转换：</p>
+<p><code>as.character</code>， <code>as.logical</code>， <code>as.numeric</code>，<code>as.complex</code>，<code>as.integer</code></p>
+<h4 id="list">list</h4><p>list是一种可以同时保存多个类型对象的数据结构，通过<code>list(a, b, c, d)</code>进行构建。</p>
+<h4 id="Matrix">Matrix</h4><p>matrix就是多维向量，通过函数<code>matrix(data, nrows, ncols)</code> 构建，默认是按列排列数据，可以通过更改byrow=T来按照行来构建。</p>
+<h4 id="Factor">Factor</h4><p>简单理解，就是分类定义的数组，比如，<code>x &lt;- factor(c(&#39;yes&#39;, &#39;no&#39;, &#39;yes&#39;, &#39;no&#39;, &#39;yes&#39;))</code>  ，虽然看起来构建了一个和Character类型的向量差不多，但是实质上，我们可以通过</p>
+<pre><code>&gt; x &lt;- <span class="function"><span class="title">factor</span><span class="params">(c(<span class="string">'yes'</span>, <span class="string">'no'</span>, <span class="string">'yes'</span>)</span></span>)
+&gt; <span class="function"><span class="title">levels</span><span class="params">(x)</span></span>
+[<span class="number">1</span>] <span class="string">"no"</span>  <span class="string">"yes"</span>
+</code></pre><p>这个向量代表了几种分类。</p>
+<h4 id="Missing_Values">Missing Values</h4><p>Na和NaN, <strong>NaN仅代表数值计算的不存在，而Na是代表一切的不存在，即Na包含NaN</strong><br>我们可以通过<code>is.Na</code>和<code>is.NaN</code>来进行判断。</p>
+<h4 id="Data_Frames">Data Frames</h4><p>Data Frames简单理解就是一个表格，但是与Matrix不同的是，她可以包含不同类型的data，也就是说，<strong>DataFrames的每一列都是一个list</strong>。</p>
+<pre><code>&gt; k &lt;- data.<span class="function"><span class="title">frame</span><span class="params">(foo = <span class="number">1</span>:<span class="number">3</span>, w = c(T, F, F)</span></span>, row<span class="class">.names</span> = <span class="function"><span class="title">c</span><span class="params">(<span class="string">'1'</span>, <span class="string">'a'</span>, <span class="string">'k'</span>)</span></span>)
+&gt; k
+  foo     w
+<span class="number">1</span>   <span class="number">1</span>  TRUE
+<span class="tag">a</span>   <span class="number">2</span> FALSE
+k   <span class="number">3</span> FALSE
+</code></pre><p><strong>需要注意的是，每一个list的长度，都必须完全一样</strong>。</p>
+<h4 id="Names（别名）">Names（别名）</h4><p>对于一个向量、list或者matrix等等，我们都可以为里面的元素加上别名，如:</p>
+<pre><code>&gt; x &lt;- <span class="number">1</span>:<span class="number">3</span>
+&gt; <span class="function"><span class="title">names</span><span class="params">(x)</span></span> &lt;- <span class="function"><span class="title">c</span><span class="params">(T, F, <span class="string">"ha"</span>)</span></span>
+&gt; x
+ TRUE FALSE    ha 
+    <span class="number">1</span>     <span class="number">2</span>     <span class="number">3</span> 
+</code></pre><p>其中，这些别名都会以字符串的形式存在，因此，你可以通过x[“TRUE”]来访问元素1。</p>
+<hr>
+<h3 id="进阶的R_哈哈哈">进阶的R 哈哈哈</h3><h4 id="Partical_Matching">Partical Matching</h4><p>R里面有个很酷的特性叫做Partial Matching。比如你定义了如下的list：<code>x &lt;- list(caonikljslkdfj = 5)</code>，每次都要输入<code>caonikljslkdfj</code>势必很麻烦，因此你可以使用<strong>$</strong>来获取，如<code>x$c</code> 即可以得到5了。</p>
+<h4 id="Subset">Subset</h4><p>在R里面，获取数据或者构建数据简直就是a piece of cake。(哈哈哈，英语好就是屌啊)</p>
+<p>比如有这样一个向量<code>x &lt;- c(1, 2, 3, 4, 5)</code>，</p>
+<p>你可以<code>x[1]</code> 来获取元素1，也可以通过<code>x[1:3]</code>来获取元素1到元素3。同样，你也可以通过<code>x[x &gt; 2]</code> 来获取元素中值比2大的元素。</p>
+<p>你也可以通过logical来构建另外的向量，如：</p>
+<pre><code>&gt; u &lt;- x &gt; <span class="number">2</span>
+&gt; u
+[<span class="number">1</span>] <span class="literal">FALSE</span> <span class="literal">FALSE</span>  <span class="literal">TRUE</span>  <span class="literal">TRUE</span>  <span class="literal">TRUE</span>
+</code></pre><p>而对于Matrix类型来说，<code>c &lt;- matrix(1:3, nrows = 3, ncols = 1)</code>，你可以使用<code>c[1, ]</code>来获取第一行所有列的数据，或者<code>c[,1]</code>来获取第一列所有行的数据。</p>
+<h4 id="[]_vs_[[]]_vs_$">[] vs [[]] vs $</h4><p>首先，这三个符号都可以获取元素，但是区别在于：</p>
+<ul>
+<li>[]返回的是和变量本身类型相同的东西，如果对list使用[]，那么返回的就是list，如果对向量使用，返回的就是向量，无关取出的元素本身的类型。</li>
+<li>[]可以获取多个元素，而[[]]和$不行。</li>
+<li>$可以模糊匹配（Partial Matching），而[[]]不行，如果要启用模糊匹配，得使用[[name, exact = F]]</li>
+<li>$不可以使用计算值，[[]]可以</li>
+</ul>
+<p>是不是很拗口？让我们来看几个例子，在看例子之前强调一点，</p>
+<p><strong>元素并非特指一个，而是一个基本的数据结构，比如对于向量 <code>x &lt;- 1:5</code>来说，里面的元素1到元素5分别都是一个元素。而对于<code>c&lt;- list(foo = 1:3, bar = 0.5)</code>来说，foo和bar都分别是一个元素，尽管foo本身仍然是个向量。</strong></p>
+<h5 id="例子">例子</h5><p>对于<code>c &lt;- list(foo = 1:3, bar = 0.6)</code>定义的一个list，我们分别使用：</p>
+<pre><code>&gt; c[<span class="string">"foo"</span>]
+$foo
+[<span class="number">1</span>] <span class="number">1</span> <span class="number">2</span> <span class="number">3</span>
+
+&gt; c[[<span class="string">"foo"</span>]]
+[<span class="number">1</span>] <span class="number">1</span> <span class="number">2</span> <span class="number">3</span>
+&gt; c$foo
+[<span class="number">1</span>] <span class="number">1</span> <span class="number">2</span> <span class="number">3</span>
+</code></pre><p>可以看到，通过［］取出的foo元素仍然是list，而[[]]和$取出的都是向量元素本身了。</p>
+<p>再比如计算变量的差别：</p>
+<pre><code>&gt; name &lt;- <span class="string">"foo"</span>
+&gt; c[[name]]
+[<span class="number">1</span>] <span class="number">1</span> <span class="number">2</span> <span class="number">3</span>
+&gt; c$name
+<span class="literal">NULL</span>
+</code></pre><p>可以看到，[[]]可以使用计算变量，而$不可以。<strong>这点其实和JavaScript里面的dot和[]操作符很类似的</strong></p>
+<p>模糊匹配差别：</p>
+<pre><code>&gt; c$f
+[<span class="number">1</span>] <span class="number">1</span> <span class="number">2</span> <span class="number">3</span>
+&gt; c[[<span class="string">"f"</span>]]
+<span class="literal">NULL</span>
+&gt; c[[<span class="string">"f"</span>, exact = F]]
+[<span class="number">1</span>] <span class="number">1</span> <span class="number">2</span> <span class="number">3</span>
+</code></pre><h4 id="向量化操作">向量化操作</h4><p><strong>R里面的所有计算操作都是并行的</strong>。</p>
+<p>因此，如果要计算两个Matrix的乘积，需要使用<code>%*%</code>，否则如果直接使用<code>*</code>就是对应位置的元素相乘而已。</p>
+
+      
+    </div>
+    <footer class="article-footer">
+      <a data-url="http://satanwoo.github.io/2015/12/13/Learn-R-1/" data-id="cilqrsv1v0015l5i10f0k2msp" class="article-share-link">Share</a>
+      
+      
+  <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/R/">R</a></li></ul>
+
+    </footer>
+  </div>
+  
+</article>
+
+
+  
+    <article id="post-LLDB-1" class="article article-type-post" itemscope itemprop="blogPost">
+  <div class="article-meta">
+    <a href="/2015/12/11/LLDB-1/" class="article-date">
+  <time datetime="2015-12-11T08:50:04.000Z" itemprop="datePublished">2015-12-11</time>
+</a>
+    
+  </div>
+  <div class="article-inner">
+    
+    
+      <header class="article-header">
+        
+  
+    <h1 itemprop="name">
+      <a class="article-title" href="/2015/12/11/LLDB-1/">浅入浅出LLDB（1）</a>
+    </h1>
+  
+
+      </header>
+    
+    <div class="article-entry" itemprop="articleBody">
+      
+        <p>这周开始好好钻研一下LLDB相关的知识，这是一系列的文章。有些初级知识可能大家都有所涉猎，嘿嘿，懂得自然懂，看我的博客，什么时候会收获小。</p>
+<h3 id="基础语法">基础语法</h3><p>1.<code>help</code> 有啥不会，就直接输入help，你会得到如下的一系列信息，</p>
+<pre><code>command           -- A <span class="keyword">set</span> <span class="keyword">of</span> commands <span class="keyword">for</span> managing <span class="keyword">or</span> customizing the
+                   debugger commands.
+disassemble       -- Disassemble bytes <span class="keyword">in</span> the current <span class="keyword">function</span>, <span class="keyword">or</span> elsewhere
+                   <span class="keyword">in</span> the executable program <span class="keyword">as</span> specified <span class="keyword">by</span> the user.
+</code></pre><p>2.<code>print</code> 输出变量值<br>比如，对于如下的程序语句 <code>let haha = 5;</code> 你只要在LLDB里面输入 <code>print haha</code> 就可以得到如下输出结果。</p>
+<pre><code>(lldb) p haha
+(Int) <span class="variable">$R0</span> = <span class="number">5</span>
+</code></pre><p><strong>请注意</strong>，在<a href="http://objccn.io/issue-19-2/" target="_blank" rel="external">与调试器共舞- LLDB 的华尔兹</a>一文中曾经提出会输出类似于 <code>$0 = 5</code>，并指出<strong>$0是当前的输出值</strong>。这个说话其实是不严谨的，正确的说法是，应该是<strong>当前的haha的值5存在了R0寄存器里。</strong></p>
+<p>比如，当我们构建如下的程序语句时，</p>
+<pre><code><span class="keyword">let</span> haha = <span class="number">5</span>;
+<span class="keyword">let</span> <span class="keyword">object</span> = <span class="string">"jkjksdjf"</span>;
+</code></pre><p>我们在分别<code>print haha</code>以及    <code>print object</code>就会分别得到<code>(Int) $R0 = 5</code>和<code>(String) $R1 = &quot;jkjksdjf&quot;</code></p>
+<p>这说明haha的值和object的值分别以int型和string型存在了R0和R1寄存器之中。</p>
+<p><strong>当然，图快速的话</strong>，可以像我上面一样将print简写成p。</p>
+<p>3.<code>po</code><br>输出变量值  </p>
+<p>哎，有人奇怪了，po也是输出变量值，那和p有啥区别啊？本质上没啥区别，如果真要说，就是<strong>po = e -O –</strong>，具体我们后续再说啦。</p>
+<p>4.<code>breakpoubt l</code> 输出所有的断点，可以得到如下的结果</p>
+<pre><code>Current breakpoints:
+<span class="number">1</span>: file = <span class="string">'xxx/ViewController.swift'</span>, line = <span class="number">19</span>, locations = <span class="number">1</span>, resolved = <span class="number">1</span>, hit count = <span class="number">1</span>
+
+<span class="number">1.1</span>: where = xxx<span class="class">.ViewController</span><span class="class">.viewDidLoad</span> (xxx.ViewController)() -&gt; () + <span class="number">131</span> at ViewController<span class="class">.swift</span>:<span class="number">19</span>, <span class="tag">address</span> = <span class="number">0</span>x0000000108d0a443, resolved, hit count = <span class="number">1</span> 
+</code></pre><p>其中 <strong>1: file</strong>的这个1就是ID号。<br>那这里的1.1是什么鬼？<strong>嘿嘿，当里使用Symbolic Breakpoint的时候，你一个断点很有可能截获了多个地方，比如AViewController和BViewController的viewDidLoad都被加上了断点，这个时候就需要靠诸如1.1和1.2之类的细分ID来进行区别了。</strong></p>
+<p>当然，有人会问，输出这个断点有什么用啊。嘿嘿，当你使用<strong>Xcode Symbolic Breakpoint</strong>的时候，你就会发现究竟在多少个地方下了断点了。</p>
+<p><strong>同样的</strong>，你可以将breakpoint简写成br。</p>
+<p>5.<code>br delete ID</code> 这里的ID就是之前的断点的ID号<br>通过这个命令，可以删除ID对应的断点</p>
+<p>6.<code>br e ID</code> 启用一个ID号对应的断点</p>
+<p>7.<code>br di ID</code> 禁用一个ID号对应的断点</p>
+<p>8.<code>b xxx.swift:lineY</code> 在xxx文件的第lineY行设置一个断点<br>如 <code>b ViewController.swift:10</code> 就是在ViewController的第10号下了一个断点。</p>
+<p><strong>需要注意的是，</strong>通过b命令设置的断点，无法直观的在Xcode界面上显示出来，而<code>br delete</code>删除一个断点可以直接在Xcode上看出效果。</p>
+<p>9.<code>br set -n functionName</code> 对functionName设置Symbolic Breakpoint<br>如<code>br set -n viewDidLoad</code> 就是对所有的viewDidLoad设置了Symboloc Breakpoint</p>
+<p>10.<code>br mod -C &quot;Condition&quot; ID</code> 对ID号对应的breakpoint添加条件触发<br>假设我们有下面这样的一段代码</p>
+<pre><code><span class="number">1.</span> <span class="comment">//ViewController.swift</span>
+<span class="number">2.</span> <span class="keyword">for</span> var value in money {
+<span class="number">3.</span>     totalValue += value
+<span class="number">4.</span> }
+</code></pre><p>我们首先先使用<code>b ViewController.swift:3</code>设置一个断点，然后使用<code>br l</code>查询到对应的ID为3。<br>然后我们使用<code>br mod -C &quot;totalValue &gt; 50&quot; 3</code>对这个断点设置条件触发，条件为<strong>当totalValue 大于50时候才触发</strong>。</p>
+<p>当然，可能有些人会问，如果我不想删除断点，只是想移除条件触发怎么办？很简单，只要输入<code>br mod -C &quot;&quot; ID</code>，将其中的Condition部分设置为空即可。</p>
+<p>11.<code>continue</code> 继续运行程序<br>12.<code>n</code>        step over单步调试<br>13.<code>s</code>        step in进行函数<br>14.<code>finish</code>   step out退出函数</p>
+<h3 id="大杀器">大杀器</h3><p>上面的命令是不是很多，一个个敲实在是太麻烦，那如果我想对一个断点执行多条语句怎么办？<br>嘿嘿，大杀器来了。</p>
+<p><code>br com add ID</code> 对ID对应的断点进入交互式指定。如：</p>
+<pre><code><span class="keyword">br</span> <span class="keyword">com</span> <span class="built_in">add</span> <span class="number">2</span>
+&gt; bt
+&gt; <span class="keyword">continue</span>
+&gt; DONE
+</code></pre><p> 上面的语句指的是，对2号断点进行交互式指定，当这个断点触发的时候，首先执行<code>bt</code>(具体bt命令的意思我们后续再说，粗略理解就是backtrace输出调用栈，可以简单看下面的例子)，然后执行<code>continue</code>，最后通过关键字<strong>Done</strong>退出指定，这里的Done类似于shell里面的exit。</p>
+<pre><code>frame <span class="preprocessor">#<span class="number">0</span>: xxx`xxx.ViewController.viewDidLoad (self=<span class="number">0x00007faf52439c20</span>)() -&gt; () + <span class="number">470</span> at ViewController.swift:<span class="number">27</span></span>
+frame <span class="preprocessor">#<span class="number">1</span>: xxx`@objc xxx.ViewController.viewDidLoad (xxx.ViewController)() -&gt; () + <span class="number">34</span> at ViewController.swift:<span class="number">0</span></span>
+frame <span class="preprocessor">#<span class="number">2</span>: UIKit`-[UIViewController loadViewIfRequired] + <span class="number">1198</span></span>
+frame <span class="preprocessor">#<span class="number">3</span>: UIKit`-[UIViewController view] + <span class="number">27</span></span>
+frame <span class="preprocessor">#<span class="number">4</span>: UIKit`-[UIWindow addRootViewControllerViewIfPossible] + <span class="number">61</span></span>
+frame <span class="preprocessor">#<span class="number">5</span>: UIKit`-[UIWindow _setHidden:forced:] + <span class="number">282</span></span>
+frame <span class="preprocessor">#<span class="number">6</span>: UIKit`-[UIWindow makeKeyAndVisible] + <span class="number">42</span></span>
+frame <span class="preprocessor">#<span class="number">7</span>: UIKit`-[UIApplication _callInitializationDelegatesForMainScene:transitionContext:] + <span class="number">4131</span></span>
+frame <span class="preprocessor">#<span class="number">8</span>: UIKit`-[UIApplication _runWithMainScene:transitionContext:completion:] + <span class="number">1760</span></span>
+frame <span class="preprocessor">#<span class="number">9</span>: UIKit`-[UIApplication workspaceDidEndTransaction:] + <span class="number">188</span></span>
+frame <span class="preprocessor">#<span class="number">10</span>: FrontBoardServices`-[FBSSerialQueue _performNext] + <span class="number">192</span></span>
+frame <span class="preprocessor">#<span class="number">11</span>: FrontBoardServices`-[FBSSerialQueue _performNextFromRunLoopSource] + <span class="number">45</span></span>
+frame <span class="preprocessor">#<span class="number">12</span>: CoreFoundation`__CFRUNLOOP_IS_CALLING_OUT_TO_A_SOURCE0_PERFORM_FUNCTION__ + <span class="number">17</span></span>
+frame <span class="preprocessor">#<span class="number">13</span>: CoreFoundation`__CFRunLoopDoSources0 + <span class="number">556</span></span>
+frame <span class="preprocessor">#<span class="number">14</span>: CoreFoundation`__CFRunLoopRun + <span class="number">867</span></span>
+frame <span class="preprocessor">#<span class="number">15</span>: CoreFoundation`CFRunLoopRunSpecific + <span class="number">488</span></span>
+frame <span class="preprocessor">#<span class="number">16</span>: UIKit`-[UIApplication _run] + <span class="number">402</span></span>
+frame <span class="preprocessor">#<span class="number">17</span>: UIKit`UIApplicationMain + <span class="number">171</span></span>
+frame <span class="preprocessor">#<span class="number">18</span>: xxx`main + <span class="number">109</span> at AppDelegate.swift:<span class="number">12</span></span>
+frame <span class="preprocessor">#<span class="number">19</span>: libdyld.dylib`start + <span class="number">1</span></span>
+frame <span class="preprocessor">#<span class="number">20</span>: libdyld.dylib`start + <span class="number">1</span></span>
+</code></pre>
+      
+    </div>
+    <footer class="article-footer">
+      <a data-url="http://satanwoo.github.io/2015/12/11/LLDB-1/" data-id="cilqrsv1z001al5i1smg8ny28" class="article-share-link">Share</a>
+      
+      
+  <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
+
+    </footer>
+  </div>
+  
+</article>
+
+
+  
     <article id="post-TBAnnotationClustering" class="article article-type-post" itemscope itemprop="blogPost">
   <div class="article-meta">
     <a href="/2015/12/11/TBAnnotationClustering/" class="article-date">
@@ -349,7 +652,7 @@ TBBoundingBox TBBoundingBoxMake(<span class="built_in">double</span> x0, <span c
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/12/11/TBAnnotationClustering/" data-id="cil4zlpzj000fwvi1z8vjnc0d" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/12/11/TBAnnotationClustering/" data-id="cilqrsv10000fl5i12lferp63" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
@@ -574,7 +877,7 @@ BOOL success = class_addMethod(<span class="keyword">class</span>, originalSelec
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/11/26/FDFullScreenPopGesture-Source-Code/" data-id="cil4zlq0l001bwvi13frsorjz" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/11/26/FDFullScreenPopGesture-Source-Code/" data-id="cilqrsv24001gl5i1vkn2xak4" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
@@ -684,7 +987,7 @@ replicationLayer.instanceDelay = <span class="number">0.3</span>
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/11/17/Fun-of-CAReplicationLayer/" data-id="cil4zlq0j0019wvi13gmty1ar" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/11/17/Fun-of-CAReplicationLayer/" data-id="cilqrsv22001el5i1hqqk7npu" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Swift/">Swift</a></li></ul>
@@ -890,7 +1193,7 @@ modalVC<span class="class">.modalPresentationStyle</span> = <span class="class">
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/11/12/Swift-UITransition-iOS8/" data-id="cil4zlpzm000hwvi1xm9r4wom" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/11/12/Swift-UITransition-iOS8/" data-id="cilqrsv12000hl5i1pkjvp7b6" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Swift/">Swift</a></li></ul>
@@ -1050,7 +1353,7 @@ modalVC<span class="class">.modalPresentationStyle</span> = <span class="class">
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/11/05/Understand-Viper/" data-id="cil4zlpzg000dwvi1agfg053g" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/11/05/Understand-Viper/" data-id="cilqrsv0y000dl5i1plmxwwx3" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
@@ -1279,7 +1582,7 @@ objectPath.<span class="keyword">get</span>(obj, <span class="string">'a.\u1200'
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/11/05/Object-Path-Source-Code/" data-id="cil4zlq06000vwvi1t7s3fzrp" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/11/05/Object-Path-Source-Code/" data-id="cilqrsv1r0010l5i1ena2osz4" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/JavaScript/">JavaScript</a></li></ul>
@@ -1342,575 +1645,10 @@ objectPath.<span class="keyword">get</span>(obj, <span class="string">'a.\u1200'
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/10/29/Learn-Android-Day-by-Day/" data-id="cil4zlq0d0012wvi1pyfv05op" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/10/29/Learn-Android-Day-by-Day/" data-id="cilqrsv1x0017l5i1qkn3u22n" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Android/">Android</a></li></ul>
-
-    </footer>
-  </div>
-  
-</article>
-
-
-  
-    <article id="post-Swift-Count-Down-Label" class="article article-type-post" itemscope itemprop="blogPost">
-  <div class="article-meta">
-    <a href="/2015/10/29/Swift-Count-Down-Label/" class="article-date">
-  <time datetime="2015-10-28T18:54:23.000Z" itemprop="datePublished">2015-10-29</time>
-</a>
-    
-  </div>
-  <div class="article-inner">
-    
-    
-      <header class="article-header">
-        
-  
-    <h1 itemprop="name">
-      <a class="article-title" href="/2015/10/29/Swift-Count-Down-Label/">Swift每日一练：重写UICountingLabel</a>
-    </h1>
-  
-
-      </header>
-    
-    <div class="article-entry" itemprop="articleBody">
-      
-        <p>今天Swift练习的是准备尝试把<a href="https://github.com/dataxpress/UICountingLabel/blob/master/UICountingLabel.m" target="_blank" rel="external">UICountingLabel</a>这个Github Star数超过500的库用Swift重写一遍。</p>
-<h3 id="UICountingLabel源码解析">UICountingLabel源码解析</h3><p>整个uICountingLabel的本质就是基于一个NSTimer来计算当前时间内应该显示什么值，</p>
-<pre><code>- (<span class="built_in">CGFloat</span>)currentValue {
-
-    <span class="keyword">if</span> (<span class="keyword">self</span><span class="variable">.progress</span> &gt;= <span class="keyword">self</span><span class="variable">.totalTime</span>) {
-        <span class="keyword">return</span> <span class="keyword">self</span><span class="variable">.destinationValue</span>;
-    }
-
-    <span class="built_in">CGFloat</span> percent = <span class="keyword">self</span><span class="variable">.progress</span> / <span class="keyword">self</span><span class="variable">.totalTime</span>;
-    <span class="built_in">CGFloat</span> updateVal = [<span class="keyword">self</span><span class="variable">.counter</span> update:percent];
-    <span class="keyword">return</span> <span class="keyword">self</span><span class="variable">.startingValue</span> + (updateVal * (<span class="keyword">self</span><span class="variable">.destinationValue</span> - <span class="keyword">self</span><span class="variable">.startingValue</span>));
-}
-</code></pre><p>这个值通过不同的插值方式得到，这个插值方式的具体实现时通过<strong>self.counter</strong>的不同子类进行实现。</p>
-<pre><code><span class="class"><span class="keyword">@implementation</span> <span class="title">UILabelCounterLinear</span></span>
-
--(<span class="built_in">CGFloat</span>)update:(<span class="built_in">CGFloat</span>)t
-{
-    <span class="keyword">return</span> t;
-}
-
-<span class="keyword">@end</span>
-
-<span class="class"><span class="keyword">@implementation</span> <span class="title">UILabelCounterEaseIn</span></span>
-
--(<span class="built_in">CGFloat</span>)update:(<span class="built_in">CGFloat</span>)t
-{
-    <span class="keyword">return</span> powf(t, k<span class="built_in">UILabelCounterRate</span>);
-}
-
-<span class="keyword">@end</span>
-
-<span class="class"><span class="keyword">@implementation</span> <span class="title">UILabelCounterEaseOut</span></span>
-
--(<span class="built_in">CGFloat</span>)update:(<span class="built_in">CGFloat</span>)t{
-    <span class="keyword">return</span> <span class="number">1.0</span>-powf((<span class="number">1.0</span>-t), k<span class="built_in">UILabelCounterRate</span>);
-}
-
-<span class="keyword">@end</span>
-
-<span class="class"><span class="keyword">@implementation</span> <span class="title">UILabelCounterEaseInOut</span></span>
-
--(<span class="built_in">CGFloat</span>) update: (<span class="built_in">CGFloat</span>) t
-{
-    <span class="keyword">int</span> sign =<span class="number">1</span>;
-    <span class="keyword">int</span> r = (<span class="keyword">int</span>) k<span class="built_in">UILabelCounterRate</span>;
-    <span class="keyword">if</span> (r % <span class="number">2</span> == <span class="number">0</span>)
-        sign = -<span class="number">1</span>;
-    t *= <span class="number">2</span>;
-    <span class="keyword">if</span> (t &lt; <span class="number">1</span>)
-        <span class="keyword">return</span> <span class="number">0.5</span>f * powf(t, k<span class="built_in">UILabelCounterRate</span>);
-    <span class="keyword">else</span>
-        <span class="keyword">return</span> sign * <span class="number">0.5</span>f * (powf(t-<span class="number">2</span>, k<span class="built_in">UILabelCounterRate</span>) + sign * <span class="number">2</span>);
-}
-</code></pre><p>这里用子类化这么说是不严谨的，因为这其实就类似于Java或者C#是面向了接口编程了而已，因为这里的每个类都只是实现了update这个函数接口而已。</p>
-<p>然后实现里相对比较直观，</p>
-<pre><code>-(<span class="keyword">void</span>)countFrom:(<span class="built_in">CGFloat</span>)startValue to:(<span class="built_in">CGFloat</span>)endValue withDuration:(<span class="built_in">NSTimeInterval</span>)duration {
-    <span class="keyword">if</span> (duration == <span class="number">0.0</span>) {
-        <span class="comment">// No animation</span>
-        [<span class="keyword">self</span> setTextValue:endValue];
-        [<span class="keyword">self</span> runCompletionBlock];
-        <span class="keyword">return</span>;
-    }
-
-    <span class="keyword">self</span><span class="variable">.lastUpdate</span> = [<span class="built_in">NSDate</span> timeIntervalSinceReferenceDate];
-
-    <span class="keyword">switch</span>(<span class="keyword">self</span><span class="variable">.method</span>)
-    {
-        <span class="keyword">case</span> <span class="built_in">UILabelCountingMethodLinear</span>:
-            <span class="keyword">self</span><span class="variable">.counter</span> = [[<span class="built_in">UILabelCounterLinear</span> alloc] init];
-            <span class="keyword">break</span>;
-        <span class="keyword">case</span> <span class="built_in">UILabelCountingMethodEaseIn</span>:
-            <span class="keyword">self</span><span class="variable">.counter</span> = [[<span class="built_in">UILabelCounterEaseIn</span> alloc] init];
-            <span class="keyword">break</span>;
-        <span class="keyword">case</span> <span class="built_in">UILabelCountingMethodEaseOut</span>:
-            <span class="keyword">self</span><span class="variable">.counter</span> = [[<span class="built_in">UILabelCounterEaseOut</span> alloc] init];
-            <span class="keyword">break</span>;
-        <span class="keyword">case</span> <span class="built_in">UILabelCountingMethodEaseInOut</span>:
-            <span class="keyword">self</span><span class="variable">.counter</span> = [[<span class="built_in">UILabelCounterEaseInOut</span> alloc] init];
-            <span class="keyword">break</span>;
-    }
-
-    <span class="built_in">NSTimer</span> *timer = [<span class="built_in">NSTimer</span> timerWithTimeInterval:(<span class="number">1.0</span>f/<span class="number">30.0</span>f) target:<span class="keyword">self</span> selector:<span class="keyword">@selector</span>(updateValue:) userInfo:<span class="literal">nil</span> repeats:<span class="literal">YES</span>];
-    [[<span class="built_in">NSRunLoop</span> mainRunLoop] addTimer:timer forMode:<span class="built_in">NSRunLoopCommonModes</span>];
-    [[<span class="built_in">NSRunLoop</span> mainRunLoop] addTimer:timer forMode:<span class="built_in">UITrackingRunLoopMode</span>];
-    <span class="keyword">self</span><span class="variable">.timer</span> = timer;
-}
-</code></pre><p>首先如果动画的时间是0，就默认直接回调。但是，我想说<b>duration == 0.0，浮点数这么判断，真的没问题吗？</b></p>
-<p>由于NSTimer无法得知确切得知道执行了多少，所以这里要记录上一步回调的lastUpdate。<br>根据不同的方法选择不同的Counter进行插值，然后创建NSTimer，这里我们要特别注意两句话：</p>
-<pre><code><span class="attr_selector">[[NSRunLoop mainRunLoop]</span> <span class="rule"><span class="attribute">addTimer</span>:<span class="value">timer forMode:NSRunLoopCommonModes]</span></span>;
-<span class="attr_selector">[[NSRunLoop mainRunLoop]</span> <span class="rule"><span class="attribute">addTimer</span>:<span class="value">timer forMode:UITrackingRunLoopMode]</span></span>;
-</code></pre><p>这表示NSTimer默认加入的是RunLoop的Default Mode，但是Default Mode在进入Tracking Mode的时候（也就是当用户滑动的时候）会被阻塞，影响动画的执行。因此要特别加入TrackingMode。</p>
-<p>但是我又想说了，<b>NSRunLoopCommonModes难道不是包含UITrackingRunLoopMode吗？天呐，还是我理解的不对，重复添加的意义呢！！！！</b></p>
-<p>然后在NSTimer的回调函数中,</p>
-<pre><code><span class="built_in">NSTimeInterval</span> now = [<span class="built_in">NSDate</span> timeIntervalSinceReferenceDate];
-<span class="keyword">self</span><span class="variable">.progress</span> += now - <span class="keyword">self</span><span class="variable">.lastUpdate</span>;
-<span class="keyword">self</span><span class="variable">.lastUpdate</span> = now;
-
-<span class="keyword">if</span> (<span class="keyword">self</span><span class="variable">.progress</span> &gt;= <span class="keyword">self</span><span class="variable">.totalTime</span>) {
-    [<span class="keyword">self</span><span class="variable">.timer</span> invalidate];
-    <span class="keyword">self</span><span class="variable">.timer</span> = <span class="literal">nil</span>;
-    <span class="keyword">self</span><span class="variable">.progress</span> = <span class="keyword">self</span><span class="variable">.totalTime</span>;
-}
-
-[<span class="keyword">self</span> setTextValue:[<span class="keyword">self</span> currentValue]];
-
-<span class="keyword">if</span> (<span class="keyword">self</span><span class="variable">.progress</span> == <span class="keyword">self</span><span class="variable">.totalTime</span>) {
-    [<span class="keyword">self</span> runCompletionBlock];
-}
-</code></pre><p>就是计算当前的progress进度，更新相应的值而已，没有难度。</p>
-<h3 id="Swift_重写">Swift 重写</h3><p>先来效果:</p>
-<p><img src="http://7lrzqz.com1.z0.glb.clouddn.com/CountDownLabel.gif"></p>
-<h4 id="CADisplayLink_vs_NSTimer">CADisplayLink vs NSTimer</h4><p>首先我们来回忆下Objective-C版本中的一些逻辑，使用NSTimer动态根据进度更新时间。但是我们知道，NSTimer有一个很大的问题就是他的“刷新率”不够准确。如果NSTimer设置了每两秒更新一次，那么如果RunLoop中有个耗时的任务，就会讲这个更新任务推迟，用时间轴来理解：</p>
-<pre><code><span class="number">0</span><span class="function"> -&gt;</span> <span class="number">2s</span> <span class="function"><span class="params">(NSTimer回调)</span> -&gt;</span> <span class="number">3s</span> （耗时的任务）<span class="function"> -&gt;</span> <span class="number">2s</span> (NSTimer回调)。
-</code></pre><p>那么这个会导致什么问题呢？NSTimer的回调和屏幕刷新不是同步的。因此，在Swift版本的重写中，我采用了CADisplayLink来改写，它的好处我们同样用时间轴来理解：</p>
-<pre><code><span class="number">0</span> -&gt; <span class="number">2</span>s（CADisplayLink回调） -&gt; <span class="number">3</span>s（耗时的任务） -&gt; <span class="number">1</span>s（空闲） -&gt; <span class="number">2</span>s（CADisplayLink回调）
-</code></pre><p>可以看出，CADisplayLink始终是保持和屏幕刷新率一样。</p>
-<p><b>这里强调一下，不论是NSTimer抑或是CADisplayLink，既然他们都是基于RunLoop的，就无法脱离被所处同一个RunLoop里的其他任务所影响的宿命，所以网上那些说CADisplayLink不会被阻塞的说法都是错误的。</b></p>
-<h4 id="Swift_面向接口编程">Swift 面向接口编程</h4><p>之前我们提过“子类化“这个说法是不准确的，因此，我们在Swift中，可以基于protocol-oriented进行编程。</p>
-<pre><code><span class="keyword">let</span> <span class="type">WZCountRate</span>:<span class="type">Float</span> = <span class="number">3.0</span>
-
-<span class="class"><span class="keyword">protocol</span> <span class="title">Interpolation</span> </span>{
-    <span class="func"><span class="keyword">func</span> <span class="title">update</span><span class="params">(val:Float)</span></span> -&gt; <span class="type">Float</span>;
-}
-
-<span class="class"><span class="keyword">struct</span> <span class="title">Linear</span>:<span class="title">Interpolation</span> </span>{
-    <span class="func"><span class="keyword">func</span> <span class="title">update</span><span class="params">(val: Float)</span></span> -&gt; <span class="type">Float</span> {
-        <span class="keyword">return</span> val
-    }
-}
-
-<span class="class"><span class="keyword">struct</span> <span class="title">EaseIn</span>:<span class="title">Interpolation</span> </span>{
-    <span class="func"><span class="keyword">func</span> <span class="title">update</span><span class="params">(val: Float)</span></span> -&gt; <span class="type">Float</span> {
-        <span class="keyword">return</span> powf(val, <span class="type">WZCountRate</span>)
-    }
-}
-
-<span class="class"><span class="keyword">struct</span> <span class="title">EaseOut</span>:<span class="title">Interpolation</span> </span>{
-    <span class="func"><span class="keyword">func</span> <span class="title">update</span><span class="params">(val: Float)</span></span> -&gt; <span class="type">Float</span> {
-        <span class="keyword">return</span> <span class="number">1</span> - powf((<span class="number">1</span> - val), <span class="type">WZCountRate</span>)
-    }
-}
-
-<span class="class"><span class="keyword">struct</span> <span class="title">EaseInOut</span>:<span class="title">Interpolation</span> </span>{
-    <span class="func"><span class="keyword">func</span> <span class="title">update</span><span class="params">(val: Float)</span></span> -&gt; <span class="type">Float</span> {
-        <span class="keyword">var</span> sign:<span class="type">Float</span> = <span class="number">1</span>
-        <span class="keyword">let</span> r = <span class="type">Int</span>(<span class="type">WZCountRate</span>)
-
-        <span class="keyword">if</span> (r % <span class="number">2</span> == <span class="number">0</span>) {
-           sign = -<span class="number">1</span>
-        }
-
-        <span class="keyword">var</span> t = val * <span class="number">2</span>
-        <span class="keyword">if</span> (t &lt; <span class="number">1</span>) {
-            <span class="keyword">return</span> <span class="number">0.5</span> * powf(t, <span class="type">WZCountRate</span>)
-        } <span class="keyword">else</span> {
-            <span class="keyword">return</span> <span class="number">0.5</span> * (powf(t - <span class="number">2.0</span>, <span class="type">WZCountRate</span>) + sign * <span class="number">2</span>) * sign
-        }
-    }
-}
-</code></pre><p>可以看到，我们用四个<b>Struct</b>结构体遵从了<b>Interpolation</b>这个接口，实现了四种不同的插值方法。</p>
-<p>别的方面没什么特别难的，</p>
-<h4 id="Access_Control_对Selector_Callback的影响">Access Control 对Selector Callback的影响</h4><p>我们都知道，Swift对类引入了Access Control这一机制，默认情况下是internal的权限。由于CADisplayLink还是基于Selector设置回调的，如下：</p>
-<pre><code><span class="keyword">let</span> displayLink = CADisplayLink(
-   target: <span class="built_in">self</span>,
-   <span class="keyword">select</span><span class="subst">or</span>: <span class="keyword">Select</span><span class="subst">or</span>(<span class="string">"displayTick:"</span>)
-)
-</code></pre><p>当这个displayTick函数处于<b>public或者internal</b>权限的时候，没有任何问题。而当你想声明如</p>
-<p><em>private func displayTick()</em></p>
-<p>的时候，就会产生doesn’t recognize selector的runtime error。</p>
-<p>原因如下：<br><b>基于Selector的回调方式还是采用了Objective-C传统的runtime 查函数表的方式，但是在Swift中声明为private的函数，对于Objective-C Runtime是不可见的。因此，如果你需要让私有函数可以被查询到，你需要添加@objc关键词。</b></p>
-<p>@objc private func displayTick()</p>
-<p>当然啦， 对于IBOutlets, IBActions 以及 Core Data 相关属性来说，默认是可以被Objective-C Runtime查询到的。</p>
-<p></p>
-<p>最后，附上<a href="https://github.com/SatanWoo/WZCountDownLabel" target="_blank" rel="external">项目地址</a></p>
-
-      
-    </div>
-    <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/10/29/Swift-Count-Down-Label/" data-id="cil4zlpzo000kwvi15ggs7rlg" class="article-share-link">Share</a>
-      
-      
-  <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Swift/">Swift</a></li></ul>
-
-    </footer>
-  </div>
-  
-</article>
-
-
-  
-    <article id="post-Swift-Circle-Slider" class="article article-type-post" itemscope itemprop="blogPost">
-  <div class="article-meta">
-    <a href="/2015/10/27/Swift-Circle-Slider/" class="article-date">
-  <time datetime="2015-10-27T07:24:11.000Z" itemprop="datePublished">2015-10-27</time>
-</a>
-    
-  </div>
-  <div class="article-inner">
-    
-    
-      <header class="article-header">
-        
-  
-    <h1 itemprop="name">
-      <a class="article-title" href="/2015/10/27/Swift-Circle-Slider/">Swift每日一练：圆形滑动条</a>
-    </h1>
-  
-
-      </header>
-    
-    <div class="article-entry" itemprop="articleBody">
-      
-        <p>最近遇到了好多人问我会不会Swift，虽然我很早就进行了Swift的学习，但是苹果对于Swift的更新真是日新月异，和我当时beta版本学习的时候大大不同了，所以，从今天起准备督促自己进行每日一练。</p>
-<p>今天想要做的是一个360度的圆型滑动条。</p>
-<h3 id="预览效果">预览效果</h3><p><img src="http://7lrzqz.com1.z0.glb.clouddn.com/RotationSlider.gif"></p>
-<p>细节方面还有欠缺，比如，没有进行旋转圈数的控制，同时也没有进行拖拽范围的控制。</p>
-<h3 id="效果实现">效果实现</h3><p>我们首先来大致看看怎么做分解：</p>
-<pre><code>-<span class="ruby"> 一个圆环
-</span>-<span class="ruby"> 一个渐变色
-</span>-<span class="ruby"> 一个控制球
-</span>-<span class="ruby"> 一个显示文字</span>
-</code></pre><p>首先看看圆环怎么实现的，很简单，我们利用Core Graphic使用如下代码即可以画出一个圆圈，只要加上描边宽度，就可以形成圆环效果。</p>
-<pre><code>CGContextAddArc(
-    ctx,
-    self.frame.size.width/<span class="number">2</span>,
-    self.frame.size.height/<span class="number">2</span>,
-    self.radius,
-    <span class="number">0</span>,
-    <span class="number">2.0</span> * M_PI,
-    <span class="number">0</span>
-)
-UIColor(red: <span class="number">0</span>, green: <span class="number">0</span>, blue: <span class="number">0</span>, alpha: <span class="number">1.0</span>).<span class="built_in">set</span>()
-CGContextSetLineWidth(ctx, <span class="number">72</span>)
-CGContextSetLineCap(ctx, kCGLineCapButt)
-CGContextDrawPath(ctx, kCGPathStroke)
-</code></pre><p>然后我们的圆环背景色是渐变的，这可怎么办？我们直接使用CAGradientLayer吗？当然那是其中之一的方法，不过这次我们试试用Mask ＋ 背景色的方式实现。什么是Mask呢？简单来理解就是，如果你想做出非常复杂的形状，你可以将构造一个包含这种形状的图片，需要显示形状的地方用<strong>非白色</strong>的颜色来填充，不显示的地方用<strong>白色</strong>填充。因此，我们构建一个从上到下的渐变色背景，然后配合黑色的圆环进行Mask，就可以得到带有渐变色背景的。</p>
-<pre><code><span class="built_in">CGContextSaveGState</span>(ctx)     
-<span class="built_in">CGContextClipToMask</span>(ctx, <span class="keyword">self</span><span class="variable">.bounds</span>, mask)
-
-let startColorComponents = <span class="built_in">CGColorGetComponents</span>(startColor<span class="variable">.CGColor</span>)
-let endColorComponents = <span class="built_in">CGColorGetComponents</span>(endColor<span class="variable">.CGColor</span>)
-let components = [
-  startColorComponents[<span class="number">0</span>], startColorComponents[<span class="number">1</span>], startColorComponents[<span class="number">2</span>], <span class="number">1.0</span>,
-  endColorComponents[<span class="number">0</span>], endColorComponents[<span class="number">1</span>], endColorComponents[<span class="number">2</span>], <span class="number">1.0</span>
-]
-let gradient = <span class="built_in">CGGradientCreateWithColorComponents</span>(<span class="built_in">CGColorSpaceCreateDeviceRGB</span>(), components, <span class="literal">nil</span>, <span class="number">2</span>)
-
-<span class="built_in">CGContextDrawLinearGradient</span>(
-    ctx,
-    gradient,
-    <span class="built_in">CGPointMake</span>(<span class="built_in">CGRectGetMidX</span>(rect), <span class="built_in">CGRectGetMinY</span>(rect)),
-    <span class="built_in">CGPointMake</span>(<span class="built_in">CGRectGetMidX</span>(rect), <span class="built_in">CGRectGetMaxY</span>(rect)),
-    <span class="number">0</span>
-);
-
-<span class="built_in">CGContextRestoreGState</span>(ctx);
-</code></pre><p>到此，绘画的工作基本就结束了，画白色小球的原理很简单，也不赘述了。我们下面来说一下根据手势来控制白色小球旋转位置，主要的思路还是控制位置来计算弧度。</p>
-<pre><code>override func touchesMoved(touches: <span class="type">Set</span>&lt;<span class="type">NSObject</span>&gt;, withEvent event: <span class="type">UIEvent</span>)     {    
-    //println(<span class="string">"Touches Moved"</span>)
-
-    <span class="keyword">if</span> <span class="keyword">let</span> touch = touches.first <span class="keyword">as</span>? <span class="type">UITouch</span> {
-        <span class="keyword">var</span> location = touch.locationInView(self)
-        moveHandle(location)
-    }
-}
-
-func computeAngle(p1:<span class="type">CGPoint</span> , p2:<span class="type">CGPoint</span>) -&gt; <span class="type">Double</span> {
-    <span class="keyword">var</span> delta = <span class="type">CGPoint</span>(x: p2.x - p1.x, y: p1.y - p2.y)
-
-    <span class="keyword">let</span> radians = <span class="type">Double</span>(atan2(delta.y, delta.x))
-    <span class="keyword">let</span> <span class="literal">result</span> = toDegree(radians)
-    <span class="keyword">return</span> <span class="literal">result</span> &gt;= <span class="number">0</span> ? <span class="literal">result</span> : <span class="literal">result</span> + <span class="number">360</span>
-}
-</code></pre><p>其中，有一点我们要特别注意<br><b>var delta = CGPoint(x: p2.x - p1.x, y: p1.y - p2.y)</b>，在Y轴的计算上，我们需要进行上下翻转的计算，原因就在于我们通过UITouch拿到的location的Y坐标，是UIKit系的坐标体系，Y轴原点在上方，而我们通过绘图的时候需要进行进行Y轴的上下颠倒。</p>
-<p>此外，根据计算的弧度，来更新小球的位置，由于我们是逆时针的slider，所以我们需要用 360 减去我们实际计算得到的弧度。</p>
-<h3 id="一些感受">一些感受</h3><p>真的，Swift中的类型安全太恶心了，不能忍，于是只好玩起了操作符重载</p>
-<pre><code><span class="func"><span class="keyword">func</span> -<span class="params">(lhs:CGFloat, rhs:Double)</span></span> -&gt; <span class="type">CGFloat</span> {
-    <span class="keyword">return</span> lhs - <span class="type">CGFloat</span>(rhs)
-}
-
-<span class="func"><span class="keyword">func</span> +<span class="params">(lhs:Double, rhs:CGFloat)</span></span> -&gt; <span class="type">CGFloat</span> {
-    <span class="keyword">return</span> <span class="type">CGFloat</span>(lhs) + rhs
-}
-
-<span class="func"><span class="keyword">func</span> +<span class="params">(lhs:CGFloat, rhs:Double)</span></span> -&gt; <span class="type">CGFloat</span> {
-    <span class="keyword">return</span> lhs + <span class="type">CGFloat</span>(rhs)
-}
-
-<span class="func"><span class="keyword">func</span> *<span class="params">(lhs:Double, rhs:CGFloat)</span></span> -&gt; <span class="type">CGFloat</span> {
-    <span class="keyword">return</span> <span class="type">CGFloat</span>(lhs) * rhs
-}
-
-<span class="func"><span class="keyword">func</span> *<span class="params">(lhs:CGFloat, rhs:Double)</span></span> -&gt; <span class="type">CGFloat</span> {
-    <span class="keyword">return</span> lhs * <span class="type">CGFloat</span>(rhs)
-}
-
-<span class="func"><span class="keyword">func</span> /<span class="params">(lhs:Double, rhs:CGFloat)</span></span> -&gt; <span class="type">CGFloat</span> {
-    <span class="keyword">return</span> <span class="type">CGFloat</span>(lhs) / rhs
-}
-
-<span class="func"><span class="keyword">func</span> /<span class="params">(lhs:CGFloat, rhs:Double)</span></span> -&gt; <span class="type">CGFloat</span> {
-    <span class="keyword">return</span> lhs / <span class="type">CGFloat</span>(rhs)
-}
-</code></pre><p>最后附上<a href="https://github.com/SatanWoo/SwiftRotateSlider" target="_blank" rel="external">项目地址</a></p>
-<p>好了，不多说了，我要升级El Captain了。</p>
-
-      
-    </div>
-    <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/10/27/Swift-Circle-Slider/" data-id="cil4zlpzs000mwvi10q3dyw5c" class="article-share-link">Share</a>
-      
-      
-  <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Swift/">Swift</a></li></ul>
-
-    </footer>
-  </div>
-  
-</article>
-
-
-  
-    <article id="post-GLCalendarView" class="article article-type-post" itemscope itemprop="blogPost">
-  <div class="article-meta">
-    <a href="/2015/10/14/GLCalendarView/" class="article-date">
-  <time datetime="2015-10-14T01:15:52.000Z" itemprop="datePublished">2015-10-14</time>
-</a>
-    
-  </div>
-  <div class="article-inner">
-    
-    
-      <header class="article-header">
-        
-  
-    <h1 itemprop="name">
-      <a class="article-title" href="/2015/10/14/GLCalendarView/">GLCaledarView 源码解读 &amp; Glow面经</a>
-    </h1>
-  
-
-      </header>
-    
-    <div class="article-entry" itemprop="articleBody">
-      
-        <p>今天选择了GLCalendarView来进行源码解读，一方面是因为它的实现效果简单清晰，第二方面，是我同学让我把Glow的面经给写了。</p>
-<h2 id="Glow面经">Glow面经</h2><p>可能对于大多数来说，Glow相对来说还算一个比较神秘的公司，它主要致力于基于大数据分析女性健康的app的研发。</p>
-<p><em>好吧，其实我也不是很懂，但是我觉得懂一点也挺好，毕竟我是有女朋友的人。</em></p>
-<p>先说说我为什么会投Glow，两点原因：</p>
-<ul>
-<li>主要原因我是想去参加他们的开放日吃东西，然后他们的登记页面有个投简历的选项，我就投了，但是后来开放日那天我被导师拉出去开项目会议了结果就没去成。</li>
-<li>他们的团队很厉害，学历上都是清华、复旦、交大、同济（其中交大和复旦排名不分先后，你们别喷我）。 初创团队都是Google出身，董事还是Paypal的创始人之一。</li>
-</ul>
-<p>后来9月中下旬，Glow给我安排了一次电面，商量了一个时间，电话如约而至。</p>
-<h4 id="电面">电面</h4><p>电面的内容我不记得了，有一个问题是围绕Core Data展开的，问我多线程之间的Core Data搞过没，我说我搞过。后来说到在多个Context之间传输object的问题，一般情况下都是直接<b>mergeChangeFromNotification就可以了，然后你就可以在private context进行数据获取</b>，当时面试官问的一个问题是你是直接merge完了就使用了，还是[context save]提交到persistentStoreCoordinator以后通过objectID去取呢。当时我说了一个我的做法，后来我再打开我自己代码的时候，发现是因为我的app支持删后保存数据，造成了objectID不一致，所以我当时提出了刚启动的时候一定要拉去objectID，现在想想好像应该是答错了。</p>
-<h4 id="现场面试">现场面试</h4><p>地狱般的6小时连续面试，累晕了。</p>
-<h5 id="第一轮_iOS面试">第一轮 iOS面试</h5><p>第一轮是iOS面试，同时来了两位iOS面试官, 先上来让自我介绍下。我每次自我介绍都比较喜欢节约时间，把自己做过的所有app都装在手机上带到现场演示。于是第一轮的很多问题都是穿插着我的项目提问，具体问题我就不说了，因人而异的，所以我就说下我没答上来的知识面：</p>
-<ol>
-<li>UITransition</li>
-<li>UIView的仿射变换对于界面层级显示的一个效果</li>
-<li>他们自家app中一个动画效果制作方式，我应该是答错了</li>
-</ol>
-<p>这一轮给自己打个70分吧。</p>
-<h5 id="第二轮_数学">第二轮 数学</h5><p>第二轮一上来我以为是产品面，结果是服务器端的一位面试官，先聊了聊自己对于做app有没有什么促进app增长的方式。然后，就开始做一道很奇怪的算法题，为什么说奇怪，是因为这题没有正确答案。然后说完思路以后就在白纸上写下来，我用C++写了。面试官问我为啥不用Objective-C写，我说Objective-C手写代码太长了，顺便我还想证明下我还会别的技术。</p>
-<p>这一轮给自己打个80分。</p>
-<h5 id="第三轮_英语面试">第三轮 英语面试</h5><p>第三轮是他们的产品的创始人来面我，他一上来问说他中文不好，我选择英语面试还是中文面试，我说的英语没问题，于是我们就开始了至少50分钟了全英语面试。</p>
-<p>这一轮可以打个95分。</p>
-<h5 id="第四轮_CTO面">第四轮 CTO面</h5><p>面试的时候我不知道他就是CTO，他还带我去外出吃了顿中饭，吃完回来就开始了面试。<br>这轮一开始先问了我怎么修一些关于多线程的Bug。然后问了我道算法题，就是求矩形相交。当时太诚实了，直接说了我做过这题，然后给出了我自己非投影的解法，于是，悲剧就从这里开始了。</p>
-<p>然后CTO就给我出了一道在我看来比较奇特的题目，具体题目保密我不说了，反正就是一开始他出难的，我没答上来，他说你先简化下，做简单版本的。我做出来了，然后又切换成了复杂的，在他的提示下我还是没做出来。</p>
-<p>这轮只能打30分。</p>
-<h5 id="第五轮_CEO面">第五轮 CEO面</h5><p>CEO进来的时候我还在想上一轮的题目，于是悲剧又来了。我在一边想题目一边和CEO进行了握手，然后就被xx了。然后CEO提了一个让我至今非常难忘的面试题：前面面你的所有面试官他们叫什么？这下是真傻眼了。<br>可能最后比较好的是我用纯英文跟CEO聊了一段时间，估计挽回了一点分数。</p>
-<p>这轮打个50分。</p>
-<p>反正面试感觉有点晕，尤其是下午，战线拖的太长了，自己表现的不是很理想。具体技术题目不说了，说出来我认为是对以后面试者的一种不尊重，所以就略过了。总体面试的体验是硅谷风格，英语 ＋ 技术 ＋ 智力。</p>
-<h2 id="GLCalendarView_源码解析">GLCalendarView 源码解析</h2><p>先来张效果图</p>
-<!--img src="https://raw.githubusercontent.com/Glow-Inc/GLCalendarView/master/demo.gif" alt="GLCalendarView" style="max-width:100%;"-->
-<p>效果还挺酷炫的，这里是它的<a href="https://github.com/Glow-Inc/GLCalendarView" target="_blank" rel="external">Github地址</a></p>
-<p>从Github上的介绍来说，这款Calendar和别的同类库之间有个比较大的区别就是可以选择Date Range。从上面的效果我们也可以看出，用户可以通过手势选择一段连续日期。</p>
-<h2 id="源码解析">源码解析</h2><h3 id="图层分解">图层分解</h3><p>既然是个UI的开源库，抛开内部逻辑实现来看，我们首先需要剖析它的图层结构，这样才有助于我们理解整个设计思路。</p>
-<p>在看真正的源代码之前，我们首先来猜测下这玩意怎么实现的。从我个人角度出发，我一开始是这么猜测的：</p>
-<ul>
-<li>整体的结构应该是个UICollectionView，每个日期都是一个UICollectionViewCell。</li>
-<li>每个Cell包含一个圆的背景色（如果是今天），包含一个方形的背景色(连续)，左右尽头是两个半圆的，基于这个，猜测在每个日期Cell里面包含一个背景View，填充颜色，设置圆角。</li>
-<li>最上面有个悬浮的sunday - saturday的表示星期几的UIView，应该是个独立图层，添加了阴影。<b>国外人为什么喜欢把星期日当成一周的开始呢，真蛋疼。</b></li>
-<li>滚动整个过程中，会出现一个显示对应月份的View，可能是个独立的UIView。</li>
-<li><b>拖动过程中出现的放大镜效果，没猜出来。这个放大镜怎么做的？</b></li>
-</ul>
-<p>带着这些疑问我们下面进入图层分解，来一个个验证我们的猜测正确不正确。</p>
-<p>当然，首先我们先大致浏览下结构，整个项目的文件结构大致如下：</p>
-<pre><code>-<span class="ruby">- <span class="constant">GLCalendarDateRange</span>.h/.m
-</span>-<span class="ruby">- <span class="constant">GLCalendarDayCell</span>
-</span>   -<span class="ruby">- <span class="constant">GLCalendarDayCell</span>.h/.m/.xib
-</span>   -<span class="ruby">- <span class="constant">GLCalendarDayCellBackgroundCover</span>.h/.m
-</span>-<span class="ruby">- <span class="constant">GLCalendarMonthCoverView</span>.h/.m
-</span>-<span class="ruby">- <span class="constant">GLCalendarView</span>.h/.m/.xib
-</span>-<span class="ruby">- <span class="constant">GLDateUtils</span>.h/.m</span>
-</code></pre><h4 id="GLCalendarDayCell">GLCalendarDayCell</h4><p>全局搜索下CollectionViewCell关键字，我们发现，果然在GLCalendarDayCell这个类里面，包含了一个UICollectionView成员。</p>
-<p><b> GLCalendarDayCell采用xib式的图形化开发，只要找到对应的xib文件，对于一个界面的布局很轻松得就了然于胸了.</b></p>
-<p>然后我们打开这个对应的xib文件，发现这个cell的布局包括了：</p>
-<ul>
-<li>底层的Cell</li>
-<li>backgroundCover 的UIView</li>
-<li>显示日期的UILabel</li>
-<li>显示月份的UILabel</li>
-</ul>
-<p>这个类很简单，具体就是做了一大堆细节配置的东西，我们来说一个有意思的地方，在GLCalendarDayCell.h里面，有这个一段定义：</p>
-<pre><code><span class="keyword">@property</span> (<span class="keyword">nonatomic</span>, <span class="keyword">strong</span>) <span class="built_in">UIColor</span> *evenMonthBackgroundColor <span class="built_in">UI_APPEARANCE_SELECTOR</span>;
-<span class="keyword">@property</span> (<span class="keyword">nonatomic</span>, <span class="keyword">strong</span>) <span class="built_in">UIColor</span> *oddMonthBackgroundColor <span class="built_in">UI_APPEARANCE_SELECTOR</span>;
-<span class="keyword">@property</span> (<span class="keyword">nonatomic</span>, <span class="keyword">strong</span>) <span class="built_in">NSDictionary</span> *dayLabelAttributes <span class="built_in">UI_APPEARANCE_SELECTOR</span>;
-<span class="keyword">@property</span> (<span class="keyword">nonatomic</span>, <span class="keyword">strong</span>) <span class="built_in">NSDictionary</span> *futureDayLabelAttributes <span class="built_in">UI_APPEARANCE_SELECTOR</span>;
-<span class="keyword">@property</span> (<span class="keyword">nonatomic</span>, <span class="keyword">strong</span>) <span class="built_in">NSDictionary</span> *todayLabelAttributes <span class="built_in">UI_APPEARANCE_SELECTOR</span>;
-<span class="keyword">@property</span> (<span class="keyword">nonatomic</span>, <span class="keyword">strong</span>) <span class="built_in">NSDictionary</span> *monthLabelAttributes <span class="built_in">UI_APPEARANCE_SELECTOR</span>;
-<span class="keyword">@property</span> (<span class="keyword">nonatomic</span>, <span class="keyword">strong</span>) <span class="built_in">UIColor</span> *todayBackgroundColor <span class="built_in">UI_APPEARANCE_SELECTOR</span>;
-</code></pre><p>其中<b>UIAPPEARANCESELECTOR</b>可能对于很多人不熟悉，我们来看看的定义，</p>
-<pre><code><span class="hexcolor">#def</span>ine UI_APPEARANCE_SELECTOR __attribute__((<span class="function"><span class="title">annotate</span><span class="params">(<span class="string">"ui_appearance_selector"</span>)</span></span>))
-</code></pre><p>这个其实是一个宏，那么这个东西的作用是什么呢？<b>是为了全局配置样式！</b></p>
-<p>不知道大家是否还记得我们经常会写[UINavigationBar appearance].tintColor来修改导航栏的颜色，那么这个宏的作用简单来理解就是让你的类拥有可以全局修改样式的能力，如：</p>
-<pre><code><span class="string">[GLCalendarDayCell appearance]</span>.todayBackgroundColor = <span class="string">[UIColol redColor]</span>;
-</code></pre><p>这个类代码虽然简单，却在实现上有个很好的地方，他把这个Cell的样式（简单来说的就是颜色，边界）交由了下面我们要提到的GLCalendarDayCellBackgroundCover类去做，也就是说，这个Cell仅仅维护状态变更的逻辑，样式有单独的样式类完成绘制。</p>
-<h4 id="GLCalendarDayCellBackgroundCover">GLCalendarDayCellBackgroundCover</h4><p>这个类的作用，无它，就是画。看下他的头文件定义，大家就能瞬间明白：</p>
-<pre><code><span class="class"><span class="keyword">@interface</span> <span class="title">GLCalendarDayCellBackgroundCover</span> : <span class="title">UIView</span></span>
-<span class="keyword">@property</span> (<span class="keyword">nonatomic</span>) RANGE_POSITION rangePosition;
-<span class="keyword">@property</span> (<span class="keyword">nonatomic</span>) <span class="built_in">CGFloat</span> paddingLeft;
-<span class="keyword">@property</span> (<span class="keyword">nonatomic</span>) <span class="built_in">CGFloat</span> paddingRight;
-<span class="keyword">@property</span> (<span class="keyword">nonatomic</span>) <span class="built_in">CGFloat</span> paddingTop;
-<span class="keyword">@property</span> (<span class="keyword">nonatomic</span>, <span class="keyword">strong</span>) <span class="built_in">UIColor</span> *fillColor;
-<span class="keyword">@property</span> (<span class="keyword">nonatomic</span>, <span class="keyword">strong</span>) <span class="built_in">UIColor</span> *strokeColor;
-<span class="keyword">@property</span> (<span class="keyword">nonatomic</span>, <span class="keyword">strong</span>) <span class="built_in">UIImage</span> *backgroundImage;
-<span class="keyword">@property</span> (<span class="keyword">nonatomic</span>) <span class="built_in">CGFloat</span> borderWidth;
-<span class="keyword">@property</span> (<span class="keyword">nonatomic</span>) <span class="built_in">BOOL</span> inEdit;
-<span class="keyword">@property</span> (<span class="keyword">nonatomic</span>) <span class="built_in">BOOL</span> isToday;
-<span class="keyword">@property</span> (<span class="keyword">nonatomic</span>) <span class="built_in">BOOL</span> continuousRangeDisplay;
-<span class="keyword">@property</span> (<span class="keyword">nonatomic</span>) <span class="built_in">CGFloat</span> pointSize;
-<span class="keyword">@property</span> (<span class="keyword">nonatomic</span>) <span class="built_in">CGFloat</span> pointScale;
-- (<span class="keyword">void</span>)enlargeBeginPoint:(<span class="built_in">BOOL</span>)enlarge;
-- (<span class="keyword">void</span>)enlargeEndPoint:(<span class="built_in">BOOL</span>)enlarge;
-<span class="keyword">@end</span>
-</code></pre><p>当然，这里要提一点，画圆的几种方法：</p>
-<ul>
-<li>cornerRadius -&gt; GPU offscreen rendering 低性能</li>
-<li>CAShaperLayer 当成mask -&gt; GPU offscreen rendering 低性能</li>
-<li>drawRect + UIBeizerPath -&gt; CPU offerscreen rendering，快，但是内存开销大</li>
-</ul>
-<p>这里在实现圆角的时候，就用了第三种：</p>
-<pre><code><span class="setting">path = <span class="value">[UIBezierPath bezierPathWithOvalInRect:rect];</span></span>
-<span class="title">[path closePath]</span><span class="comment">;</span>
-<span class="title">[self.fillColor setFill]</span><span class="comment">;</span>
-<span class="title">[path fill]</span><span class="comment">;</span>
-</code></pre><p>别的也没什么，都是具体的数学求画的位置。以如下代码为例子说明下</p>
-<pre><code><span class="tag">if</span> (self.rangePosition == RANGE_POSITION_BEGIN) {
-    <span class="attr_selector">[path moveToPoint:CGPointMake(radius + borderWidth + paddingLeft, paddingTop + borderWidth)]</span>;
-    <span class="attr_selector">[path addArcWithCenter:CGPointMake(radius + borderWidth + paddingLeft, midY) radius:radius startAngle: - M_PI / 2 endAngle: M_PI / 2 clockwise:NO]</span>;
-
-    <span class="attr_selector">[path addLineToPoint:CGPointMake(width, height - borderWidth - paddingTop)]</span>;
-    <span class="attr_selector">[path addLineToPoint:CGPointMake(width, borderWidth + paddingTop)]</span>;
-
-    <span class="attr_selector">[path closePath]</span>;
-}
-</code></pre><p><b>RANGEPOSITIONBEGIN</b>表示为左侧开头的cell，所以有个左弧度。画法过程如下：</p>
-<ul>
-<li>左弧度的上部顶点作为贝塞尔曲线的初始点</li>
-<li>画左弧度</li>
-<li>画左弧度下方的一条水平横线</li>
-<li>画水平横线右端顶点向上的竖直线</li>
-<li>封闭，自动会在竖直线和上部初始顶点间添加一条水平横线。</li>
-</ul>
-<h4 id="GLCalendarView">GLCalendarView</h4><p>最后来说下对外暴露的类，GLCalendarView。<br>这个类的实现就是一对控制逻辑，主要说下我特别感兴趣的拖动range的过程中放大镜的实现。</p>
-<ul>
-<li>首先这个放大镜，是个中心区域透明的图片。我一开始是纯代码编程的，真蛋疼。</li>
-<li>这个放大镜底下偷偷埋了个UIImageView，每次拖动的更新的时候，都自动去截图，把截图放到这个UIImageView里面，就完成了放大镜的效果。</li>
-</ul>
-<p>具体的实现如下：</p>
-<pre><code>- (<span class="keyword">void</span>)showMagnifierAboveDate:(<span class="built_in">NSDate</span> *)date
-{
-    <span class="keyword">if</span> (!<span class="keyword">self</span><span class="variable">.showMagnifier</span>) {
-        <span class="keyword">return</span>;
-    }
-    GLCalendarDayCell *cell = (GLCalendarDayCell *)[<span class="keyword">self</span> collectionView:<span class="keyword">self</span><span class="variable">.collectionView</span> cellForItemAtIndexPath:[<span class="keyword">self</span> indexPathForDate:date]];
-    <span class="built_in">CGFloat</span> delta = <span class="keyword">self</span><span class="variable">.cellWidth</span> / <span class="number">2</span>;
-    <span class="keyword">if</span> (<span class="keyword">self</span><span class="variable">.draggingBeginDate</span>) {
-        delta = delta;
-    } <span class="keyword">else</span> {
-        delta = -delta;
-    }
-    <span class="built_in">UIGraphicsBeginImageContextWithOptions</span>(<span class="keyword">self</span><span class="variable">.maginifierContentView</span><span class="variable">.frame</span><span class="variable">.size</span>, <span class="literal">YES</span>, <span class="number">0.0</span>);
-    <span class="built_in">CGContextRef</span> context = <span class="built_in">UIGraphicsGetCurrentContext</span>();
-    <span class="built_in">CGContextFillRect</span>(context, <span class="keyword">self</span><span class="variable">.maginifierContentView</span><span class="variable">.bounds</span>);
-    <span class="built_in">CGContextTranslateCTM</span>(context, -cell<span class="variable">.center</span><span class="variable">.x</span> + delta, -cell<span class="variable">.center</span><span class="variable">.y</span>);
-    <span class="built_in">CGContextTranslateCTM</span>(context, <span class="keyword">self</span><span class="variable">.maginifierContentView</span><span class="variable">.frame</span><span class="variable">.size</span><span class="variable">.width</span> / <span class="number">2</span>, <span class="keyword">self</span><span class="variable">.maginifierContentView</span><span class="variable">.frame</span><span class="variable">.size</span><span class="variable">.height</span> / <span class="number">2</span>);
-    [<span class="keyword">self</span><span class="variable">.collectionView</span><span class="variable">.layer</span> renderInContext:context];
-    <span class="built_in">UIImage</span> *image = <span class="built_in">UIGraphicsGetImageFromCurrentImageContext</span>();
-    <span class="built_in">UIGraphicsEndImageContext</span>();
-
-    <span class="keyword">self</span><span class="variable">.maginifierContentView</span><span class="variable">.image</span> = image;
-    <span class="keyword">self</span><span class="variable">.magnifierContainer</span><span class="variable">.center</span> = [<span class="keyword">self</span> convertPoint:<span class="built_in">CGPointMake</span>(cell<span class="variable">.center</span><span class="variable">.x</span> - delta - <span class="number">58</span>, cell<span class="variable">.center</span><span class="variable">.y</span> - <span class="number">90</span>) fromView:<span class="keyword">self</span><span class="variable">.collectionView</span>];
-    <span class="keyword">self</span><span class="variable">.magnifierContainer</span><span class="variable">.hidden</span> = <span class="literal">NO</span>;
-}
-</code></pre><p>主要说下CGContext那块，因为发现好多人还不是特别能理解。</p>
-<p><b>首先，坐标系和UIKit是反过来的！</b><br>然后这段代码做了啥呢？</p>
-<ul>
-<li><p>获取当前拖拽日期的对应的Cell。</p>
-</li>
-<li><p>创建一个画布，画布大小就是放大镜的大小。</p>
-<pre><code><span class="tag">UIGraphicsBeginImageContextWithOptions</span>(<span class="tag">self</span><span class="class">.maginifierContentView</span><span class="class">.frame</span><span class="class">.size</span>, <span class="tag">YES</span>, 0<span class="class">.0</span>);
-</code></pre></li>
-<li><p>位移到cell的位置处进行截图，因为是CGContext画图，所以向上是正的，向下负的。</p>
-<pre><code><span class="tag">CGContextTranslateCTM</span>(<span class="tag">context</span>, <span class="tag">-cell</span><span class="class">.center</span><span class="class">.x</span> + <span class="tag">delta</span>, <span class="tag">-cell</span><span class="class">.center</span><span class="class">.y</span>);
-</code></pre></li>
-<li><p>向上移到放大镜的中心截图，否则因为放大镜的大小是cell的高度，会包含上cell的下半部分，和下cell的上半部分。</p>
-<pre><code>CGContextTranslateCTM(context, self.maginifierContentView.frame.<span class="built_in">size</span>.<span class="variable">width</span> / <span class="number">2</span>, self.maginifierContentView.frame.<span class="built_in">size</span>.<span class="variable">height</span> / <span class="number">2</span>);
-</code></pre></li>
-</ul>
-<h4 id="Thread_Local_变量">Thread Local 变量</h4><p>在GLCalendarView里面，有一个比较有亮点的实现：</p>
-<pre><code>+ (<span class="built_in">NSCalendar</span> *)calendar {
-    <span class="built_in">NSMutableDictionary</span> *threadDictionary = [[<span class="built_in">NSThread</span> currentThread] threadDictionary];
-
-    <span class="built_in">NSCalendar</span> *cal = [threadDictionary objectForKey:<span class="string">@"GLCalendar"</span>];
-    <span class="keyword">if</span> (!cal) {
-        cal = [[<span class="built_in">NSCalendar</span> alloc] initWithCalendarIdentifier:<span class="built_in">NSCalendarIdentifierGregorian</span>];
-        cal<span class="variable">.locale</span> = [<span class="built_in">NSLocale</span> currentLocale];
-        [threadDictionary setObject:cal forKey:<span class="string">@"GLCalendar"</span>];
-    }
-    <span class="keyword">return</span> cal;
-}
-</code></pre><p>我们都知道，NSCalendar的初始化是比较耗时的，所以经验上来说一般会构建一个单例子使用。但是在这里可以看到，这里用了threadDictionary去获取thread local variable。相当于在每个使用到这个函数的线程里都构建一个thread local的单例子，那么thread local的好处有啥呢？</p>
-<ul>
-<li>线程安全</li>
-<li>thread local cache，访问快，避免flush cache line。</li>
-</ul>
-<p>但是其实我个人不是很理解这么做的优势究竟有多大，请大家指点一下。</p>
-
-      
-    </div>
-    <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/10/14/GLCalendarView/" data-id="cil4zlq0h0017wvi1eb8x9kii" class="article-share-link">Share</a>
-      
-      
-  <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
 
     </footer>
   </div>
@@ -1934,7 +1672,7 @@ func computeAngle(p1:<span class="type">CGPoint</span> , p2:<span class="type">C
   <div class="widget-wrap">
     <h3 class="widget-title">Tags</h3>
     <div class="widget">
-      <ul class="tag-list"><li class="tag-list-item"><a class="tag-list-link" href="/tags/Android/">Android</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/JavaScript/">JavaScript</a><span class="tag-list-count">2</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Math/">Math</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/R/">R</a><span class="tag-list-count">2</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Swift/">Swift</a><span class="tag-list-count">4</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/iOS/">iOS</a><span class="tag-list-count">13</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/shell/">shell</a><span class="tag-list-count">1</span></li></ul>
+      <ul class="tag-list"><li class="tag-list-item"><a class="tag-list-link" href="/tags/Android/">Android</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/JavaScript/">JavaScript</a><span class="tag-list-count">2</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Math/">Math</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/R/">R</a><span class="tag-list-count">2</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Reverse-Engineering/">Reverse Engineering</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Swift/">Swift</a><span class="tag-list-count">5</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/iOS/">iOS</a><span class="tag-list-count">14</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/shell/">shell</a><span class="tag-list-count">1</span></li></ul>
     </div>
   </div>
 
@@ -1943,7 +1681,7 @@ func computeAngle(p1:<span class="type">CGPoint</span> , p2:<span class="type">C
   <div class="widget-wrap">
     <h3 class="widget-title">Tag Cloud</h3>
     <div class="widget tagcloud">
-      <a href="/tags/Android/" style="font-size: 10px;">Android</a> <a href="/tags/JavaScript/" style="font-size: 13.33px;">JavaScript</a> <a href="/tags/Math/" style="font-size: 10px;">Math</a> <a href="/tags/R/" style="font-size: 13.33px;">R</a> <a href="/tags/Swift/" style="font-size: 16.67px;">Swift</a> <a href="/tags/iOS/" style="font-size: 20px;">iOS</a> <a href="/tags/shell/" style="font-size: 10px;">shell</a>
+      <a href="/tags/Android/" style="font-size: 10px;">Android</a> <a href="/tags/JavaScript/" style="font-size: 13.33px;">JavaScript</a> <a href="/tags/Math/" style="font-size: 10px;">Math</a> <a href="/tags/R/" style="font-size: 13.33px;">R</a> <a href="/tags/Reverse-Engineering/" style="font-size: 10px;">Reverse Engineering</a> <a href="/tags/Swift/" style="font-size: 16.67px;">Swift</a> <a href="/tags/iOS/" style="font-size: 20px;">iOS</a> <a href="/tags/shell/" style="font-size: 10px;">shell</a>
     </div>
   </div>
 
@@ -1952,7 +1690,7 @@ func computeAngle(p1:<span class="type">CGPoint</span> , p2:<span class="type">C
   <div class="widget-wrap">
     <h3 class="widget-title">Archives</h3>
     <div class="widget">
-      <ul class="archive-list"><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/02/">February 2016</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/12/">December 2015</a><span class="archive-list-count">6</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/11/">November 2015</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/10/">October 2015</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/09/">September 2015</a><span class="archive-list-count">4</span></li></ul>
+      <ul class="archive-list"><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/03/">March 2016</a><span class="archive-list-count">3</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/02/">February 2016</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/12/">December 2015</a><span class="archive-list-count">6</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/11/">November 2015</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/10/">October 2015</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/09/">September 2015</a><span class="archive-list-count">4</span></li></ul>
     </div>
   </div>
 
@@ -1964,23 +1702,23 @@ func computeAngle(p1:<span class="type">CGPoint</span> , p2:<span class="type">C
       <ul>
         
           <li>
+            <a href="/2016/03/14/RxSwift/">RxSwift</a>
+          </li>
+        
+          <li>
+            <a href="/2016/03/14/SizeUp/">SizeUp</a>
+          </li>
+        
+          <li>
+            <a href="/2016/03/14/DXXcodeConsoleUnicodePlugin/">DXXcodeConsoleUnicodePlugin源码解析</a>
+          </li>
+        
+          <li>
             <a href="/2016/02/27/check-manifest/">Check Pods Manifest.lock</a>
           </li>
         
           <li>
             <a href="/2016/02/27/pod-install-plugin/">开发一个简单的Pod Install 插件</a>
-          </li>
-        
-          <li>
-            <a href="/2016/02/27/FBKVOController/">FBKVOController 源码解析</a>
-          </li>
-        
-          <li>
-            <a href="/2016/02/05/DGRunKeeperSwitch/">DGRunKeeperSwitch 源码解析</a>
-          </li>
-        
-          <li>
-            <a href="/2016/02/05/PureLayout/">PureLayout 源码解析</a>
           </li>
         
       </ul>

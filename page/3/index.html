@@ -62,6 +62,571 @@
       <div class="outer">
         <section id="main">
   
+    <article id="post-Swift-Count-Down-Label" class="article article-type-post" itemscope itemprop="blogPost">
+  <div class="article-meta">
+    <a href="/2015/10/29/Swift-Count-Down-Label/" class="article-date">
+  <time datetime="2015-10-28T18:54:23.000Z" itemprop="datePublished">2015-10-29</time>
+</a>
+    
+  </div>
+  <div class="article-inner">
+    
+    
+      <header class="article-header">
+        
+  
+    <h1 itemprop="name">
+      <a class="article-title" href="/2015/10/29/Swift-Count-Down-Label/">Swift每日一练：重写UICountingLabel</a>
+    </h1>
+  
+
+      </header>
+    
+    <div class="article-entry" itemprop="articleBody">
+      
+        <p>今天Swift练习的是准备尝试把<a href="https://github.com/dataxpress/UICountingLabel/blob/master/UICountingLabel.m" target="_blank" rel="external">UICountingLabel</a>这个Github Star数超过500的库用Swift重写一遍。</p>
+<h3 id="UICountingLabel源码解析">UICountingLabel源码解析</h3><p>整个uICountingLabel的本质就是基于一个NSTimer来计算当前时间内应该显示什么值，</p>
+<pre><code>- (<span class="built_in">CGFloat</span>)currentValue {
+
+    <span class="keyword">if</span> (<span class="keyword">self</span><span class="variable">.progress</span> &gt;= <span class="keyword">self</span><span class="variable">.totalTime</span>) {
+        <span class="keyword">return</span> <span class="keyword">self</span><span class="variable">.destinationValue</span>;
+    }
+
+    <span class="built_in">CGFloat</span> percent = <span class="keyword">self</span><span class="variable">.progress</span> / <span class="keyword">self</span><span class="variable">.totalTime</span>;
+    <span class="built_in">CGFloat</span> updateVal = [<span class="keyword">self</span><span class="variable">.counter</span> update:percent];
+    <span class="keyword">return</span> <span class="keyword">self</span><span class="variable">.startingValue</span> + (updateVal * (<span class="keyword">self</span><span class="variable">.destinationValue</span> - <span class="keyword">self</span><span class="variable">.startingValue</span>));
+}
+</code></pre><p>这个值通过不同的插值方式得到，这个插值方式的具体实现时通过<strong>self.counter</strong>的不同子类进行实现。</p>
+<pre><code><span class="class"><span class="keyword">@implementation</span> <span class="title">UILabelCounterLinear</span></span>
+
+-(<span class="built_in">CGFloat</span>)update:(<span class="built_in">CGFloat</span>)t
+{
+    <span class="keyword">return</span> t;
+}
+
+<span class="keyword">@end</span>
+
+<span class="class"><span class="keyword">@implementation</span> <span class="title">UILabelCounterEaseIn</span></span>
+
+-(<span class="built_in">CGFloat</span>)update:(<span class="built_in">CGFloat</span>)t
+{
+    <span class="keyword">return</span> powf(t, k<span class="built_in">UILabelCounterRate</span>);
+}
+
+<span class="keyword">@end</span>
+
+<span class="class"><span class="keyword">@implementation</span> <span class="title">UILabelCounterEaseOut</span></span>
+
+-(<span class="built_in">CGFloat</span>)update:(<span class="built_in">CGFloat</span>)t{
+    <span class="keyword">return</span> <span class="number">1.0</span>-powf((<span class="number">1.0</span>-t), k<span class="built_in">UILabelCounterRate</span>);
+}
+
+<span class="keyword">@end</span>
+
+<span class="class"><span class="keyword">@implementation</span> <span class="title">UILabelCounterEaseInOut</span></span>
+
+-(<span class="built_in">CGFloat</span>) update: (<span class="built_in">CGFloat</span>) t
+{
+    <span class="keyword">int</span> sign =<span class="number">1</span>;
+    <span class="keyword">int</span> r = (<span class="keyword">int</span>) k<span class="built_in">UILabelCounterRate</span>;
+    <span class="keyword">if</span> (r % <span class="number">2</span> == <span class="number">0</span>)
+        sign = -<span class="number">1</span>;
+    t *= <span class="number">2</span>;
+    <span class="keyword">if</span> (t &lt; <span class="number">1</span>)
+        <span class="keyword">return</span> <span class="number">0.5</span>f * powf(t, k<span class="built_in">UILabelCounterRate</span>);
+    <span class="keyword">else</span>
+        <span class="keyword">return</span> sign * <span class="number">0.5</span>f * (powf(t-<span class="number">2</span>, k<span class="built_in">UILabelCounterRate</span>) + sign * <span class="number">2</span>);
+}
+</code></pre><p>这里用子类化这么说是不严谨的，因为这其实就类似于Java或者C#是面向了接口编程了而已，因为这里的每个类都只是实现了update这个函数接口而已。</p>
+<p>然后实现里相对比较直观，</p>
+<pre><code>-(<span class="keyword">void</span>)countFrom:(<span class="built_in">CGFloat</span>)startValue to:(<span class="built_in">CGFloat</span>)endValue withDuration:(<span class="built_in">NSTimeInterval</span>)duration {
+    <span class="keyword">if</span> (duration == <span class="number">0.0</span>) {
+        <span class="comment">// No animation</span>
+        [<span class="keyword">self</span> setTextValue:endValue];
+        [<span class="keyword">self</span> runCompletionBlock];
+        <span class="keyword">return</span>;
+    }
+
+    <span class="keyword">self</span><span class="variable">.lastUpdate</span> = [<span class="built_in">NSDate</span> timeIntervalSinceReferenceDate];
+
+    <span class="keyword">switch</span>(<span class="keyword">self</span><span class="variable">.method</span>)
+    {
+        <span class="keyword">case</span> <span class="built_in">UILabelCountingMethodLinear</span>:
+            <span class="keyword">self</span><span class="variable">.counter</span> = [[<span class="built_in">UILabelCounterLinear</span> alloc] init];
+            <span class="keyword">break</span>;
+        <span class="keyword">case</span> <span class="built_in">UILabelCountingMethodEaseIn</span>:
+            <span class="keyword">self</span><span class="variable">.counter</span> = [[<span class="built_in">UILabelCounterEaseIn</span> alloc] init];
+            <span class="keyword">break</span>;
+        <span class="keyword">case</span> <span class="built_in">UILabelCountingMethodEaseOut</span>:
+            <span class="keyword">self</span><span class="variable">.counter</span> = [[<span class="built_in">UILabelCounterEaseOut</span> alloc] init];
+            <span class="keyword">break</span>;
+        <span class="keyword">case</span> <span class="built_in">UILabelCountingMethodEaseInOut</span>:
+            <span class="keyword">self</span><span class="variable">.counter</span> = [[<span class="built_in">UILabelCounterEaseInOut</span> alloc] init];
+            <span class="keyword">break</span>;
+    }
+
+    <span class="built_in">NSTimer</span> *timer = [<span class="built_in">NSTimer</span> timerWithTimeInterval:(<span class="number">1.0</span>f/<span class="number">30.0</span>f) target:<span class="keyword">self</span> selector:<span class="keyword">@selector</span>(updateValue:) userInfo:<span class="literal">nil</span> repeats:<span class="literal">YES</span>];
+    [[<span class="built_in">NSRunLoop</span> mainRunLoop] addTimer:timer forMode:<span class="built_in">NSRunLoopCommonModes</span>];
+    [[<span class="built_in">NSRunLoop</span> mainRunLoop] addTimer:timer forMode:<span class="built_in">UITrackingRunLoopMode</span>];
+    <span class="keyword">self</span><span class="variable">.timer</span> = timer;
+}
+</code></pre><p>首先如果动画的时间是0，就默认直接回调。但是，我想说<b>duration == 0.0，浮点数这么判断，真的没问题吗？</b></p>
+<p>由于NSTimer无法得知确切得知道执行了多少，所以这里要记录上一步回调的lastUpdate。<br>根据不同的方法选择不同的Counter进行插值，然后创建NSTimer，这里我们要特别注意两句话：</p>
+<pre><code><span class="attr_selector">[[NSRunLoop mainRunLoop]</span> <span class="rule"><span class="attribute">addTimer</span>:<span class="value">timer forMode:NSRunLoopCommonModes]</span></span>;
+<span class="attr_selector">[[NSRunLoop mainRunLoop]</span> <span class="rule"><span class="attribute">addTimer</span>:<span class="value">timer forMode:UITrackingRunLoopMode]</span></span>;
+</code></pre><p>这表示NSTimer默认加入的是RunLoop的Default Mode，但是Default Mode在进入Tracking Mode的时候（也就是当用户滑动的时候）会被阻塞，影响动画的执行。因此要特别加入TrackingMode。</p>
+<p>但是我又想说了，<b>NSRunLoopCommonModes难道不是包含UITrackingRunLoopMode吗？天呐，还是我理解的不对，重复添加的意义呢！！！！</b></p>
+<p>然后在NSTimer的回调函数中,</p>
+<pre><code><span class="built_in">NSTimeInterval</span> now = [<span class="built_in">NSDate</span> timeIntervalSinceReferenceDate];
+<span class="keyword">self</span><span class="variable">.progress</span> += now - <span class="keyword">self</span><span class="variable">.lastUpdate</span>;
+<span class="keyword">self</span><span class="variable">.lastUpdate</span> = now;
+
+<span class="keyword">if</span> (<span class="keyword">self</span><span class="variable">.progress</span> &gt;= <span class="keyword">self</span><span class="variable">.totalTime</span>) {
+    [<span class="keyword">self</span><span class="variable">.timer</span> invalidate];
+    <span class="keyword">self</span><span class="variable">.timer</span> = <span class="literal">nil</span>;
+    <span class="keyword">self</span><span class="variable">.progress</span> = <span class="keyword">self</span><span class="variable">.totalTime</span>;
+}
+
+[<span class="keyword">self</span> setTextValue:[<span class="keyword">self</span> currentValue]];
+
+<span class="keyword">if</span> (<span class="keyword">self</span><span class="variable">.progress</span> == <span class="keyword">self</span><span class="variable">.totalTime</span>) {
+    [<span class="keyword">self</span> runCompletionBlock];
+}
+</code></pre><p>就是计算当前的progress进度，更新相应的值而已，没有难度。</p>
+<h3 id="Swift_重写">Swift 重写</h3><p>先来效果:</p>
+<p><img src="http://7lrzqz.com1.z0.glb.clouddn.com/CountDownLabel.gif"></p>
+<h4 id="CADisplayLink_vs_NSTimer">CADisplayLink vs NSTimer</h4><p>首先我们来回忆下Objective-C版本中的一些逻辑，使用NSTimer动态根据进度更新时间。但是我们知道，NSTimer有一个很大的问题就是他的“刷新率”不够准确。如果NSTimer设置了每两秒更新一次，那么如果RunLoop中有个耗时的任务，就会讲这个更新任务推迟，用时间轴来理解：</p>
+<pre><code><span class="number">0</span><span class="function"> -&gt;</span> <span class="number">2s</span> <span class="function"><span class="params">(NSTimer回调)</span> -&gt;</span> <span class="number">3s</span> （耗时的任务）<span class="function"> -&gt;</span> <span class="number">2s</span> (NSTimer回调)。
+</code></pre><p>那么这个会导致什么问题呢？NSTimer的回调和屏幕刷新不是同步的。因此，在Swift版本的重写中，我采用了CADisplayLink来改写，它的好处我们同样用时间轴来理解：</p>
+<pre><code><span class="number">0</span> -&gt; <span class="number">2</span>s（CADisplayLink回调） -&gt; <span class="number">3</span>s（耗时的任务） -&gt; <span class="number">1</span>s（空闲） -&gt; <span class="number">2</span>s（CADisplayLink回调）
+</code></pre><p>可以看出，CADisplayLink始终是保持和屏幕刷新率一样。</p>
+<p><b>这里强调一下，不论是NSTimer抑或是CADisplayLink，既然他们都是基于RunLoop的，就无法脱离被所处同一个RunLoop里的其他任务所影响的宿命，所以网上那些说CADisplayLink不会被阻塞的说法都是错误的。</b></p>
+<h4 id="Swift_面向接口编程">Swift 面向接口编程</h4><p>之前我们提过“子类化“这个说法是不准确的，因此，我们在Swift中，可以基于protocol-oriented进行编程。</p>
+<pre><code><span class="keyword">let</span> <span class="type">WZCountRate</span>:<span class="type">Float</span> = <span class="number">3.0</span>
+
+<span class="class"><span class="keyword">protocol</span> <span class="title">Interpolation</span> </span>{
+    <span class="func"><span class="keyword">func</span> <span class="title">update</span><span class="params">(val:Float)</span></span> -&gt; <span class="type">Float</span>;
+}
+
+<span class="class"><span class="keyword">struct</span> <span class="title">Linear</span>:<span class="title">Interpolation</span> </span>{
+    <span class="func"><span class="keyword">func</span> <span class="title">update</span><span class="params">(val: Float)</span></span> -&gt; <span class="type">Float</span> {
+        <span class="keyword">return</span> val
+    }
+}
+
+<span class="class"><span class="keyword">struct</span> <span class="title">EaseIn</span>:<span class="title">Interpolation</span> </span>{
+    <span class="func"><span class="keyword">func</span> <span class="title">update</span><span class="params">(val: Float)</span></span> -&gt; <span class="type">Float</span> {
+        <span class="keyword">return</span> powf(val, <span class="type">WZCountRate</span>)
+    }
+}
+
+<span class="class"><span class="keyword">struct</span> <span class="title">EaseOut</span>:<span class="title">Interpolation</span> </span>{
+    <span class="func"><span class="keyword">func</span> <span class="title">update</span><span class="params">(val: Float)</span></span> -&gt; <span class="type">Float</span> {
+        <span class="keyword">return</span> <span class="number">1</span> - powf((<span class="number">1</span> - val), <span class="type">WZCountRate</span>)
+    }
+}
+
+<span class="class"><span class="keyword">struct</span> <span class="title">EaseInOut</span>:<span class="title">Interpolation</span> </span>{
+    <span class="func"><span class="keyword">func</span> <span class="title">update</span><span class="params">(val: Float)</span></span> -&gt; <span class="type">Float</span> {
+        <span class="keyword">var</span> sign:<span class="type">Float</span> = <span class="number">1</span>
+        <span class="keyword">let</span> r = <span class="type">Int</span>(<span class="type">WZCountRate</span>)
+
+        <span class="keyword">if</span> (r % <span class="number">2</span> == <span class="number">0</span>) {
+           sign = -<span class="number">1</span>
+        }
+
+        <span class="keyword">var</span> t = val * <span class="number">2</span>
+        <span class="keyword">if</span> (t &lt; <span class="number">1</span>) {
+            <span class="keyword">return</span> <span class="number">0.5</span> * powf(t, <span class="type">WZCountRate</span>)
+        } <span class="keyword">else</span> {
+            <span class="keyword">return</span> <span class="number">0.5</span> * (powf(t - <span class="number">2.0</span>, <span class="type">WZCountRate</span>) + sign * <span class="number">2</span>) * sign
+        }
+    }
+}
+</code></pre><p>可以看到，我们用四个<b>Struct</b>结构体遵从了<b>Interpolation</b>这个接口，实现了四种不同的插值方法。</p>
+<p>别的方面没什么特别难的，</p>
+<h4 id="Access_Control_对Selector_Callback的影响">Access Control 对Selector Callback的影响</h4><p>我们都知道，Swift对类引入了Access Control这一机制，默认情况下是internal的权限。由于CADisplayLink还是基于Selector设置回调的，如下：</p>
+<pre><code><span class="keyword">let</span> displayLink = CADisplayLink(
+   target: <span class="built_in">self</span>,
+   <span class="keyword">select</span><span class="subst">or</span>: <span class="keyword">Select</span><span class="subst">or</span>(<span class="string">"displayTick:"</span>)
+)
+</code></pre><p>当这个displayTick函数处于<b>public或者internal</b>权限的时候，没有任何问题。而当你想声明如</p>
+<p><em>private func displayTick()</em></p>
+<p>的时候，就会产生doesn’t recognize selector的runtime error。</p>
+<p>原因如下：<br><b>基于Selector的回调方式还是采用了Objective-C传统的runtime 查函数表的方式，但是在Swift中声明为private的函数，对于Objective-C Runtime是不可见的。因此，如果你需要让私有函数可以被查询到，你需要添加@objc关键词。</b></p>
+<p>@objc private func displayTick()</p>
+<p>当然啦， 对于IBOutlets, IBActions 以及 Core Data 相关属性来说，默认是可以被Objective-C Runtime查询到的。</p>
+<p></p>
+<p>最后，附上<a href="https://github.com/SatanWoo/WZCountDownLabel" target="_blank" rel="external">项目地址</a></p>
+
+      
+    </div>
+    <footer class="article-footer">
+      <a data-url="http://satanwoo.github.io/2015/10/29/Swift-Count-Down-Label/" data-id="cilqrsv14000kl5i1l439lgs4" class="article-share-link">Share</a>
+      
+      
+  <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Swift/">Swift</a></li></ul>
+
+    </footer>
+  </div>
+  
+</article>
+
+
+  
+    <article id="post-Swift-Circle-Slider" class="article article-type-post" itemscope itemprop="blogPost">
+  <div class="article-meta">
+    <a href="/2015/10/27/Swift-Circle-Slider/" class="article-date">
+  <time datetime="2015-10-27T07:24:11.000Z" itemprop="datePublished">2015-10-27</time>
+</a>
+    
+  </div>
+  <div class="article-inner">
+    
+    
+      <header class="article-header">
+        
+  
+    <h1 itemprop="name">
+      <a class="article-title" href="/2015/10/27/Swift-Circle-Slider/">Swift每日一练：圆形滑动条</a>
+    </h1>
+  
+
+      </header>
+    
+    <div class="article-entry" itemprop="articleBody">
+      
+        <p>最近遇到了好多人问我会不会Swift，虽然我很早就进行了Swift的学习，但是苹果对于Swift的更新真是日新月异，和我当时beta版本学习的时候大大不同了，所以，从今天起准备督促自己进行每日一练。</p>
+<p>今天想要做的是一个360度的圆型滑动条。</p>
+<h3 id="预览效果">预览效果</h3><p><img src="http://7lrzqz.com1.z0.glb.clouddn.com/RotationSlider.gif"></p>
+<p>细节方面还有欠缺，比如，没有进行旋转圈数的控制，同时也没有进行拖拽范围的控制。</p>
+<h3 id="效果实现">效果实现</h3><p>我们首先来大致看看怎么做分解：</p>
+<pre><code>-<span class="ruby"> 一个圆环
+</span>-<span class="ruby"> 一个渐变色
+</span>-<span class="ruby"> 一个控制球
+</span>-<span class="ruby"> 一个显示文字</span>
+</code></pre><p>首先看看圆环怎么实现的，很简单，我们利用Core Graphic使用如下代码即可以画出一个圆圈，只要加上描边宽度，就可以形成圆环效果。</p>
+<pre><code>CGContextAddArc(
+    ctx,
+    self.frame.size.width/<span class="number">2</span>,
+    self.frame.size.height/<span class="number">2</span>,
+    self.radius,
+    <span class="number">0</span>,
+    <span class="number">2.0</span> * M_PI,
+    <span class="number">0</span>
+)
+UIColor(red: <span class="number">0</span>, green: <span class="number">0</span>, blue: <span class="number">0</span>, alpha: <span class="number">1.0</span>).<span class="built_in">set</span>()
+CGContextSetLineWidth(ctx, <span class="number">72</span>)
+CGContextSetLineCap(ctx, kCGLineCapButt)
+CGContextDrawPath(ctx, kCGPathStroke)
+</code></pre><p>然后我们的圆环背景色是渐变的，这可怎么办？我们直接使用CAGradientLayer吗？当然那是其中之一的方法，不过这次我们试试用Mask ＋ 背景色的方式实现。什么是Mask呢？简单来理解就是，如果你想做出非常复杂的形状，你可以将构造一个包含这种形状的图片，需要显示形状的地方用<strong>非白色</strong>的颜色来填充，不显示的地方用<strong>白色</strong>填充。因此，我们构建一个从上到下的渐变色背景，然后配合黑色的圆环进行Mask，就可以得到带有渐变色背景的。</p>
+<pre><code><span class="built_in">CGContextSaveGState</span>(ctx)     
+<span class="built_in">CGContextClipToMask</span>(ctx, <span class="keyword">self</span><span class="variable">.bounds</span>, mask)
+
+let startColorComponents = <span class="built_in">CGColorGetComponents</span>(startColor<span class="variable">.CGColor</span>)
+let endColorComponents = <span class="built_in">CGColorGetComponents</span>(endColor<span class="variable">.CGColor</span>)
+let components = [
+  startColorComponents[<span class="number">0</span>], startColorComponents[<span class="number">1</span>], startColorComponents[<span class="number">2</span>], <span class="number">1.0</span>,
+  endColorComponents[<span class="number">0</span>], endColorComponents[<span class="number">1</span>], endColorComponents[<span class="number">2</span>], <span class="number">1.0</span>
+]
+let gradient = <span class="built_in">CGGradientCreateWithColorComponents</span>(<span class="built_in">CGColorSpaceCreateDeviceRGB</span>(), components, <span class="literal">nil</span>, <span class="number">2</span>)
+
+<span class="built_in">CGContextDrawLinearGradient</span>(
+    ctx,
+    gradient,
+    <span class="built_in">CGPointMake</span>(<span class="built_in">CGRectGetMidX</span>(rect), <span class="built_in">CGRectGetMinY</span>(rect)),
+    <span class="built_in">CGPointMake</span>(<span class="built_in">CGRectGetMidX</span>(rect), <span class="built_in">CGRectGetMaxY</span>(rect)),
+    <span class="number">0</span>
+);
+
+<span class="built_in">CGContextRestoreGState</span>(ctx);
+</code></pre><p>到此，绘画的工作基本就结束了，画白色小球的原理很简单，也不赘述了。我们下面来说一下根据手势来控制白色小球旋转位置，主要的思路还是控制位置来计算弧度。</p>
+<pre><code>override func touchesMoved(touches: <span class="type">Set</span>&lt;<span class="type">NSObject</span>&gt;, withEvent event: <span class="type">UIEvent</span>)     {    
+    //println(<span class="string">"Touches Moved"</span>)
+
+    <span class="keyword">if</span> <span class="keyword">let</span> touch = touches.first <span class="keyword">as</span>? <span class="type">UITouch</span> {
+        <span class="keyword">var</span> location = touch.locationInView(self)
+        moveHandle(location)
+    }
+}
+
+func computeAngle(p1:<span class="type">CGPoint</span> , p2:<span class="type">CGPoint</span>) -&gt; <span class="type">Double</span> {
+    <span class="keyword">var</span> delta = <span class="type">CGPoint</span>(x: p2.x - p1.x, y: p1.y - p2.y)
+
+    <span class="keyword">let</span> radians = <span class="type">Double</span>(atan2(delta.y, delta.x))
+    <span class="keyword">let</span> <span class="literal">result</span> = toDegree(radians)
+    <span class="keyword">return</span> <span class="literal">result</span> &gt;= <span class="number">0</span> ? <span class="literal">result</span> : <span class="literal">result</span> + <span class="number">360</span>
+}
+</code></pre><p>其中，有一点我们要特别注意<br><b>var delta = CGPoint(x: p2.x - p1.x, y: p1.y - p2.y)</b>，在Y轴的计算上，我们需要进行上下翻转的计算，原因就在于我们通过UITouch拿到的location的Y坐标，是UIKit系的坐标体系，Y轴原点在上方，而我们通过绘图的时候需要进行进行Y轴的上下颠倒。</p>
+<p>此外，根据计算的弧度，来更新小球的位置，由于我们是逆时针的slider，所以我们需要用 360 减去我们实际计算得到的弧度。</p>
+<h3 id="一些感受">一些感受</h3><p>真的，Swift中的类型安全太恶心了，不能忍，于是只好玩起了操作符重载</p>
+<pre><code><span class="func"><span class="keyword">func</span> -<span class="params">(lhs:CGFloat, rhs:Double)</span></span> -&gt; <span class="type">CGFloat</span> {
+    <span class="keyword">return</span> lhs - <span class="type">CGFloat</span>(rhs)
+}
+
+<span class="func"><span class="keyword">func</span> +<span class="params">(lhs:Double, rhs:CGFloat)</span></span> -&gt; <span class="type">CGFloat</span> {
+    <span class="keyword">return</span> <span class="type">CGFloat</span>(lhs) + rhs
+}
+
+<span class="func"><span class="keyword">func</span> +<span class="params">(lhs:CGFloat, rhs:Double)</span></span> -&gt; <span class="type">CGFloat</span> {
+    <span class="keyword">return</span> lhs + <span class="type">CGFloat</span>(rhs)
+}
+
+<span class="func"><span class="keyword">func</span> *<span class="params">(lhs:Double, rhs:CGFloat)</span></span> -&gt; <span class="type">CGFloat</span> {
+    <span class="keyword">return</span> <span class="type">CGFloat</span>(lhs) * rhs
+}
+
+<span class="func"><span class="keyword">func</span> *<span class="params">(lhs:CGFloat, rhs:Double)</span></span> -&gt; <span class="type">CGFloat</span> {
+    <span class="keyword">return</span> lhs * <span class="type">CGFloat</span>(rhs)
+}
+
+<span class="func"><span class="keyword">func</span> /<span class="params">(lhs:Double, rhs:CGFloat)</span></span> -&gt; <span class="type">CGFloat</span> {
+    <span class="keyword">return</span> <span class="type">CGFloat</span>(lhs) / rhs
+}
+
+<span class="func"><span class="keyword">func</span> /<span class="params">(lhs:CGFloat, rhs:Double)</span></span> -&gt; <span class="type">CGFloat</span> {
+    <span class="keyword">return</span> lhs / <span class="type">CGFloat</span>(rhs)
+}
+</code></pre><p>最后附上<a href="https://github.com/SatanWoo/SwiftRotateSlider" target="_blank" rel="external">项目地址</a></p>
+<p>好了，不多说了，我要升级El Captain了。</p>
+
+      
+    </div>
+    <footer class="article-footer">
+      <a data-url="http://satanwoo.github.io/2015/10/27/Swift-Circle-Slider/" data-id="cilqrsv19000ml5i1fhaia2oy" class="article-share-link">Share</a>
+      
+      
+  <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Swift/">Swift</a></li></ul>
+
+    </footer>
+  </div>
+  
+</article>
+
+
+  
+    <article id="post-GLCalendarView" class="article article-type-post" itemscope itemprop="blogPost">
+  <div class="article-meta">
+    <a href="/2015/10/14/GLCalendarView/" class="article-date">
+  <time datetime="2015-10-14T01:15:52.000Z" itemprop="datePublished">2015-10-14</time>
+</a>
+    
+  </div>
+  <div class="article-inner">
+    
+    
+      <header class="article-header">
+        
+  
+    <h1 itemprop="name">
+      <a class="article-title" href="/2015/10/14/GLCalendarView/">GLCaledarView 源码解读 &amp; Glow面经</a>
+    </h1>
+  
+
+      </header>
+    
+    <div class="article-entry" itemprop="articleBody">
+      
+        <p>今天选择了GLCalendarView来进行源码解读，一方面是因为它的实现效果简单清晰，第二方面，是我同学让我把Glow的面经给写了。</p>
+<h2 id="Glow面经">Glow面经</h2><p>可能对于大多数来说，Glow相对来说还算一个比较神秘的公司，它主要致力于基于大数据分析女性健康的app的研发。</p>
+<p><em>好吧，其实我也不是很懂，但是我觉得懂一点也挺好，毕竟我是有女朋友的人。</em></p>
+<p>先说说我为什么会投Glow，两点原因：</p>
+<ul>
+<li>主要原因我是想去参加他们的开放日吃东西，然后他们的登记页面有个投简历的选项，我就投了，但是后来开放日那天我被导师拉出去开项目会议了结果就没去成。</li>
+<li>他们的团队很厉害，学历上都是清华、复旦、交大、同济（其中交大和复旦排名不分先后，你们别喷我）。 初创团队都是Google出身，董事还是Paypal的创始人之一。</li>
+</ul>
+<p>后来9月中下旬，Glow给我安排了一次电面，商量了一个时间，电话如约而至。</p>
+<h4 id="电面">电面</h4><p>电面的内容我不记得了，有一个问题是围绕Core Data展开的，问我多线程之间的Core Data搞过没，我说我搞过。后来说到在多个Context之间传输object的问题，一般情况下都是直接<b>mergeChangeFromNotification就可以了，然后你就可以在private context进行数据获取</b>，当时面试官问的一个问题是你是直接merge完了就使用了，还是[context save]提交到persistentStoreCoordinator以后通过objectID去取呢。当时我说了一个我的做法，后来我再打开我自己代码的时候，发现是因为我的app支持删后保存数据，造成了objectID不一致，所以我当时提出了刚启动的时候一定要拉去objectID，现在想想好像应该是答错了。</p>
+<h4 id="现场面试">现场面试</h4><p>地狱般的6小时连续面试，累晕了。</p>
+<h5 id="第一轮_iOS面试">第一轮 iOS面试</h5><p>第一轮是iOS面试，同时来了两位iOS面试官, 先上来让自我介绍下。我每次自我介绍都比较喜欢节约时间，把自己做过的所有app都装在手机上带到现场演示。于是第一轮的很多问题都是穿插着我的项目提问，具体问题我就不说了，因人而异的，所以我就说下我没答上来的知识面：</p>
+<ol>
+<li>UITransition</li>
+<li>UIView的仿射变换对于界面层级显示的一个效果</li>
+<li>他们自家app中一个动画效果制作方式，我应该是答错了</li>
+</ol>
+<p>这一轮给自己打个70分吧。</p>
+<h5 id="第二轮_数学">第二轮 数学</h5><p>第二轮一上来我以为是产品面，结果是服务器端的一位面试官，先聊了聊自己对于做app有没有什么促进app增长的方式。然后，就开始做一道很奇怪的算法题，为什么说奇怪，是因为这题没有正确答案。然后说完思路以后就在白纸上写下来，我用C++写了。面试官问我为啥不用Objective-C写，我说Objective-C手写代码太长了，顺便我还想证明下我还会别的技术。</p>
+<p>这一轮给自己打个80分。</p>
+<h5 id="第三轮_英语面试">第三轮 英语面试</h5><p>第三轮是他们的产品的创始人来面我，他一上来问说他中文不好，我选择英语面试还是中文面试，我说的英语没问题，于是我们就开始了至少50分钟了全英语面试。</p>
+<p>这一轮可以打个95分。</p>
+<h5 id="第四轮_CTO面">第四轮 CTO面</h5><p>面试的时候我不知道他就是CTO，他还带我去外出吃了顿中饭，吃完回来就开始了面试。<br>这轮一开始先问了我怎么修一些关于多线程的Bug。然后问了我道算法题，就是求矩形相交。当时太诚实了，直接说了我做过这题，然后给出了我自己非投影的解法，于是，悲剧就从这里开始了。</p>
+<p>然后CTO就给我出了一道在我看来比较奇特的题目，具体题目保密我不说了，反正就是一开始他出难的，我没答上来，他说你先简化下，做简单版本的。我做出来了，然后又切换成了复杂的，在他的提示下我还是没做出来。</p>
+<p>这轮只能打30分。</p>
+<h5 id="第五轮_CEO面">第五轮 CEO面</h5><p>CEO进来的时候我还在想上一轮的题目，于是悲剧又来了。我在一边想题目一边和CEO进行了握手，然后就被xx了。然后CEO提了一个让我至今非常难忘的面试题：前面面你的所有面试官他们叫什么？这下是真傻眼了。<br>可能最后比较好的是我用纯英文跟CEO聊了一段时间，估计挽回了一点分数。</p>
+<p>这轮打个50分。</p>
+<p>反正面试感觉有点晕，尤其是下午，战线拖的太长了，自己表现的不是很理想。具体技术题目不说了，说出来我认为是对以后面试者的一种不尊重，所以就略过了。总体面试的体验是硅谷风格，英语 ＋ 技术 ＋ 智力。</p>
+<h2 id="GLCalendarView_源码解析">GLCalendarView 源码解析</h2><p>先来张效果图</p>
+<!--img src="https://raw.githubusercontent.com/Glow-Inc/GLCalendarView/master/demo.gif" alt="GLCalendarView" style="max-width:100%;"-->
+<p>效果还挺酷炫的，这里是它的<a href="https://github.com/Glow-Inc/GLCalendarView" target="_blank" rel="external">Github地址</a></p>
+<p>从Github上的介绍来说，这款Calendar和别的同类库之间有个比较大的区别就是可以选择Date Range。从上面的效果我们也可以看出，用户可以通过手势选择一段连续日期。</p>
+<h2 id="源码解析">源码解析</h2><h3 id="图层分解">图层分解</h3><p>既然是个UI的开源库，抛开内部逻辑实现来看，我们首先需要剖析它的图层结构，这样才有助于我们理解整个设计思路。</p>
+<p>在看真正的源代码之前，我们首先来猜测下这玩意怎么实现的。从我个人角度出发，我一开始是这么猜测的：</p>
+<ul>
+<li>整体的结构应该是个UICollectionView，每个日期都是一个UICollectionViewCell。</li>
+<li>每个Cell包含一个圆的背景色（如果是今天），包含一个方形的背景色(连续)，左右尽头是两个半圆的，基于这个，猜测在每个日期Cell里面包含一个背景View，填充颜色，设置圆角。</li>
+<li>最上面有个悬浮的sunday - saturday的表示星期几的UIView，应该是个独立图层，添加了阴影。<b>国外人为什么喜欢把星期日当成一周的开始呢，真蛋疼。</b></li>
+<li>滚动整个过程中，会出现一个显示对应月份的View，可能是个独立的UIView。</li>
+<li><b>拖动过程中出现的放大镜效果，没猜出来。这个放大镜怎么做的？</b></li>
+</ul>
+<p>带着这些疑问我们下面进入图层分解，来一个个验证我们的猜测正确不正确。</p>
+<p>当然，首先我们先大致浏览下结构，整个项目的文件结构大致如下：</p>
+<pre><code>-<span class="ruby">- <span class="constant">GLCalendarDateRange</span>.h/.m
+</span>-<span class="ruby">- <span class="constant">GLCalendarDayCell</span>
+</span>   -<span class="ruby">- <span class="constant">GLCalendarDayCell</span>.h/.m/.xib
+</span>   -<span class="ruby">- <span class="constant">GLCalendarDayCellBackgroundCover</span>.h/.m
+</span>-<span class="ruby">- <span class="constant">GLCalendarMonthCoverView</span>.h/.m
+</span>-<span class="ruby">- <span class="constant">GLCalendarView</span>.h/.m/.xib
+</span>-<span class="ruby">- <span class="constant">GLDateUtils</span>.h/.m</span>
+</code></pre><h4 id="GLCalendarDayCell">GLCalendarDayCell</h4><p>全局搜索下CollectionViewCell关键字，我们发现，果然在GLCalendarDayCell这个类里面，包含了一个UICollectionView成员。</p>
+<p><b> GLCalendarDayCell采用xib式的图形化开发，只要找到对应的xib文件，对于一个界面的布局很轻松得就了然于胸了.</b></p>
+<p>然后我们打开这个对应的xib文件，发现这个cell的布局包括了：</p>
+<ul>
+<li>底层的Cell</li>
+<li>backgroundCover 的UIView</li>
+<li>显示日期的UILabel</li>
+<li>显示月份的UILabel</li>
+</ul>
+<p>这个类很简单，具体就是做了一大堆细节配置的东西，我们来说一个有意思的地方，在GLCalendarDayCell.h里面，有这个一段定义：</p>
+<pre><code><span class="keyword">@property</span> (<span class="keyword">nonatomic</span>, <span class="keyword">strong</span>) <span class="built_in">UIColor</span> *evenMonthBackgroundColor <span class="built_in">UI_APPEARANCE_SELECTOR</span>;
+<span class="keyword">@property</span> (<span class="keyword">nonatomic</span>, <span class="keyword">strong</span>) <span class="built_in">UIColor</span> *oddMonthBackgroundColor <span class="built_in">UI_APPEARANCE_SELECTOR</span>;
+<span class="keyword">@property</span> (<span class="keyword">nonatomic</span>, <span class="keyword">strong</span>) <span class="built_in">NSDictionary</span> *dayLabelAttributes <span class="built_in">UI_APPEARANCE_SELECTOR</span>;
+<span class="keyword">@property</span> (<span class="keyword">nonatomic</span>, <span class="keyword">strong</span>) <span class="built_in">NSDictionary</span> *futureDayLabelAttributes <span class="built_in">UI_APPEARANCE_SELECTOR</span>;
+<span class="keyword">@property</span> (<span class="keyword">nonatomic</span>, <span class="keyword">strong</span>) <span class="built_in">NSDictionary</span> *todayLabelAttributes <span class="built_in">UI_APPEARANCE_SELECTOR</span>;
+<span class="keyword">@property</span> (<span class="keyword">nonatomic</span>, <span class="keyword">strong</span>) <span class="built_in">NSDictionary</span> *monthLabelAttributes <span class="built_in">UI_APPEARANCE_SELECTOR</span>;
+<span class="keyword">@property</span> (<span class="keyword">nonatomic</span>, <span class="keyword">strong</span>) <span class="built_in">UIColor</span> *todayBackgroundColor <span class="built_in">UI_APPEARANCE_SELECTOR</span>;
+</code></pre><p>其中<b>UIAPPEARANCESELECTOR</b>可能对于很多人不熟悉，我们来看看的定义，</p>
+<pre><code><span class="hexcolor">#def</span>ine UI_APPEARANCE_SELECTOR __attribute__((<span class="function"><span class="title">annotate</span><span class="params">(<span class="string">"ui_appearance_selector"</span>)</span></span>))
+</code></pre><p>这个其实是一个宏，那么这个东西的作用是什么呢？<b>是为了全局配置样式！</b></p>
+<p>不知道大家是否还记得我们经常会写[UINavigationBar appearance].tintColor来修改导航栏的颜色，那么这个宏的作用简单来理解就是让你的类拥有可以全局修改样式的能力，如：</p>
+<pre><code><span class="string">[GLCalendarDayCell appearance]</span>.todayBackgroundColor = <span class="string">[UIColol redColor]</span>;
+</code></pre><p>这个类代码虽然简单，却在实现上有个很好的地方，他把这个Cell的样式（简单来说的就是颜色，边界）交由了下面我们要提到的GLCalendarDayCellBackgroundCover类去做，也就是说，这个Cell仅仅维护状态变更的逻辑，样式有单独的样式类完成绘制。</p>
+<h4 id="GLCalendarDayCellBackgroundCover">GLCalendarDayCellBackgroundCover</h4><p>这个类的作用，无它，就是画。看下他的头文件定义，大家就能瞬间明白：</p>
+<pre><code><span class="class"><span class="keyword">@interface</span> <span class="title">GLCalendarDayCellBackgroundCover</span> : <span class="title">UIView</span></span>
+<span class="keyword">@property</span> (<span class="keyword">nonatomic</span>) RANGE_POSITION rangePosition;
+<span class="keyword">@property</span> (<span class="keyword">nonatomic</span>) <span class="built_in">CGFloat</span> paddingLeft;
+<span class="keyword">@property</span> (<span class="keyword">nonatomic</span>) <span class="built_in">CGFloat</span> paddingRight;
+<span class="keyword">@property</span> (<span class="keyword">nonatomic</span>) <span class="built_in">CGFloat</span> paddingTop;
+<span class="keyword">@property</span> (<span class="keyword">nonatomic</span>, <span class="keyword">strong</span>) <span class="built_in">UIColor</span> *fillColor;
+<span class="keyword">@property</span> (<span class="keyword">nonatomic</span>, <span class="keyword">strong</span>) <span class="built_in">UIColor</span> *strokeColor;
+<span class="keyword">@property</span> (<span class="keyword">nonatomic</span>, <span class="keyword">strong</span>) <span class="built_in">UIImage</span> *backgroundImage;
+<span class="keyword">@property</span> (<span class="keyword">nonatomic</span>) <span class="built_in">CGFloat</span> borderWidth;
+<span class="keyword">@property</span> (<span class="keyword">nonatomic</span>) <span class="built_in">BOOL</span> inEdit;
+<span class="keyword">@property</span> (<span class="keyword">nonatomic</span>) <span class="built_in">BOOL</span> isToday;
+<span class="keyword">@property</span> (<span class="keyword">nonatomic</span>) <span class="built_in">BOOL</span> continuousRangeDisplay;
+<span class="keyword">@property</span> (<span class="keyword">nonatomic</span>) <span class="built_in">CGFloat</span> pointSize;
+<span class="keyword">@property</span> (<span class="keyword">nonatomic</span>) <span class="built_in">CGFloat</span> pointScale;
+- (<span class="keyword">void</span>)enlargeBeginPoint:(<span class="built_in">BOOL</span>)enlarge;
+- (<span class="keyword">void</span>)enlargeEndPoint:(<span class="built_in">BOOL</span>)enlarge;
+<span class="keyword">@end</span>
+</code></pre><p>当然，这里要提一点，画圆的几种方法：</p>
+<ul>
+<li>cornerRadius -&gt; GPU offscreen rendering 低性能</li>
+<li>CAShaperLayer 当成mask -&gt; GPU offscreen rendering 低性能</li>
+<li>drawRect + UIBeizerPath -&gt; CPU offerscreen rendering，快，但是内存开销大</li>
+</ul>
+<p>这里在实现圆角的时候，就用了第三种：</p>
+<pre><code><span class="setting">path = <span class="value">[UIBezierPath bezierPathWithOvalInRect:rect];</span></span>
+<span class="title">[path closePath]</span><span class="comment">;</span>
+<span class="title">[self.fillColor setFill]</span><span class="comment">;</span>
+<span class="title">[path fill]</span><span class="comment">;</span>
+</code></pre><p>别的也没什么，都是具体的数学求画的位置。以如下代码为例子说明下</p>
+<pre><code><span class="tag">if</span> (self.rangePosition == RANGE_POSITION_BEGIN) {
+    <span class="attr_selector">[path moveToPoint:CGPointMake(radius + borderWidth + paddingLeft, paddingTop + borderWidth)]</span>;
+    <span class="attr_selector">[path addArcWithCenter:CGPointMake(radius + borderWidth + paddingLeft, midY) radius:radius startAngle: - M_PI / 2 endAngle: M_PI / 2 clockwise:NO]</span>;
+
+    <span class="attr_selector">[path addLineToPoint:CGPointMake(width, height - borderWidth - paddingTop)]</span>;
+    <span class="attr_selector">[path addLineToPoint:CGPointMake(width, borderWidth + paddingTop)]</span>;
+
+    <span class="attr_selector">[path closePath]</span>;
+}
+</code></pre><p><b>RANGEPOSITIONBEGIN</b>表示为左侧开头的cell，所以有个左弧度。画法过程如下：</p>
+<ul>
+<li>左弧度的上部顶点作为贝塞尔曲线的初始点</li>
+<li>画左弧度</li>
+<li>画左弧度下方的一条水平横线</li>
+<li>画水平横线右端顶点向上的竖直线</li>
+<li>封闭，自动会在竖直线和上部初始顶点间添加一条水平横线。</li>
+</ul>
+<h4 id="GLCalendarView">GLCalendarView</h4><p>最后来说下对外暴露的类，GLCalendarView。<br>这个类的实现就是一对控制逻辑，主要说下我特别感兴趣的拖动range的过程中放大镜的实现。</p>
+<ul>
+<li>首先这个放大镜，是个中心区域透明的图片。我一开始是纯代码编程的，真蛋疼。</li>
+<li>这个放大镜底下偷偷埋了个UIImageView，每次拖动的更新的时候，都自动去截图，把截图放到这个UIImageView里面，就完成了放大镜的效果。</li>
+</ul>
+<p>具体的实现如下：</p>
+<pre><code>- (<span class="keyword">void</span>)showMagnifierAboveDate:(<span class="built_in">NSDate</span> *)date
+{
+    <span class="keyword">if</span> (!<span class="keyword">self</span><span class="variable">.showMagnifier</span>) {
+        <span class="keyword">return</span>;
+    }
+    GLCalendarDayCell *cell = (GLCalendarDayCell *)[<span class="keyword">self</span> collectionView:<span class="keyword">self</span><span class="variable">.collectionView</span> cellForItemAtIndexPath:[<span class="keyword">self</span> indexPathForDate:date]];
+    <span class="built_in">CGFloat</span> delta = <span class="keyword">self</span><span class="variable">.cellWidth</span> / <span class="number">2</span>;
+    <span class="keyword">if</span> (<span class="keyword">self</span><span class="variable">.draggingBeginDate</span>) {
+        delta = delta;
+    } <span class="keyword">else</span> {
+        delta = -delta;
+    }
+    <span class="built_in">UIGraphicsBeginImageContextWithOptions</span>(<span class="keyword">self</span><span class="variable">.maginifierContentView</span><span class="variable">.frame</span><span class="variable">.size</span>, <span class="literal">YES</span>, <span class="number">0.0</span>);
+    <span class="built_in">CGContextRef</span> context = <span class="built_in">UIGraphicsGetCurrentContext</span>();
+    <span class="built_in">CGContextFillRect</span>(context, <span class="keyword">self</span><span class="variable">.maginifierContentView</span><span class="variable">.bounds</span>);
+    <span class="built_in">CGContextTranslateCTM</span>(context, -cell<span class="variable">.center</span><span class="variable">.x</span> + delta, -cell<span class="variable">.center</span><span class="variable">.y</span>);
+    <span class="built_in">CGContextTranslateCTM</span>(context, <span class="keyword">self</span><span class="variable">.maginifierContentView</span><span class="variable">.frame</span><span class="variable">.size</span><span class="variable">.width</span> / <span class="number">2</span>, <span class="keyword">self</span><span class="variable">.maginifierContentView</span><span class="variable">.frame</span><span class="variable">.size</span><span class="variable">.height</span> / <span class="number">2</span>);
+    [<span class="keyword">self</span><span class="variable">.collectionView</span><span class="variable">.layer</span> renderInContext:context];
+    <span class="built_in">UIImage</span> *image = <span class="built_in">UIGraphicsGetImageFromCurrentImageContext</span>();
+    <span class="built_in">UIGraphicsEndImageContext</span>();
+
+    <span class="keyword">self</span><span class="variable">.maginifierContentView</span><span class="variable">.image</span> = image;
+    <span class="keyword">self</span><span class="variable">.magnifierContainer</span><span class="variable">.center</span> = [<span class="keyword">self</span> convertPoint:<span class="built_in">CGPointMake</span>(cell<span class="variable">.center</span><span class="variable">.x</span> - delta - <span class="number">58</span>, cell<span class="variable">.center</span><span class="variable">.y</span> - <span class="number">90</span>) fromView:<span class="keyword">self</span><span class="variable">.collectionView</span>];
+    <span class="keyword">self</span><span class="variable">.magnifierContainer</span><span class="variable">.hidden</span> = <span class="literal">NO</span>;
+}
+</code></pre><p>主要说下CGContext那块，因为发现好多人还不是特别能理解。</p>
+<p><b>首先，坐标系和UIKit是反过来的！</b><br>然后这段代码做了啥呢？</p>
+<ul>
+<li><p>获取当前拖拽日期的对应的Cell。</p>
+</li>
+<li><p>创建一个画布，画布大小就是放大镜的大小。</p>
+<pre><code><span class="tag">UIGraphicsBeginImageContextWithOptions</span>(<span class="tag">self</span><span class="class">.maginifierContentView</span><span class="class">.frame</span><span class="class">.size</span>, <span class="tag">YES</span>, 0<span class="class">.0</span>);
+</code></pre></li>
+<li><p>位移到cell的位置处进行截图，因为是CGContext画图，所以向上是正的，向下负的。</p>
+<pre><code><span class="tag">CGContextTranslateCTM</span>(<span class="tag">context</span>, <span class="tag">-cell</span><span class="class">.center</span><span class="class">.x</span> + <span class="tag">delta</span>, <span class="tag">-cell</span><span class="class">.center</span><span class="class">.y</span>);
+</code></pre></li>
+<li><p>向上移到放大镜的中心截图，否则因为放大镜的大小是cell的高度，会包含上cell的下半部分，和下cell的上半部分。</p>
+<pre><code>CGContextTranslateCTM(context, self.maginifierContentView.frame.<span class="built_in">size</span>.<span class="variable">width</span> / <span class="number">2</span>, self.maginifierContentView.frame.<span class="built_in">size</span>.<span class="variable">height</span> / <span class="number">2</span>);
+</code></pre></li>
+</ul>
+<h4 id="Thread_Local_变量">Thread Local 变量</h4><p>在GLCalendarView里面，有一个比较有亮点的实现：</p>
+<pre><code>+ (<span class="built_in">NSCalendar</span> *)calendar {
+    <span class="built_in">NSMutableDictionary</span> *threadDictionary = [[<span class="built_in">NSThread</span> currentThread] threadDictionary];
+
+    <span class="built_in">NSCalendar</span> *cal = [threadDictionary objectForKey:<span class="string">@"GLCalendar"</span>];
+    <span class="keyword">if</span> (!cal) {
+        cal = [[<span class="built_in">NSCalendar</span> alloc] initWithCalendarIdentifier:<span class="built_in">NSCalendarIdentifierGregorian</span>];
+        cal<span class="variable">.locale</span> = [<span class="built_in">NSLocale</span> currentLocale];
+        [threadDictionary setObject:cal forKey:<span class="string">@"GLCalendar"</span>];
+    }
+    <span class="keyword">return</span> cal;
+}
+</code></pre><p>我们都知道，NSCalendar的初始化是比较耗时的，所以经验上来说一般会构建一个单例子使用。但是在这里可以看到，这里用了threadDictionary去获取thread local variable。相当于在每个使用到这个函数的线程里都构建一个thread local的单例子，那么thread local的好处有啥呢？</p>
+<ul>
+<li>线程安全</li>
+<li>thread local cache，访问快，避免flush cache line。</li>
+</ul>
+<p>但是其实我个人不是很理解这么做的优势究竟有多大，请大家指点一下。</p>
+
+      
+    </div>
+    <footer class="article-footer">
+      <a data-url="http://satanwoo.github.io/2015/10/14/GLCalendarView/" data-id="cilqrsv21001cl5i1qkh9puy0" class="article-share-link">Share</a>
+      
+      
+  <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
+
+    </footer>
+  </div>
+  
+</article>
+
+
+  
     <article id="post-Debounce-and-Throttle-in-iOS" class="article article-type-post" itemscope itemprop="blogPost">
   <div class="article-meta">
     <a href="/2015/09/30/Debounce-and-Throttle-in-iOS/" class="article-date">
@@ -271,7 +836,7 @@
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/09/30/Debounce-and-Throttle-in-iOS/" data-id="cil4zlq0q001fwvi1407qeu8j" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/09/30/Debounce-and-Throttle-in-iOS/" data-id="cilqrsv2a001kl5i1gey260yn" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
@@ -572,7 +1137,7 @@
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/09/23/flux-js-part-one/" data-id="cil4zlpz90005wvi1betzfpx1" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/09/23/flux-js-part-one/" data-id="cilqrsv0o0005l5i1qsv4auak" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/JavaScript/">JavaScript</a></li></ul>
@@ -1244,7 +1809,7 @@ CountryModel<span class="keyword">*</span> country = [[CountryModel alloc] initW
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/09/17/code-of-JSONModel/" data-id="cil4zlpzb0008wvi1013765mg" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/09/17/code-of-JSONModel/" data-id="cilqrsv0s0008l5i1iz4en2aq" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
@@ -1292,7 +1857,7 @@ CountryModel<span class="keyword">*</span> country = [[CountryModel alloc] initW
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/09/11/A-New-Start/" data-id="cil4zlpy90000wvi1a374vmoy" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/09/11/A-New-Start/" data-id="cilqrsuzi0000l5i1nvbhudi6" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
@@ -1319,7 +1884,7 @@ CountryModel<span class="keyword">*</span> country = [[CountryModel alloc] initW
   <div class="widget-wrap">
     <h3 class="widget-title">Tags</h3>
     <div class="widget">
-      <ul class="tag-list"><li class="tag-list-item"><a class="tag-list-link" href="/tags/Android/">Android</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/JavaScript/">JavaScript</a><span class="tag-list-count">2</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Math/">Math</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/R/">R</a><span class="tag-list-count">2</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Swift/">Swift</a><span class="tag-list-count">4</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/iOS/">iOS</a><span class="tag-list-count">13</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/shell/">shell</a><span class="tag-list-count">1</span></li></ul>
+      <ul class="tag-list"><li class="tag-list-item"><a class="tag-list-link" href="/tags/Android/">Android</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/JavaScript/">JavaScript</a><span class="tag-list-count">2</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Math/">Math</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/R/">R</a><span class="tag-list-count">2</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Reverse-Engineering/">Reverse Engineering</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Swift/">Swift</a><span class="tag-list-count">5</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/iOS/">iOS</a><span class="tag-list-count">14</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/shell/">shell</a><span class="tag-list-count">1</span></li></ul>
     </div>
   </div>
 
@@ -1328,7 +1893,7 @@ CountryModel<span class="keyword">*</span> country = [[CountryModel alloc] initW
   <div class="widget-wrap">
     <h3 class="widget-title">Tag Cloud</h3>
     <div class="widget tagcloud">
-      <a href="/tags/Android/" style="font-size: 10px;">Android</a> <a href="/tags/JavaScript/" style="font-size: 13.33px;">JavaScript</a> <a href="/tags/Math/" style="font-size: 10px;">Math</a> <a href="/tags/R/" style="font-size: 13.33px;">R</a> <a href="/tags/Swift/" style="font-size: 16.67px;">Swift</a> <a href="/tags/iOS/" style="font-size: 20px;">iOS</a> <a href="/tags/shell/" style="font-size: 10px;">shell</a>
+      <a href="/tags/Android/" style="font-size: 10px;">Android</a> <a href="/tags/JavaScript/" style="font-size: 13.33px;">JavaScript</a> <a href="/tags/Math/" style="font-size: 10px;">Math</a> <a href="/tags/R/" style="font-size: 13.33px;">R</a> <a href="/tags/Reverse-Engineering/" style="font-size: 10px;">Reverse Engineering</a> <a href="/tags/Swift/" style="font-size: 16.67px;">Swift</a> <a href="/tags/iOS/" style="font-size: 20px;">iOS</a> <a href="/tags/shell/" style="font-size: 10px;">shell</a>
     </div>
   </div>
 
@@ -1337,7 +1902,7 @@ CountryModel<span class="keyword">*</span> country = [[CountryModel alloc] initW
   <div class="widget-wrap">
     <h3 class="widget-title">Archives</h3>
     <div class="widget">
-      <ul class="archive-list"><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/02/">February 2016</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/12/">December 2015</a><span class="archive-list-count">6</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/11/">November 2015</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/10/">October 2015</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/09/">September 2015</a><span class="archive-list-count">4</span></li></ul>
+      <ul class="archive-list"><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/03/">March 2016</a><span class="archive-list-count">3</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/02/">February 2016</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/12/">December 2015</a><span class="archive-list-count">6</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/11/">November 2015</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/10/">October 2015</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/09/">September 2015</a><span class="archive-list-count">4</span></li></ul>
     </div>
   </div>
 
@@ -1349,23 +1914,23 @@ CountryModel<span class="keyword">*</span> country = [[CountryModel alloc] initW
       <ul>
         
           <li>
+            <a href="/2016/03/14/RxSwift/">RxSwift</a>
+          </li>
+        
+          <li>
+            <a href="/2016/03/14/SizeUp/">SizeUp</a>
+          </li>
+        
+          <li>
+            <a href="/2016/03/14/DXXcodeConsoleUnicodePlugin/">DXXcodeConsoleUnicodePlugin源码解析</a>
+          </li>
+        
+          <li>
             <a href="/2016/02/27/check-manifest/">Check Pods Manifest.lock</a>
           </li>
         
           <li>
             <a href="/2016/02/27/pod-install-plugin/">开发一个简单的Pod Install 插件</a>
-          </li>
-        
-          <li>
-            <a href="/2016/02/27/FBKVOController/">FBKVOController 源码解析</a>
-          </li>
-        
-          <li>
-            <a href="/2016/02/05/DGRunKeeperSwitch/">DGRunKeeperSwitch 源码解析</a>
-          </li>
-        
-          <li>
-            <a href="/2016/02/05/PureLayout/">PureLayout 源码解析</a>
           </li>
         
       </ul>
