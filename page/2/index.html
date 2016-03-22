@@ -62,6 +62,157 @@
       <div class="outer">
         <section id="main">
   
+    <article id="post-Learn-R-2" class="article article-type-post" itemscope itemprop="blogPost">
+  <div class="article-meta">
+    <a href="/2015/12/20/Learn-R-2/" class="article-date">
+  <time datetime="2015-12-20T08:43:31.000Z" itemprop="datePublished">2015-12-20</time>
+</a>
+    
+  </div>
+  <div class="article-inner">
+    
+    
+      <header class="article-header">
+        
+  
+    <h1 itemprop="name">
+      <a class="article-title" href="/2015/12/20/Learn-R-2/">一步步学R（2）</a>
+    </h1>
+  
+
+      </header>
+    
+    <div class="article-entry" itemprop="articleBody">
+      
+        <h3 id="系列连载">系列连载</h3><p><a href="http://satanwoo.github.io/2015/12/13/Learn-R-1/">一步步学R（1）</a><br><a href="http://satanwoo.github.io/2015/12/20/Learn-R-2/">一步步学R（2）</a></p>
+<h3 id="If-Else">If-Else</h3><p>R 种的If-Else结构并没有比较特殊的地方，仍然支持两种结构：</p>
+<pre><code><span class="tag">if</span> (condition) {
+    <span class="comment">// Do Something</span>
+} <span class="tag">else</span> {
+   <span class="comment">// Do Otherthing</span>
+}
+</code></pre><p>或者如下：</p>
+<pre><code><span class="keyword">if</span> (condition) {
+    // <span class="keyword">Do</span> Something
+} <span class="keyword">else</span> <span class="keyword">if</span> (condition2) {
+   // <span class="keyword">Do</span> Otherthing
+} <span class="keyword">else</span> {
+   // <span class="keyword">Do</span> <span class="keyword">Else</span>
+}
+</code></pre><p>但是在R中，对于If-else有一个可以简化的地方，如：</p>
+<pre><code><span class="keyword">if</span> (x &gt; <span class="number">100</span>) {
+    y &lt;- <span class="number">10</span>
+} <span class="keyword">else</span> <span class="keyword">if</span> (x &lt; <span class="number">100</span>) {
+   y &lt;- <span class="number">11</span>
+} <span class="keyword">else</span> {
+   y &lt;- <span class="number">5</span>
+}
+</code></pre><p>可以简化成：</p>
+<pre><code>y &lt;- <span class="keyword">if</span> (x &gt; <span class="number">100</span>) {
+    <span class="number">10</span>
+} <span class="keyword">else</span> <span class="keyword">if</span> (x &lt; <span class="number">100</span>) {
+   <span class="number">11</span>
+} <span class="keyword">else</span> {
+   <span class="number">5</span>
+}
+</code></pre><h3 id="For">For</h3><p>For语句的语法也非常简单：</p>
+<pre><code><span class="keyword">for</span> (i <span class="keyword">in</span> <span class="number">1</span>:<span class="number">10</span>) {
+    <span class="built_in">print</span>(i)
+}
+</code></pre><p><strong>seq_along</strong> 函数是for循环中可以注意的一个点。它的参数是一个vector，如<code>x &lt;- c(&#39;a&#39;, &#39;b&#39;)</code>，调用<code>seq_along(x)</code>会得到一个序列，长度为2，值为1，2。因此，<code>print(x[1])</code> 就等于 <code>a</code>。</p>
+<h3 id="While">While</h3><p>同样简单：</p>
+<pre><code><span class="keyword">while</span> <span class="comment">(condition)</span> {
+   <span class="comment">// Do studyy</span>
+}
+</code></pre><h3 id="Repeat">Repeat</h3><p>repeat是R中特有的一种逻辑结构，简单来理解就是<strong>死循环</strong>，想要退出的唯一方式是<strong>显式使用<code>break</code>。</strong></p>
+<pre><code>repeat {
+    x &lt;- something()
+
+    <span class="keyword">if</span> (<span class="literal">A</span>) {
+        <span class="keyword">break</span>
+    } <span class="keyword">else</span> {
+        x &lt;- x + <span class="number">1</span>
+    }
+}
+</code></pre><h3 id="Next">Next</h3><p><code>next</code>就是其他语言中的<code>continue</code></p>
+<pre><code><span class="keyword">for</span> (i in <span class="number">1</span>:<span class="number">100</span>) {
+     <span class="keyword">if</span> (i &lt; <span class="number">20</span>) {
+         next
+     }
+
+     <span class="comment">// Do other</span>
+}
+</code></pre><h3 id="函数">函数</h3><p>R中的函数可以没有显式的<code>return</code>，默认返回最后一句语句。</p>
+<pre><code>add2 &lt;- <span class="function"><span class="keyword">function</span><span class="params">(x, y)</span> </span>{
+     x + y
+}
+</code></pre><p>和其他语言一样，你可以给参数设置默认值，如</p>
+<pre><code>add2 &lt;- <span class="function"><span class="keyword">function</span><span class="params">(x, y = 10)</span> </span>{
+     x + y
+}
+</code></pre><p>R中的函数参数优点类似于JavaScript，<strong>可以不用赋值完全，前提是你用不到</strong>。而且，对于R中的参数，你可以打乱参数传递，只要你前面加上了行参的名称，</p>
+<p>比如</p>
+<pre><code>add2 &lt;- <span class="function"><span class="keyword">function</span><span class="params">(x, y)</span> </span>{
+     x + y
+}
+</code></pre><p>你可以通过<code>add2(y = 5, x = 7)</code>来进行调用。</p>
+<h4 id="可变参数">可变参数</h4><p>在R中也是有可变参数的，即<code>...</code>。</p>
+<pre><code>myplot &lt;- <span class="function"><span class="keyword">function</span><span class="params">(x, y, type = 1, <span class="rest_arg">...) {
+    plot</span>(x, y, type, <span class="rest_arg">...)
+}</span></span></span>
+</code></pre><p>同样，<code>...</code>也可以用在泛型函数中，后续学习中我们会说到。</p>
+<p>**不过，与其他编程语言所不同的是，R中的可变参数可以放在函数列表的前面，如</p>
+<p><code>function(..., sep = &quot; &quot;, collsape = NULL)</code></p>
+<p>调用如上的这种函数，必须<strong>显式的</strong>通过函数参数名称来调用后续参数，如</p>
+<p><code>function(&quot;haha&quot;, &quot;heihei&quot;, sep = &quot;,&quot;)</code></p>
+<h3 id="变量作用域">变量作用域</h3><h4 id="使用变量">使用变量</h4><p>当你使用一个R语言中的变量时，比如x，你有没有想过x究竟是存在于哪里呢？</p>
+<p>有些人会说，我定义的呀，比如<code>x &lt;- 5</code>，那么对于那些默认函数，比如<code>vector()</code>呢？</p>
+<p>所以，这就涉及到R中的<strong>Symbol binding</strong>（其他语言的变量查找）了。</p>
+<p>在R中，查找顺序是这样的。</p>
+<pre><code>[<span class="number">1</span>] <span class="string">".GlobalEnv"</span>        <span class="string">"tools:rstudio"</span>     <span class="string">"package:stats"</span>     <span class="string">"package:graphics"</span>  <span class="string">"package:grDevices"</span>
+[<span class="number">6</span>] <span class="string">"package:utils"</span>     <span class="string">"package:datasets"</span>  <span class="string">"package:methods"</span>   <span class="string">"Autoloads"</span>         <span class="string">"package:base"</span> 
+</code></pre><p>默认查找的是<strong>.GlobalEnv</strong>，依次类推。</p>
+<p>如果你还通过<code>library()</code>函数加载了其他package，如ggplot2，那么查找顺序是</p>
+<pre><code> [<span class="number">1</span>] <span class="string">".GlobalEnv"</span>        <span class="string">"package:ggplot2"</span>   <span class="string">"tools:rstudio"</span>     <span class="string">"package:stats"</span>     <span class="string">"package:graphics"</span> 
+ [<span class="number">6</span>] <span class="string">"package:grDevices"</span> <span class="string">"package:utils"</span>     <span class="string">"package:datasets"</span>  <span class="string">"package:methods"</span>   <span class="string">"Autoloads"</span>        
+[<span class="number">11</span>] <span class="string">"package:base"</span>     
+</code></pre><p>也就是用户加载的package会自动加到除了<strong>.GlobalEnv</strong>之外的任意搜索顺序前。</p>
+<p>如果要查看最新的搜索顺序，可以通过<code>search()</code></p>
+<h4 id="作用域">作用域</h4><p>R中的作用域，是Lexical Scoping，也就是静态作用域，也就是<strong>JavaScript的作用域</strong>。</p>
+<p>好了，我不多说了，如果想学习更多冠以静态作用域的话，看我的JavaScript博客部分。</p>
+<p>当然，如果你不懂，你可以通过如下函数帮助你理解。</p>
+<p><code>ls(environment(functionName))</code><br><code>get(variableName, environment(functionName))</code></p>
+<p><strong>一言以蔽之，lexcial scoping可以简单理解为你函数中需要的变量，是通过其定义时环境进行查找。</strong></p>
+<h4 id="Data_and_Times">Data and Times</h4><p>R中的时间表示，采用了一种特殊的数据结构。</p>
+<p>Date是通过<strong>Date</strong>这一数据结构表示，而Time是通过POSIXct或者POSIXlt表示。</p>
+<ul>
+<li>Date是不包含Time的，只显示年、月、日。</li>
+<li>Date的内部储存是计算1970-01-01到当前时间之间的天数。</li>
+<li>Time的内部储存是计算1979-01-01到当前时间之间的秒数。</li>
+</ul>
+<p>可以采用<code>as.Date</code>构建Date，如<code>as.Date(&quot;1970-01-01&quot;)</code></p>
+<p>而Time相对来说比较复杂，我们首先来看看<code>Posixlt</code>的表现形式。</p>
+<p>我们输入<code>p&lt;- Sys.time()</code>获取当前时间，结果是<code>&quot;2015-12-27 00:59:18 CST&quot;</code>，然后我们调用<code>unclass(p)</code>来看看其构成，结果如下：</p>
+<pre><code>[<span class="number">1</span>] <span class="string">"sec"</span>    <span class="string">"min"</span>    <span class="string">"hour"</span>   <span class="string">"mday"</span>   <span class="string">"mon"</span>    <span class="string">"year"</span>   <span class="string">"wday"</span>   <span class="string">"yday"</span>   <span class="string">"isdst"</span>  <span class="string">"zone"</span>   <span class="string">"gmtoff"</span>
+</code></pre><p><strong>这表明，通过<code>Posixlt</code>表征的<code>Time</code></strong>，其内部是由一系列成分组成的集合。我们可以通过<br><code>p$wday</code> 来查看今天是周几。  </p>
+<p>而<code>Posixct</code>就是就算1970-01-01到当前时间的描述，是个非常大的<strong>Integer</strong>。</p>
+<p>你可以对Date或者Time进行大小比较操作，但是注意，<strong>不能讲Date和Time混合操作</strong></p>
+
+      
+    </div>
+    <footer class="article-footer">
+      <a data-url="http://satanwoo.github.io/2015/12/20/Learn-R-2/" data-id="cim3hlk4n0014tui1dxii7kh4" class="article-share-link">Share</a>
+      
+      
+  <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/R/">R</a></li></ul>
+
+    </footer>
+  </div>
+  
+</article>
+
+
+  
     <article id="post-Regression-Model-1" class="article article-type-post" itemscope itemprop="blogPost">
   <div class="article-meta">
     <a href="/2015/12/15/Regression-Model-1/" class="article-date">
@@ -104,7 +255,7 @@
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/12/15/Regression-Model-1/" data-id="cilqspnds000t19i12fpn8f07" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/12/15/Regression-Model-1/" data-id="cim3hlk4c000vtui1ontd4u8n" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Math/">Math</a></li></ul>
@@ -247,7 +398,7 @@ $foo
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/12/13/Learn-R-1/" data-id="cilqspne6001519i1yhptu8nf" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/12/13/Learn-R-1/" data-id="cim3hlk4r0017tui1zr8hvv5x" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/R/">R</a></li></ul>
@@ -353,7 +504,7 @@ frame <span class="preprocessor">#<span class="number">20</span>: libdyld.dylib`
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/12/11/LLDB-1/" data-id="cilqspneb001a19i16h3qyjhr" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/12/11/LLDB-1/" data-id="cim3hlk4w001ctui1l138m5ma" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
@@ -652,7 +803,7 @@ TBBoundingBox TBBoundingBoxMake(<span class="built_in">double</span> x0, <span c
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/12/11/TBAnnotationClustering/" data-id="cilqspnd8000f19i18287n58e" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/12/11/TBAnnotationClustering/" data-id="cim3hlk3r000itui1xi7cykic" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
@@ -877,7 +1028,7 @@ BOOL success = class_addMethod(<span class="keyword">class</span>, originalSelec
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/11/26/FDFullScreenPopGesture-Source-Code/" data-id="cilqspneh001g19i1mfjvvlsn" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/11/26/FDFullScreenPopGesture-Source-Code/" data-id="cim3hlk53001itui1709kmpgb" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
@@ -987,7 +1138,7 @@ replicationLayer.instanceDelay = <span class="number">0.3</span>
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/11/17/Fun-of-CAReplicationLayer/" data-id="cilqspnef001e19i1pf1qa6k4" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/11/17/Fun-of-CAReplicationLayer/" data-id="cim3hlk51001gtui1n1a2vxzu" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Swift/">Swift</a></li></ul>
@@ -1193,7 +1344,7 @@ modalVC<span class="class">.modalPresentationStyle</span> = <span class="class">
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/11/12/Swift-UITransition-iOS8/" data-id="cilqspndb000h19i1pfh7328s" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/11/12/Swift-UITransition-iOS8/" data-id="cim3hlk3t000ktui14mj5rlnt" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Swift/">Swift</a></li></ul>
@@ -1353,7 +1504,7 @@ modalVC<span class="class">.modalPresentationStyle</span> = <span class="class">
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/11/05/Understand-Viper/" data-id="cilqspnd6000d19i1cqxjnjwo" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/11/05/Understand-Viper/" data-id="cim3hlk3o000gtui177t2c67u" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
@@ -1582,73 +1733,10 @@ objectPath.<span class="keyword">get</span>(obj, <span class="string">'a.\u1200'
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/11/05/Object-Path-Source-Code/" data-id="cilqspne0001019i1kzpedjf0" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/11/05/Object-Path-Source-Code/" data-id="cim3hlk4l0012tui10zkfu54s" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/JavaScript/">JavaScript</a></li></ul>
-
-    </footer>
-  </div>
-  
-</article>
-
-
-  
-    <article id="post-Learn-Android-Day-by-Day" class="article article-type-post" itemscope itemprop="blogPost">
-  <div class="article-meta">
-    <a href="/2015/10/29/Learn-Android-Day-by-Day/" class="article-date">
-  <time datetime="2015-10-29T11:52:44.000Z" itemprop="datePublished">2015-10-29</time>
-</a>
-    
-  </div>
-  <div class="article-inner">
-    
-    
-      <header class="article-header">
-        
-  
-    <h1 itemprop="name">
-      <a class="article-title" href="/2015/10/29/Learn-Android-Day-by-Day/">大菜比学安卓</a>
-    </h1>
-  
-
-      </header>
-    
-    <div class="article-entry" itemprop="articleBody">
-      
-        <p>本人新手，学习安卓，这里用来记录一下阅读《第一行代码》的笔试和体会。</p>
-<ol>
-<li>在XML引入一个id，就使用@id/id_name，如果要添加一个id，就使用@+id/id_name</li>
-<li>给主活动指定的Label不仅会成为标题栏中的内容，还会成为Launcher中应用程序显示的名称。</li>
-<li>Intent 调用StartActivityForResult用来给上一层Activity返回数据</li>
-<li>活动的生存期</li>
-</ol>
-<ul>
-<li>运行状态，当一个活动处于返回栈的栈顶时，就处于运行状态，系统最不愿意回收的就是处于运行状态的活动。</li>
-<li>暂停状态，当一个活动不处于栈顶位置，但是仍然可见的时候，就进入了暂停状态（因为有些活动，如对话框等，就不会占据整个屏幕，因此其他活动仍然可见）</li>
-<li>停止状态，当一个活动不再处于栈顶位置，并且完全不可见的时候，就进入了停止状态。</li>
-<li>销毁状态，当一个活动从返回栈中被移除后，就进入了销毁状态。</li>
-</ul>
-<ol>
-<li>活动生命周期回调函数</li>
-</ol>
-<ul>
-<li>onCreate在活动第一次创建的时候调用</li>
-<li>onStart在活动由不可见变成可见的时候调用</li>
-<li>onResume在活动准备好和用户进行交互的时候调用，此时的活动一定位于栈的栈顶，且处于运行状态。</li>
-<li>onPause在系统准备去启动或者恢复另一个活动的时候调用。</li>
-<li>onStop在活动完全不可见的时候调用。</li>
-<li>onDestory在活动被销毁之前调用，之后的活动变为销毁状态。</li>
-<li>onRestart在活动由停止状态变为运行状态之前调用，也就是活动被重新启动了。</li>
-</ul>
-
-      
-    </div>
-    <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/10/29/Learn-Android-Day-by-Day/" data-id="cilqspne8001719i12a2xrc9p" class="article-share-link">Share</a>
-      
-      
-  <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Android/">Android</a></li></ul>
 
     </footer>
   </div>
@@ -1672,7 +1760,7 @@ objectPath.<span class="keyword">get</span>(obj, <span class="string">'a.\u1200'
   <div class="widget-wrap">
     <h3 class="widget-title">Tags</h3>
     <div class="widget">
-      <ul class="tag-list"><li class="tag-list-item"><a class="tag-list-link" href="/tags/Android/">Android</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/JavaScript/">JavaScript</a><span class="tag-list-count">2</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Math/">Math</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/R/">R</a><span class="tag-list-count">2</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Reverse-Engineering/">Reverse Engineering</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Swift/">Swift</a><span class="tag-list-count">5</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/iOS/">iOS</a><span class="tag-list-count">14</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/shell/">shell</a><span class="tag-list-count">1</span></li></ul>
+      <ul class="tag-list"><li class="tag-list-item"><a class="tag-list-link" href="/tags/Android/">Android</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/JavaScript/">JavaScript</a><span class="tag-list-count">2</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Math/">Math</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/R/">R</a><span class="tag-list-count">2</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Reverse-Engineering/">Reverse Engineering</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Swift/">Swift</a><span class="tag-list-count">6</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/iOS/">iOS</a><span class="tag-list-count">14</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/shell/">shell</a><span class="tag-list-count">1</span></li></ul>
     </div>
   </div>
 
@@ -1690,7 +1778,7 @@ objectPath.<span class="keyword">get</span>(obj, <span class="string">'a.\u1200'
   <div class="widget-wrap">
     <h3 class="widget-title">Archives</h3>
     <div class="widget">
-      <ul class="archive-list"><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/03/">March 2016</a><span class="archive-list-count">3</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/02/">February 2016</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/12/">December 2015</a><span class="archive-list-count">6</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/11/">November 2015</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/10/">October 2015</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/09/">September 2015</a><span class="archive-list-count">4</span></li></ul>
+      <ul class="archive-list"><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/03/">March 2016</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/02/">February 2016</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/12/">December 2015</a><span class="archive-list-count">6</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/11/">November 2015</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/10/">October 2015</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/09/">September 2015</a><span class="archive-list-count">4</span></li></ul>
     </div>
   </div>
 
@@ -1700,6 +1788,10 @@ objectPath.<span class="keyword">get</span>(obj, <span class="string">'a.\u1200'
     <h3 class="widget-title">Recents</h3>
     <div class="widget">
       <ul>
+        
+          <li>
+            <a href="/2016/03/22/dispatch-in-swift/">Swift 中的静态Dispatch VS 动态Dispatch</a>
+          </li>
         
           <li>
             <a href="/2016/03/14/RxSwift/">RxSwift的第一印象</a>
@@ -1715,10 +1807,6 @@ objectPath.<span class="keyword">get</span>(obj, <span class="string">'a.\u1200'
         
           <li>
             <a href="/2016/02/27/check-manifest/">Check Pods Manifest.lock</a>
-          </li>
-        
-          <li>
-            <a href="/2016/02/27/pod-install-plugin/">开发一个简单的Pod Install 插件</a>
           </li>
         
       </ul>

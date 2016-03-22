@@ -17,7 +17,7 @@
 <meta property="og:image" content="http://7lrzqz.com1.z0.glb.clouddn.com/%E5%B1%8F%E5%B9%95%E5%BF%AB%E7%85%A7%202016-03-13%20%E4%B8%8B%E5%8D%8811.24.28.png">
 <meta property="og:image" content="http://7lrzqz.com1.z0.glb.clouddn.com/%E5%B1%8F%E5%B9%95%E5%BF%AB%E7%85%A7%202016-03-13%20%E4%B8%8B%E5%8D%8811.51.30.png">
 <meta property="og:image" content="http://7lrzqz.com1.z0.glb.clouddn.com/%E5%B1%8F%E5%B9%95%E5%BF%AB%E7%85%A7%202016-03-14%20%E4%B8%8A%E5%8D%8812.00.45.png">
-<meta property="og:updated_time" content="2016-03-13T16:48:31.000Z">
+<meta property="og:updated_time" content="2016-03-22T12:48:47.000Z">
 <meta name="twitter:card" content="summary">
 <meta name="twitter:title" content="逆向工程SizeUp">
 <meta name="twitter:description" content="这几天把《汇编语言》好好复习一遍，心里痒痒，就想找个软件来逆向破解一发。破啥好呢？网上逆向工程的教程一大堆，主要都是Sketch啦，Reveal啦，那我照着做一遍也没啥意思啊，体现不出我中国iOS第12人的特点啊。干脆我找个小众一点的软件破解吧。于是，我就盯上了我每天都非常喜欢使用的SizeUp，这是一款非常快速的窗口管理软件，可以通过快捷键将窗口扩展到指定的大小和位置，配合外接显示屏简直酷炫到飞">
@@ -135,7 +135,7 @@
 ... <span class="number">0x1000008bd9</span>:
 val = edx(<span class="literal">true</span>)
 <span class="keyword">return</span> val
-</code></pre><p>理解了吧，就是首先将0x1（即YES）放入<code>edx</code>寄存器，然后判断<code>al</code>代表的某种分支条件是不是0，如果是0，通过<code>je</code>命令跳转到<code>0x1000008bd9</code>地址。这个地址后面的指令就是讲<code>edx</code>的值塞入<code>eax</code>中，而<code>eax</code>是<strong>ARM指令集中默认存放函数返回值的寄存器</strong>。</p>
+</code></pre><p>理解了吧，就是首先将0x1（即YES）放入<code>edx</code>寄存器，然后判断<code>al</code>代表的某种分支条件是不是0，如果是0，通过<code>je</code>命令跳转到<code>0x1000008bd9</code>地址。这个地址后面的指令就是讲<code>edx</code>的值塞入<code>eax</code>中，而<code>eax</code>是<strong>x86指令集中默认存放函数返回值的寄存器</strong>。</p>
 <p>事情到这，是不是基本理清思路了？我们只需要将je跳转的条件极其后面语句干掉就好了。我在这里采用了更暴力的做法，直接在函数一开始就讲false塞入<code>eax</code>寄存器，然后直接调用<code>ret</code>进行返回。</p>
 <p><img src="http://7lrzqz.com1.z0.glb.clouddn.com/%E5%B1%8F%E5%B9%95%E5%BF%AB%E7%85%A7%202016-03-14%20%E4%B8%8A%E5%8D%8812.00.45.png" alt=""></p>
 <h4 id="结语">结语</h4><p>是不是逆向工程看起来也没那么难呢？其实，SizeUp这种利用函数返回至做文章的逆向是最简单的，下次我们来挑战下更难的逆向目标！</p>
@@ -143,7 +143,7 @@ val = edx(<span class="literal">true</span>)
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/03/14/SizeUp/" data-id="cilqspndm000o19i1zl1902xt" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/03/14/SizeUp/" data-id="cim3hlk44000qtui1gl2tf5y7" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Reverse-Engineering/">Reverse Engineering</a></li></ul>
@@ -203,7 +203,7 @@ val = edx(<span class="literal">true</span>)
   <div class="widget-wrap">
     <h3 class="widget-title">Tags</h3>
     <div class="widget">
-      <ul class="tag-list"><li class="tag-list-item"><a class="tag-list-link" href="/tags/Android/">Android</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/JavaScript/">JavaScript</a><span class="tag-list-count">2</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Math/">Math</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/R/">R</a><span class="tag-list-count">2</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Reverse-Engineering/">Reverse Engineering</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Swift/">Swift</a><span class="tag-list-count">5</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/iOS/">iOS</a><span class="tag-list-count">14</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/shell/">shell</a><span class="tag-list-count">1</span></li></ul>
+      <ul class="tag-list"><li class="tag-list-item"><a class="tag-list-link" href="/tags/Android/">Android</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/JavaScript/">JavaScript</a><span class="tag-list-count">2</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Math/">Math</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/R/">R</a><span class="tag-list-count">2</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Reverse-Engineering/">Reverse Engineering</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Swift/">Swift</a><span class="tag-list-count">6</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/iOS/">iOS</a><span class="tag-list-count">14</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/shell/">shell</a><span class="tag-list-count">1</span></li></ul>
     </div>
   </div>
 
@@ -221,7 +221,7 @@ val = edx(<span class="literal">true</span>)
   <div class="widget-wrap">
     <h3 class="widget-title">Archives</h3>
     <div class="widget">
-      <ul class="archive-list"><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/03/">March 2016</a><span class="archive-list-count">3</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/02/">February 2016</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/12/">December 2015</a><span class="archive-list-count">6</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/11/">November 2015</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/10/">October 2015</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/09/">September 2015</a><span class="archive-list-count">4</span></li></ul>
+      <ul class="archive-list"><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/03/">March 2016</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/02/">February 2016</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/12/">December 2015</a><span class="archive-list-count">6</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/11/">November 2015</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/10/">October 2015</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/09/">September 2015</a><span class="archive-list-count">4</span></li></ul>
     </div>
   </div>
 
@@ -231,6 +231,10 @@ val = edx(<span class="literal">true</span>)
     <h3 class="widget-title">Recents</h3>
     <div class="widget">
       <ul>
+        
+          <li>
+            <a href="/2016/03/22/dispatch-in-swift/">Swift 中的静态Dispatch VS 动态Dispatch</a>
+          </li>
         
           <li>
             <a href="/2016/03/14/RxSwift/">RxSwift的第一印象</a>
@@ -246,10 +250,6 @@ val = edx(<span class="literal">true</span>)
         
           <li>
             <a href="/2016/02/27/check-manifest/">Check Pods Manifest.lock</a>
-          </li>
-        
-          <li>
-            <a href="/2016/02/27/pod-install-plugin/">开发一个简单的Pod Install 插件</a>
           </li>
         
       </ul>

@@ -4,7 +4,7 @@
   
   <link href="/atom.xml" rel="self"/>
   <link href="http://satanwoo.github.io/"/>
-  <updated>2016-03-13T16:48:41.000Z</updated>
+  <updated>2016-03-22T13:58:25.000Z</updated>
   <id>http://satanwoo.github.io/</id>
   
   <author>
@@ -13,6 +13,179 @@
   </author>
   
   <generator uri="http://hexo.io/">Hexo</generator>
+  
+  <entry>
+    <title><![CDATA[Swift 中的静态Dispatch VS 动态Dispatch]]></title>
+    <link href="http://satanwoo.github.io/2016/03/22/dispatch-in-swift/"/>
+    <id>http://satanwoo.github.io/2016/03/22/dispatch-in-swift/</id>
+    <published>2016-03-22T09:14:34.000Z</published>
+    <updated>2016-03-22T13:58:25.000Z</updated>
+    <content type="html"><![CDATA[<p>感谢<span style="color:red"><strong>英语流利说</strong></span>给我提供了3个月的实习，能够让我在实际上线的App-<a href="http://itunes.apple.com/cn/app/ying-yu-liu-li-shuo-hui-da/id597364850?mt=8" target="_blank" rel="external">英语流利说</a>中锻炼Swift技术。</p>
+<h3 id="C++_VS_Swift">C++ VS Swift</h3><p>虽然我很早就了解了Swift（2014年的WWDC），但是在粗略看了一下Swift的语法后，我认为这不过是许多语言语法的大杂烩，感觉和C++没有啥区别。但是实际上，在我使用Swift的这几个月中，我发现了许多问题值得注意的地方，比如</p>
+<ul>
+<li>函数的返回值可以作为推断函数签名的依据。</li>
+<li>Swift中的函数静态Dispatch VS 动态函数Dispatch</li>
+</ul>
+<p>而第二点，也是本文要阐述的重点。</p>
+<p>在展开本文的内容前，如果你曾经有C++的开发背景，不妨回忆下C++中RTTI机制，这也是多态发生的先决条件。简单来说，就是C++的多态函数是基于运行时的，我们可以看看下面这个例子：</p>
+<pre><code><span class="keyword">class</span> A
+{
+    <span class="function"><span class="keyword">void</span> <span class="title">print</span><span class="params">()</span></span>{<span class="built_in">cout</span> &lt;&lt; <span class="string">"I'm A"</span>;}
+}
+
+<span class="keyword">class</span> B: <span class="keyword">public</span> A
+{
+    <span class="function"><span class="keyword">void</span> <span class="title">print</span><span class="params">()</span></span>{<span class="built_in">cout</span> &lt;&lt; <span class="string">"I'm B"</span>;}
+}
+
+A *b = <span class="keyword">new</span> B();
+b-&gt;print();
+</code></pre><p>相信大家一眼就能知道这个答案，会输出<code>I&#39;m B</code>。那么，Swift中也存在<code>class</code>，那么对于Swift中的函数调用是否和C++一致呢？</p>
+<h3 id="Swift_Class">Swift Class</h3><p>首先我们先来验证下最基本的<code>class</code>中的行为。我们采用和C++中相同例子，定义如下：</p>
+<pre><code><span class="class"><span class="keyword">class</span> <span class="title">A</span>
+</span>{
+    <span class="func"><span class="keyword">func</span> <span class="title">printInfo</span><span class="params">()</span></span>
+    {
+        <span class="built_in">print</span>(<span class="string">"I'm A"</span>)
+    }
+}
+
+<span class="class"><span class="keyword">class</span> <span class="title">B</span>:<span class="title">A</span>
+</span>{
+    <span class="keyword">override</span> <span class="func"><span class="keyword">func</span> <span class="title">printInfo</span><span class="params">()</span></span>
+    {
+        <span class="built_in">print</span>(<span class="string">"I'm B"</span>)
+    }
+}
+</code></pre><p>根据Swift的<code>Type Inference</code> 我们分别验证了如下几种调用方式：</p>
+<pre><code>let b1:B = <span class="function"><span class="title">B</span><span class="params">()</span></span>
+b1.<span class="function"><span class="title">printInfo</span><span class="params">()</span></span> <span class="comment">// I'm B</span>
+
+let b2:A = <span class="function"><span class="title">B</span><span class="params">()</span></span>
+b2.<span class="function"><span class="title">printInfo</span><span class="params">()</span></span> <span class="comment">// I'm B</span>
+
+let a1:A = <span class="function"><span class="title">A</span><span class="params">()</span></span>
+a1.<span class="function"><span class="title">printInfo</span><span class="params">()</span></span> <span class="comment">// I'm A</span>
+
+let a2 = <span class="function"><span class="title">A</span><span class="params">()</span></span>
+a2.<span class="function"><span class="title">printInfo</span><span class="params">()</span></span> <span class="comment">// I'm A</span>
+
+let b3 = <span class="function"><span class="title">B</span><span class="params">()</span></span>
+b3.<span class="function"><span class="title">printInfo</span><span class="params">()</span></span> <span class="comment">// I'm B</span>
+</code></pre><p>如果你自己的思考结果和这个一模一样，至少你理解了运行期和编译期的概念，恭喜你，你的C++是过关了。以<code>class B</code>举例，无论是<strong>b1, b2, b3中的哪一个，尽管其中有部分声明的类型是A，但是在实际运行时还是会走类似virtual function那套确认实际类型为B</strong>。但是，事情在Swift中真是这么简单吗？让我们接着往下看。 </p>
+<h3 id="Protocol_Extension">Protocol Extension</h3><p>去年，<strong>Swift 2.0</strong>发布，随之而来，一个概念悄然兴起：面向协议的编程。而这种编程范式不可或缺的必要条件就是<strong>Protocol Extension</strong>。在<code>Swift &lt; 2.0</code> 时代，<code>Protocol</code>的作用更类似于一种表征特征的约束。而有了<code>Protocol Extension</code>以后，<code>Protocol</code>更类似于一种插件装配的概念（写过Ruby的人相信会有体会），可以在无须编写代码的情况下，更自定义的元素添加行为能力。</p>
+<p>哎？你上面说了这么一大段废话，和我们的文章主题有啥关系？</p>
+<p>好，首先我们先看如下定义：</p>
+<pre><code><span class="class"><span class="keyword">protocol</span> <span class="title">Testable</span>
+</span>{
+    <span class="func"><span class="keyword">func</span> <span class="title">dynamicInfo</span><span class="params">()</span></span>
+}
+
+<span class="class"><span class="keyword">extension</span> <span class="title">Testable</span>
+</span>{
+    <span class="func"><span class="keyword">func</span> <span class="title">dynamicInfo</span><span class="params">()</span></span>
+    {
+        <span class="built_in">print</span>(<span class="string">"I'm Testable"</span>)
+    }
+}
+
+<span class="class"><span class="keyword">class</span> <span class="title">A</span>:<span class="title">Testable</span>
+</span>{
+    <span class="func"><span class="keyword">func</span> <span class="title">dynamicInfo</span><span class="params">()</span></span>
+    {
+        <span class="built_in">print</span>(<span class="string">"I'm A"</span>)
+    }
+}
+
+<span class="class"><span class="keyword">class</span> <span class="title">B</span>:<span class="title">Testable</span>
+</span>{
+    <span class="func"><span class="keyword">func</span> <span class="title">dynamicInfo</span><span class="params">()</span></span> {
+        <span class="built_in">print</span>(<span class="string">"I'm B"</span>)
+    }
+}
+</code></pre><p>然后，我们进行如下调用：</p>
+<pre><code>let a1 = <span class="function"><span class="title">A</span><span class="params">()</span></span>
+a1.<span class="function"><span class="title">dynamicInfo</span><span class="params">()</span></span> <span class="comment">// I'm A</span>
+
+let b1 = <span class="function"><span class="title">B</span><span class="params">()</span></span>     
+b1.<span class="function"><span class="title">dynamicInfo</span><span class="params">()</span></span> <span class="comment">// I'm B</span>
+
+let a2:Testable = <span class="function"><span class="title">A</span><span class="params">()</span></span>
+a2.<span class="function"><span class="title">dynamicInfo</span><span class="params">()</span></span> <span class="comment">// I'm A</span>
+
+let b2:Testable = <span class="function"><span class="title">B</span><span class="params">()</span></span>
+b2.<span class="function"><span class="title">dynamicInfo</span><span class="params">()</span></span> <span class="comment">// I'm B</span>
+</code></pre><p>到这里，事情还是还是按照C++那套逻辑在走，如果你把<code>class B</code>中的<code>dynamicInfo</code>删除，那么对应B类型的<code>dynamicInfo</code>函数调用就会输出<strong>I’m Testable</strong>。</p>
+<p>好，现在问题来了，如果我们将<code>Testable Protocol Extension</code>添加一下东西，同时保持<code>protocol Testable</code>不变，如下所示：</p>
+<pre><code><span class="class"><span class="keyword">protocol</span> <span class="title">Testable</span>
+</span>{
+    <span class="func"><span class="keyword">func</span> <span class="title">dynamicInfo</span><span class="params">()</span></span>
+}
+
+<span class="class"><span class="keyword">extension</span> <span class="title">Testable</span>
+</span>{
+    <span class="func"><span class="keyword">func</span> <span class="title">dynamicInfo</span><span class="params">()</span></span>
+    {
+        <span class="built_in">print</span>(<span class="string">"I'm Testable"</span>)
+    }
+
+    <span class="comment">// ### 新添加的 ###</span>
+    <span class="func"><span class="keyword">func</span> <span class="title">staticInfo</span><span class="params">()</span></span>
+    {
+        <span class="built_in">print</span>(<span class="string">"I'm Testable Static"</span>)
+    }
+}
+</code></pre><p>如果这个时候，我们进行如下代码的测试：</p>
+<pre><code><span class="class"><span class="keyword">class</span> <span class="title">A</span>:<span class="title">Testable</span>
+</span>{
+    <span class="func"><span class="keyword">func</span> <span class="title">dynamicInfo</span><span class="params">()</span></span>
+    {
+        <span class="built_in">print</span>(<span class="string">"I'm A"</span>)
+    }
+
+    <span class="func"><span class="keyword">func</span> <span class="title">staticInfo</span><span class="params">()</span></span>
+    {
+        <span class="built_in">print</span>(<span class="string">"I'm A Static"</span>)
+    }
+}
+
+<span class="keyword">let</span> a1 = <span class="type">A</span>()     
+a1.staticInfo() <span class="comment">// I'm A Static</span>
+
+<span class="keyword">let</span> a2:<span class="type">A</span> = <span class="type">A</span>()
+a2.staticInfo() <span class="comment">// I'm A Static</span>
+
+<span class="keyword">let</span> a3:<span class="type">Testable</span> = <span class="type">A</span>()
+a3.staticInfo() <span class="comment">// I'm Testable Static</span>
+</code></pre><p>看到没？最后一行的输出是不是出乎了大家的意料，竟然输出了<strong>I’m Testable Static</strong>。 </p>
+<p>这是咋回事？回顾下之前我们改变的地方，发现我们在<strong>Protocol Extension中添加了一个<code>func staticInfo()</code>，但是却没在对应的<code>Testable Protocol</code>进行声明</strong>。但是这还不够，我们必须将调用<code>staticInfo</code>的地方的类型显式的声明成<strong>let a3:Testable</strong>。</p>
+<p><div style="color:red">也就是说，Swift方法的静态Dispatch必须严格满足如下条件：</div>  </p>
+<ul>
+<li>方法在Extension中提供了实现，但是在对应的protocol中没有声明。</li>
+<li>调用方法的时候必须显示的声明成protocol的类型。</li>
+</ul>
+<p>如果不好理解，我画了张图帮助大家加深印象：</p>
+<p><img src="http://7lrzqz.com1.z0.glb.clouddn.com/Slice%201.png" alt=""></p>
+<p><strong>还有一点需要注意的是，Swift中的静态Dispatch不以类的层级和override而转移</strong>，也就是说，如下这种定义：</p>
+<pre><code><span class="class"><span class="keyword">class</span> <span class="title">B</span>:<span class="title">A</span>
+</span>{
+    <span class="keyword">override</span> <span class="func"><span class="keyword">func</span> <span class="title">staticInfo</span><span class="params">()</span></span>
+    {
+        <span class="built_in">print</span>(<span class="string">"I'm B Static"</span>)
+    }
+}
+</code></pre><p>当我们使用  </p>
+<pre><code>let a4:Testable = <span class="function"><span class="title">B</span><span class="params">()</span></span>
+a4.<span class="function"><span class="title">staticInfo</span><span class="params">()</span></span>
+</code></pre><p>一样会输出<code>I&#39;m Testable Static</code></p>
+]]></content>
+    <summary type="html">
+    <![CDATA[<p>感谢<span style="color:red"><strong>英语流利说</strong></span>给我提供了3个月的实习，能够让我在实际上线的App-<a href="http://itunes.apple.com/cn/app/ying-yu-liu-li-s]]>
+    </summary>
+    
+      <category term="Swift" scheme="http://satanwoo.github.io/tags/Swift/"/>
+    
+  </entry>
   
   <entry>
     <title><![CDATA[RxSwift的第一印象]]></title>
@@ -89,7 +262,7 @@
     <link href="http://satanwoo.github.io/2016/03/14/SizeUp/"/>
     <id>http://satanwoo.github.io/2016/03/14/SizeUp/</id>
     <published>2016-03-13T16:20:57.000Z</published>
-    <updated>2016-03-13T16:48:31.000Z</updated>
+    <updated>2016-03-22T12:48:47.000Z</updated>
     <content type="html"><![CDATA[<p>这几天把《汇编语言》好好复习一遍，心里痒痒，就想找个软件来逆向破解一发。破啥好呢？网上逆向工程的教程一大堆，主要都是<em>Sketch</em>啦，<em>Reveal</em>啦，那我照着做一遍也没啥意思啊，体现不出我中国iOS第12人的特点啊。干脆我找个小众一点的软件破解吧。于是，我就盯上了我每天都非常喜欢使用的<strong>SizeUp</strong>，这是一款非常快速的窗口管理软件，可以通过快捷键将窗口扩展到指定的大小和位置，配合外接显示屏简直酷炫到飞起。</p>
 <p><img src="http://7lrzqz.com1.z0.glb.clouddn.com/%E5%B1%8F%E5%B9%95%E5%BF%AB%E7%85%A7%202016-03-09%20%E4%B8%8B%E5%8D%8810.46.45.png" alt=""></p>
 <p>但是这个App有个很大的问题，虽然它是免费的，但是它每次启动的时候，包括你使用的过程中，都会时不时蹦出一个提示你购买的弹框，而且弹框上的取消按钮一定要过5秒才能点击关闭，真是让人蛋疼。</p>
@@ -136,7 +309,7 @@
 ... <span class="number">0x1000008bd9</span>:
 val = edx(<span class="literal">true</span>)
 <span class="keyword">return</span> val
-</code></pre><p>理解了吧，就是首先将0x1（即YES）放入<code>edx</code>寄存器，然后判断<code>al</code>代表的某种分支条件是不是0，如果是0，通过<code>je</code>命令跳转到<code>0x1000008bd9</code>地址。这个地址后面的指令就是讲<code>edx</code>的值塞入<code>eax</code>中，而<code>eax</code>是<strong>ARM指令集中默认存放函数返回值的寄存器</strong>。</p>
+</code></pre><p>理解了吧，就是首先将0x1（即YES）放入<code>edx</code>寄存器，然后判断<code>al</code>代表的某种分支条件是不是0，如果是0，通过<code>je</code>命令跳转到<code>0x1000008bd9</code>地址。这个地址后面的指令就是讲<code>edx</code>的值塞入<code>eax</code>中，而<code>eax</code>是<strong>x86指令集中默认存放函数返回值的寄存器</strong>。</p>
 <p>事情到这，是不是基本理清思路了？我们只需要将je跳转的条件极其后面语句干掉就好了。我在这里采用了更暴力的做法，直接在函数一开始就讲false塞入<code>eax</code>寄存器，然后直接调用<code>ret</code>进行返回。</p>
 <p><img src="http://7lrzqz.com1.z0.glb.clouddn.com/%E5%B1%8F%E5%B9%95%E5%BF%AB%E7%85%A7%202016-03-14%20%E4%B8%8A%E5%8D%8812.00.45.png" alt=""></p>
 <h4 id="结语">结语</h4><p>是不是逆向工程看起来也没那么难呢？其实，SizeUp这种利用函数返回至做文章的逆向是最简单的，下次我们来挑战下更难的逆向目标！</p>
@@ -2729,49 +2902,6 @@ objectPath.<span class="keyword">get</span>(obj, <span class="string">'a.\u1200'
     </summary>
     
       <category term="JavaScript" scheme="http://satanwoo.github.io/tags/JavaScript/"/>
-    
-  </entry>
-  
-  <entry>
-    <title><![CDATA[大菜比学安卓]]></title>
-    <link href="http://satanwoo.github.io/2015/10/29/Learn-Android-Day-by-Day/"/>
-    <id>http://satanwoo.github.io/2015/10/29/Learn-Android-Day-by-Day/</id>
-    <published>2015-10-29T11:52:44.000Z</published>
-    <updated>2015-11-05T17:07:20.000Z</updated>
-    <content type="html"><![CDATA[<p>本人新手，学习安卓，这里用来记录一下阅读《第一行代码》的笔试和体会。</p>
-<ol>
-<li>在XML引入一个id，就使用@id/id_name，如果要添加一个id，就使用@+id/id_name</li>
-<li>给主活动指定的Label不仅会成为标题栏中的内容，还会成为Launcher中应用程序显示的名称。</li>
-<li>Intent 调用StartActivityForResult用来给上一层Activity返回数据</li>
-<li>活动的生存期</li>
-</ol>
-<ul>
-<li>运行状态，当一个活动处于返回栈的栈顶时，就处于运行状态，系统最不愿意回收的就是处于运行状态的活动。</li>
-<li>暂停状态，当一个活动不处于栈顶位置，但是仍然可见的时候，就进入了暂停状态（因为有些活动，如对话框等，就不会占据整个屏幕，因此其他活动仍然可见）</li>
-<li>停止状态，当一个活动不再处于栈顶位置，并且完全不可见的时候，就进入了停止状态。</li>
-<li>销毁状态，当一个活动从返回栈中被移除后，就进入了销毁状态。</li>
-</ul>
-<ol>
-<li>活动生命周期回调函数</li>
-</ol>
-<ul>
-<li>onCreate在活动第一次创建的时候调用</li>
-<li>onStart在活动由不可见变成可见的时候调用</li>
-<li>onResume在活动准备好和用户进行交互的时候调用，此时的活动一定位于栈的栈顶，且处于运行状态。</li>
-<li>onPause在系统准备去启动或者恢复另一个活动的时候调用。</li>
-<li>onStop在活动完全不可见的时候调用。</li>
-<li>onDestory在活动被销毁之前调用，之后的活动变为销毁状态。</li>
-<li>onRestart在活动由停止状态变为运行状态之前调用，也就是活动被重新启动了。</li>
-</ul>
-]]></content>
-    <summary type="html">
-    <![CDATA[<p>本人新手，学习安卓，这里用来记录一下阅读《第一行代码》的笔试和体会。</p>
-<ol>
-<li>在XML引入一个id，就使用@id/id_name，如果要添加一个id，就使用@+id/id_name</li>
-<li>给主活动指定的Label不仅会成为标题栏中的内容，还会成]]>
-    </summary>
-    
-      <category term="Android" scheme="http://satanwoo.github.io/tags/Android/"/>
     
   </entry>
   
