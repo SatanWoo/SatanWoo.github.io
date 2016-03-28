@@ -5,26 +5,32 @@
   
   <title>Swift 中的静态Dispatch VS 动态Dispatch | Hexo</title>
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
-  <meta name="description" content="感谢英语流利说给我提供了3个月的实习，能够让我在实际上线的App-英语流利说中锻炼Swift技术。
-C++ VS Swift虽然我很早就了解了Swift（2014年的WWDC），但是在粗略看了一下Swift的语法后，我认为这不过是许多语言语法的大杂烩，感觉和C++没有啥区别。但是实际上，在我使用Swift的这几个月中，我发现了许多问题值得注意的地方，比如
+  <meta name="description" content="C++ VS Swift虽然我很早就了解了Swift（2014年的WWDC），但是在粗略看了一下Swift的语法后，我认为这不过是许多语言语法的大杂烩，感觉和C++没有啥区别。但是实际上，在我使用Swift的这几个月中，我发现了许多问题值得注意的地方，比如
 
-函数的返回值可以作为推断函数签名的依据。">
+函数的返回值可以作为推断函数签名的依据。
+Swift中的函数静态Dispatch VS 动态函数Dispatch
+
+而第二点，也是本文要阐述">
 <meta property="og:type" content="article">
 <meta property="og:title" content="Swift 中的静态Dispatch VS 动态Dispatch">
 <meta property="og:url" content="http://satanwoo.github.io/2016/03/22/dispatch-in-swift/index.html">
 <meta property="og:site_name" content="Hexo">
-<meta property="og:description" content="感谢英语流利说给我提供了3个月的实习，能够让我在实际上线的App-英语流利说中锻炼Swift技术。
-C++ VS Swift虽然我很早就了解了Swift（2014年的WWDC），但是在粗略看了一下Swift的语法后，我认为这不过是许多语言语法的大杂烩，感觉和C++没有啥区别。但是实际上，在我使用Swift的这几个月中，我发现了许多问题值得注意的地方，比如
+<meta property="og:description" content="C++ VS Swift虽然我很早就了解了Swift（2014年的WWDC），但是在粗略看了一下Swift的语法后，我认为这不过是许多语言语法的大杂烩，感觉和C++没有啥区别。但是实际上，在我使用Swift的这几个月中，我发现了许多问题值得注意的地方，比如
 
-函数的返回值可以作为推断函数签名的依据。">
+函数的返回值可以作为推断函数签名的依据。
+Swift中的函数静态Dispatch VS 动态函数Dispatch
+
+而第二点，也是本文要阐述">
 <meta property="og:image" content="http://7lrzqz.com1.z0.glb.clouddn.com/Slice%201.png">
-<meta property="og:updated_time" content="2016-03-22T13:58:25.000Z">
+<meta property="og:updated_time" content="2016-03-28T14:24:49.000Z">
 <meta name="twitter:card" content="summary">
 <meta name="twitter:title" content="Swift 中的静态Dispatch VS 动态Dispatch">
-<meta name="twitter:description" content="感谢英语流利说给我提供了3个月的实习，能够让我在实际上线的App-英语流利说中锻炼Swift技术。
-C++ VS Swift虽然我很早就了解了Swift（2014年的WWDC），但是在粗略看了一下Swift的语法后，我认为这不过是许多语言语法的大杂烩，感觉和C++没有啥区别。但是实际上，在我使用Swift的这几个月中，我发现了许多问题值得注意的地方，比如
+<meta name="twitter:description" content="C++ VS Swift虽然我很早就了解了Swift（2014年的WWDC），但是在粗略看了一下Swift的语法后，我认为这不过是许多语言语法的大杂烩，感觉和C++没有啥区别。但是实际上，在我使用Swift的这几个月中，我发现了许多问题值得注意的地方，比如
 
-函数的返回值可以作为推断函数签名的依据。">
+函数的返回值可以作为推断函数签名的依据。
+Swift中的函数静态Dispatch VS 动态函数Dispatch
+
+而第二点，也是本文要阐述">
   
     <link rel="alternative" href="/atom.xml" title="Hexo" type="application/atom+xml">
   
@@ -93,8 +99,7 @@ C++ VS Swift虽然我很早就了解了Swift（2014年的WWDC），但是在粗�
     
     <div class="article-entry" itemprop="articleBody">
       
-        <p>感谢<span style="color:red"><strong>英语流利说</strong></span>给我提供了3个月的实习，能够让我在实际上线的App-<a href="http://itunes.apple.com/cn/app/ying-yu-liu-li-shuo-hui-da/id597364850?mt=8" target="_blank" rel="external">英语流利说</a>中锻炼Swift技术。</p>
-<h3 id="C++_VS_Swift">C++ VS Swift</h3><p>虽然我很早就了解了Swift（2014年的WWDC），但是在粗略看了一下Swift的语法后，我认为这不过是许多语言语法的大杂烩，感觉和C++没有啥区别。但是实际上，在我使用Swift的这几个月中，我发现了许多问题值得注意的地方，比如</p>
+        <h3 id="C++_VS_Swift">C++ VS Swift</h3><p>虽然我很早就了解了Swift（2014年的WWDC），但是在粗略看了一下Swift的语法后，我认为这不过是许多语言语法的大杂烩，感觉和C++没有啥区别。但是实际上，在我使用Swift的这几个月中，我发现了许多问题值得注意的地方，比如</p>
 <ul>
 <li>函数的返回值可以作为推断函数签名的依据。</li>
 <li>Swift中的函数静态Dispatch VS 动态函数Dispatch</li>
@@ -255,7 +260,7 @@ a4.<span class="function"><span class="title">staticInfo</span><span class="para
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/03/22/dispatch-in-swift/" data-id="cim3hlk3e0008tui15kw4q6pj" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/03/22/dispatch-in-swift/" data-id="cimc36zxs0008oji1sari24l5" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Swift/">Swift</a></li></ul>
