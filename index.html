@@ -84,8 +84,7 @@
     
     <div class="article-entry" itemprop="articleBody">
       
-        <p>###现象</p>
-<p>上周排查了一个bug，现象很简单，就是个Crash问题。但是读了一下crash Log以后，却发现堆栈报的错误信息却是第一次见到（<strong>吹牛的说，我在国内的iOS也能算第十二人了</strong>），包含以下还未符号化信息：</p>
+        <h3 id="现象">现象</h3><p>上周排查了一个bug，现象很简单，就是个Crash问题。但是读了一下crash Log以后，却发现堆栈报的错误信息却是第一次见到（<strong>吹牛的说，我在国内的iOS也能算第十二人了</strong>），包含以下还未符号化信息：</p>
 <pre><code>Application Specific Information:
 com.xxx.yyy failed to scene-<span class="operator"><span class="keyword">create</span> <span class="keyword">in</span> <span class="keyword">time</span>
 
@@ -101,7 +100,7 @@ Elapsed application CPU <span class="keyword">time</span> (seconds): <span class
 ...
 ...</span>
 </code></pre><p>无符号化的crash 堆栈暂时不去管它，我们重点关注<strong>com.xxx.yyy failed to scene-create in time</strong>。如果理解无误的话，这句话提示我们：我们的应用程序在规定的时间没能加载成功，无法显示。看起来这个原因是启动加载过长直接被干掉。那么问题来了，原因具体是啥？</p>
-<h4 id="符号化">符号化</h4><p>首先我们需要符号化一下，这里涉及公司内部信息，所以我们自己构造个demo试试。<br>demo的代码很简单，如下：</p>
+<h3 id="查看堆栈">查看堆栈</h3><p>首先我们需要符号化一下，这里涉及公司内部信息，所以我们自己构造个demo试试。<br>demo的代码很简单，如下：</p>
 <pre><code><span class="preprocessor">#import <span class="title">"ManageA.h"</span></span>
 
 <span class="class"><span class="keyword">@implementation</span> <span class="title">ManageA</span></span>
@@ -173,7 +172,7 @@ Elapsed application CPU <span class="keyword">time</span> (seconds): <span class
 </code></pre><p>从中我们可以发现，的确在这段调用栈中，出现了多次敏感字样<code>sharedInstance</code>和<code>dispatch_once_f</code>字样。</p>
 <p>在查阅相关资料后，感觉是<code>dispatch_once_f</code>函数造成了信号量的永久等待，从而引发死锁。那么，为什么<code>dispatch_once</code>会死锁呢？以前说的<strong>最安全的单例构造方式</strong>还正确不正确呢？</p>
 <p>所以，我们一起来看看下面关于<code>dispatch_once</code>的源码分析。</p>
-<h4 id="dispatch_once源码分析">dispatch_once源码分析</h4><p>从<a href="git://git.macosforge.org/libdispatch.git" target="_blank" rel="external">libdispatch</a>获取最新版本代码，进入对应的文件<strong>once.c</strong>。去除注释后代码如下，共<strong>66</strong>行代码，但是真的是有很多奇妙的地方。</p>
+<h3 id="dispatch_once源码分析">dispatch_once源码分析</h3><p>从<a href="git://git.macosforge.org/libdispatch.git" target="_blank" rel="external">libdispatch</a>获取最新版本代码，进入对应的文件<strong>once.c</strong>。去除注释后代码如下，共<strong>66</strong>行代码，但是真的是有很多奇妙的地方。</p>
 <pre><code><span class="preprocessor">#<span class="keyword">include</span> <span class="string">"internal.h"</span></span>
 
 <span class="preprocessor">#<span class="keyword">undef</span> dispatch_once</span>
@@ -269,12 +268,12 @@ Elapsed application CPU <span class="keyword">time</span> (seconds): <span class
 <li><code>dispatch_once</code>本质上可以接受多次请求，会对此维护一个请求链表</li>
 <li>如果在block执行期间，多次进入调用同类的<code>dispatch_once</code>函数（即单例函数），会导致整体链表无限增长，造成永久性死锁。</li>
 </ol>
-<h4 id="备注">备注</h4><ol>
+<h3 id="备注">备注</h3><ol>
 <li>根据以上分析，相对应地写了一个简易的死锁Demo，就是在两个单例的初始化调用中直接相互调用。A&lt;-&gt;B。也许这个Demo过于简单，大家轻易不会犯。但是如果是A-&gt;B-&gt;C-&gt;A，甚至是更多个模块的相互引用，那又该如何轻易避免呢？</li>
 <li>以上的Demo，如果在Xcode模拟器测试环境下，是不会死锁从而导致应用启动被杀。这是因为模拟器不具备守护进程，如果要观察现象，可以输出Log或者直接利用真机进行测试。</li>
 <li>有时候，启动耗时是因为占用了太多的CPU资源。但是从我们的Crash Log中可以发现，我们仅仅占用了<strong>Elapsed application CPU time (seconds): 0.h秒, k% CPU</strong>。通过这个，我们也可以发现，CPU占用率高并不是导致启动阶段APP Crash的唯一原因。</li>
 </ol>
-<h4 id="反思">反思</h4><p>虽然这次的问题直接原因是<code>dispatch_once</code>引出的<strong>死锁</strong>问题，但是个人认为，这却是滥用单例造成的后果。各位可以打开自己公司的app源代码查看一下，究竟存在着多少的单例。</p>
+<h3 id="反思">反思</h3><p>虽然这次的问题直接原因是<code>dispatch_once</code>引出的<strong>死锁</strong>问题，但是个人认为，这却是滥用单例造成的后果。各位可以打开自己公司的app源代码查看一下，究竟存在着多少的单例。</p>
 <p>实话实说，单例和全局变量几乎没有任何区别，不仅仅占用了全生命周期的内存，还对解耦造成了巨大的负作用。写起来容易，但是对于整个项目的架构梳理却是有着巨大的影响，因为在不读完整个相关代码的前提下，你压根不知道究竟哪里会触发单例的调用。</p>
 <p>因此在这里，谈谈个人认为可以不使用单例的几个方面：</p>
 <ol>
@@ -287,7 +286,7 @@ Elapsed application CPU <span class="keyword">time</span> (seconds): <span class
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/04/11/dispatch-once/" data-id="cimuswbq500080yi1bmhqa0li" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/04/11/dispatch-once/" data-id="cimuszn4o00084bi1g1pn8903" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
@@ -482,7 +481,7 @@ a4.<span class="function"><span class="title">staticInfo</span><span class="para
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/03/22/dispatch-in-swift/" data-id="cimuswbq7000a0yi1jbt02o5o" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/03/22/dispatch-in-swift/" data-id="cimuszn4q000a4bi1hwydryuo" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Swift/">Swift</a></li></ul>
@@ -574,7 +573,7 @@ a4.<span class="function"><span class="title">staticInfo</span><span class="para
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/03/14/RxSwift/" data-id="cimuswbqx000v0yi10g7vskxv" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/03/14/RxSwift/" data-id="cimuszn5h000v4bi1aiadto3b" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Swift/">Swift</a></li></ul>
@@ -662,7 +661,7 @@ val = edx(<span class="literal">true</span>)
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/03/14/SizeUp/" data-id="cimuswbqu000s0yi1l82eqocr" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/03/14/SizeUp/" data-id="cimuszn5e000s4bi1y19q1iej" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Reverse-Engineering/">Reverse Engineering</a></li></ul>
@@ -802,7 +801,7 @@ val = edx(<span class="literal">true</span>)
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/03/14/DXXcodeConsoleUnicodePlugin/" data-id="cimuswbry001q0yi19bc67j8o" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/03/14/DXXcodeConsoleUnicodePlugin/" data-id="cimuszn6g001q4bi165b0r133" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
@@ -879,7 +878,7 @@ fi
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/02/27/check-manifest/" data-id="cimuswbqc000f0yi18d31vg64" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/02/27/check-manifest/" data-id="cimuszn4v000f4bi1osjb1734" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/shell/">shell</a></li></ul>
@@ -989,7 +988,7 @@ fi
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/02/27/pod-install-plugin/" data-id="cimuswbps00030yi1ai2goev0" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/02/27/pod-install-plugin/" data-id="cimuszn4h00034bi18sh9qwpq" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
@@ -1245,7 +1244,7 @@ fi
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/02/27/FBKVOController/" data-id="cimuswbrq001m0yi1q29zahc1" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/02/27/FBKVOController/" data-id="cimuszn69001m4bi10r140ux5" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
@@ -1359,7 +1358,7 @@ selectedTitleLabelsContentView<span class="class">.layer</span><span class="clas
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/02/05/DGRunKeeperSwitch/" data-id="cimuswbs0001s0yi1e8sy16et" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/02/05/DGRunKeeperSwitch/" data-id="cimuszn6i001s4bi1hi7bievn" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
@@ -1615,7 +1614,7 @@ NSLayoutConstraint *constraint = [NSLayoutConstraint <span class="string">constr
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/02/05/PureLayout/" data-id="cimuswbr500120yi10vbz1a71" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/02/05/PureLayout/" data-id="cimuszn5p00124bi1p7djic3z" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
