@@ -62,6 +62,243 @@
       <div class="outer">
         <section id="main">
   
+    <article id="post-dispatch-once" class="article article-type-post" itemscope itemprop="blogPost">
+  <div class="article-meta">
+    <a href="/2016/04/11/dispatch-once/" class="article-date">
+  <time datetime="2016-04-10T16:41:09.000Z" itemprop="datePublished">2016-04-11</time>
+</a>
+    
+  </div>
+  <div class="article-inner">
+    
+    
+      <header class="article-header">
+        
+  
+    <h1 itemprop="name">
+      <a class="article-title" href="/2016/04/11/dispatch-once/">滥用单例之dispatch_once死锁</a>
+    </h1>
+  
+
+      </header>
+    
+    <div class="article-entry" itemprop="articleBody">
+      
+        <p>###现象</p>
+<p>上周排查了一个bug，现象很简单，就是个Crash问题。但是读了一下crash Log以后，却发现堆栈报的错误信息却是第一次见到（<strong>吹牛的说，我在国内的iOS也能算第十二人了</strong>），包含以下还未符号化信息：</p>
+<pre><code>Application Specific Information:
+com.xxx.yyy failed to scene-<span class="operator"><span class="keyword">create</span> <span class="keyword">in</span> <span class="keyword">time</span>
+
+Elapsed total CPU <span class="keyword">time</span> (seconds): hhh秒 (<span class="keyword">user</span> hhh, <span class="keyword">system</span> <span class="number">0.000</span>), <span class="keyword">k</span>% CPU
+Elapsed application CPU <span class="keyword">time</span> (seconds): <span class="number">0.</span>h秒, <span class="keyword">k</span>% CPU
+
+<span class="keyword">Thread</span> <span class="number">0</span> <span class="keyword">name</span>:  Dispatch queue: com.apple.<span class="keyword">main</span>-<span class="keyword">thread</span>
+<span class="keyword">Thread</span> <span class="number">0</span>:
+<span class="number">0</span>   libsystem_kernel.dylib            <span class="number">0x36cb2540</span> semaphore_wait_trap + <span class="number">8</span>
+<span class="number">1</span>   libsystem_platform.dylib          <span class="number">0x36d3d430</span> _os_semaphore_wait + <span class="number">8</span>
+<span class="number">2</span>   libdispatch.dylib                 <span class="number">0x36be04a6</span> dispatch_once_f + <span class="number">250</span>
+<span class="number">3</span>   xxxx                              偏移量 <span class="number">0x4000</span> + <span class="number">947290</span>
+...
+...</span>
+</code></pre><p>无符号化的crash 堆栈暂时不去管它，我们重点关注<strong>com.xxx.yyy failed to scene-create in time</strong>。如果理解无误的话，这句话提示我们：我们的应用程序在规定的时间没能加载成功，无法显示。看起来这个原因是启动加载过长直接被干掉。那么问题来了，原因具体是啥？</p>
+<h4 id="符号化">符号化</h4><p>首先我们需要符号化一下，这里涉及公司内部信息，所以我们自己构造个demo试试。<br>demo的代码很简单，如下：</p>
+<pre><code><span class="preprocessor">#import <span class="title">"ManageA.h"</span></span>
+
+<span class="class"><span class="keyword">@implementation</span> <span class="title">ManageA</span></span>
+
++ (ManageA *)sharedInstance
+{
+    <span class="keyword">static</span> ManageA *manager = <span class="literal">nil</span>;
+    <span class="keyword">static</span> <span class="built_in">dispatch_once_t</span> token;
+
+    <span class="built_in">dispatch_once</span>(&amp;token, ^{
+        manager = [[ManageA alloc] init];
+    });
+
+    <span class="keyword">return</span> manager;
+}
+
+- (instancetype)init
+{
+    <span class="keyword">self</span> = [<span class="keyword">super</span> init];
+    <span class="keyword">if</span> (<span class="keyword">self</span>) {
+        [ManageB sharedInstance];
+    }
+    <span class="keyword">return</span> <span class="keyword">self</span>;
+}
+
+<span class="keyword">@end</span>
+
+<span class="class"><span class="keyword">@implementation</span> <span class="title">ManageB</span></span>
+
++ (ManageB *)sharedInstance
+{
+    <span class="keyword">static</span> ManageB *manager = <span class="literal">nil</span>;
+    <span class="keyword">static</span> <span class="built_in">dispatch_once_t</span> token;
+
+    <span class="built_in">dispatch_once</span>(&amp;token, ^{
+        manager = [[ManageB alloc] init];
+    });
+
+    <span class="keyword">return</span> manager;
+}
+
+- (instancetype)init
+{
+    <span class="keyword">self</span> = [<span class="keyword">super</span> init];
+    <span class="keyword">if</span> (<span class="keyword">self</span>) {
+        [ManageA sharedInstance];
+    }
+    <span class="keyword">return</span> <span class="keyword">self</span>;
+}
+</code></pre><p>运行后的堆栈基本如下：</p>
+<pre><code><span class="preprocessor">#<span class="number">0</span>    <span class="number">0x000000011054acd2</span> in semaphore_wait_trap ()</span>
+<span class="preprocessor">#<span class="number">1</span>    <span class="number">0x00000001101b1b1a</span> in _dispatch_thread_semaphore_wait ()</span>
+<span class="preprocessor">#<span class="number">2</span>    <span class="number">0x00000001101b1d48</span> in dispatch_once_f ()</span>
+<span class="preprocessor">#<span class="number">3</span>    <span class="number">0x000000010d01c857</span> in _dispatch_once [inlined] at once.h:<span class="number">68</span></span>
+<span class="preprocessor">#<span class="number">4</span>    <span class="number">0x000000010d01c839</span> in +[ManageA sharedInstance] at ManageA.m:<span class="number">18</span></span>
+<span class="preprocessor">#<span class="number">5</span>    <span class="number">0x000000010d01cad8</span> in -[ManageB init] at ManageA.m:<span class="number">54</span></span>
+<span class="preprocessor">#<span class="number">6</span>    <span class="number">0x000000010d01ca42</span> in __25+[ManageB sharedInstance]_block_invoke at ManageA.m:<span class="number">44</span></span>
+<span class="preprocessor">#<span class="number">7</span>    <span class="number">0x00000001101c649b</span> in _dispatch_client_callout ()</span>
+<span class="preprocessor">#<span class="number">8</span>    <span class="number">0x00000001101b1e28</span> in dispatch_once_f ()</span>
+<span class="preprocessor">#<span class="number">9</span>    <span class="number">0x000000010d01c9e7</span> in _dispatch_once [inlined] at once.h:<span class="number">68</span></span>
+<span class="preprocessor">#<span class="number">10</span>    <span class="number">0x000000010d01c9c9</span> in +[ManageB sharedInstance] at ManageA.m:<span class="number">43</span></span>
+<span class="preprocessor">#<span class="number">11</span>    <span class="number">0x000000010d01c948</span> in -[ManageA init] at ManageA.m:<span class="number">29</span></span>
+<span class="preprocessor">#<span class="number">12</span>    <span class="number">0x000000010d01c8b2</span> in __25+[ManageA sharedInstance]_block_invoke at ManageA.m:<span class="number">19</span></span>
+<span class="preprocessor">#<span class="number">13</span>    <span class="number">0x00000001101c649b</span> in _dispatch_client_callout ()</span>
+<span class="preprocessor">#<span class="number">14</span>    <span class="number">0x00000001101b1e28</span> in dispatch_once_f ()</span>
+<span class="preprocessor">#<span class="number">15</span>    <span class="number">0x000000010d01c857</span> in _dispatch_once [inlined] at once.h:<span class="number">68</span></span>
+<span class="preprocessor">#<span class="number">16</span>    <span class="number">0x000000010d01c839</span> in +[ManageA sharedInstance] at /ManageA.m:<span class="number">18</span></span>
+<span class="preprocessor">#<span class="number">17</span>    <span class="number">0x000000010d01c5cc</span> in -[AppDelegate application:didFinishLaunchingWithOptions:]         at /AppDelegate.m:<span class="number">21</span></span>
+</code></pre><p>从中我们可以发现，的确在这段调用栈中，出现了多次敏感字样<code>sharedInstance</code>和<code>dispatch_once_f</code>字样。</p>
+<p>在查阅相关资料后，感觉是<code>dispatch_once_f</code>函数造成了信号量的永久等待，从而引发死锁。那么，为什么<code>dispatch_once</code>会死锁呢？以前说的<strong>最安全的单例构造方式</strong>还正确不正确呢？</p>
+<p>所以，我们一起来看看下面关于<code>dispatch_once</code>的源码分析。</p>
+<h4 id="dispatch_once源码分析">dispatch_once源码分析</h4><p>从<a href="git://git.macosforge.org/libdispatch.git" target="_blank" rel="external">libdispatch</a>获取最新版本代码，进入对应的文件<strong>once.c</strong>。去除注释后代码如下，共<strong>66</strong>行代码，但是真的是有很多奇妙的地方。</p>
+<pre><code><span class="preprocessor">#<span class="keyword">include</span> <span class="string">"internal.h"</span></span>
+
+<span class="preprocessor">#<span class="keyword">undef</span> dispatch_once</span>
+<span class="preprocessor">#<span class="keyword">undef</span> dispatch_once_f</span>
+
+<span class="keyword">struct</span> _dispatch_once_waiter_s {
+    <span class="keyword">volatile</span> <span class="keyword">struct</span> _dispatch_once_waiter_s *<span class="keyword">volatile</span> dow_next;
+    <span class="keyword">_dispatch_thread_semaphore_t</span> dow_sema;
+};
+
+<span class="preprocessor">#<span class="keyword">define</span> DISPATCH_ONCE_DONE ((struct _dispatch_once_waiter_s *)~<span class="number">0l</span>)</span>
+
+<span class="preprocessor">#<span class="keyword">ifdef</span> __BLOCKS__</span>
+<span class="comment">// 1. 我们的应用程序调用的入口</span>
+<span class="function"><span class="keyword">void</span>
+<span class="title">dispatch_once</span><span class="params">(dispatch_once_t *val, dispatch_block_t block)</span>
+</span>{
+    <span class="keyword">struct</span> Block_basic *bb = (<span class="keyword">void</span> *)block;
+
+    <span class="comment">// 2. 内部逻辑</span>
+    dispatch_once_f(val, block, (<span class="keyword">void</span> *)bb-&gt;Block_invoke);
+}
+<span class="preprocessor">#<span class="keyword">endif</span></span>
+
+<span class="function">DISPATCH_NOINLINE
+<span class="keyword">void</span>
+<span class="title">dispatch_once_f</span><span class="params">(dispatch_once_t *val, <span class="keyword">void</span> *ctxt, dispatch_function_t func)</span>
+</span>{
+    <span class="keyword">struct</span> _dispatch_once_waiter_s * <span class="keyword">volatile</span> *vval =
+            (<span class="keyword">struct</span> _dispatch_once_waiter_s**)val;
+
+    <span class="comment">// 3. 地址类似于简单的哨兵位</span>
+    <span class="keyword">struct</span> _dispatch_once_waiter_s dow = { <span class="literal">NULL</span>, <span class="number">0</span> };
+
+    <span class="comment">// 4. 在Dispatch_Once的block执行期进入的dispatch_once_t更改请求的链表</span>
+    <span class="keyword">struct</span> _dispatch_once_waiter_s *tail, *tmp;
+
+    <span class="comment">// 5.局部变量，用于在遍历链表过程中获取每一个在链表上的更改请求的信号量</span>
+    <span class="keyword">_dispatch_thread_semaphore_t</span> sema;
+
+    <span class="comment">// 6. Compare and Swap（用于首次更改请求）</span>
+    <span class="keyword">if</span> (dispatch_atomic_cmpxchg(vval, <span class="literal">NULL</span>, &amp;dow)) {
+        dispatch_atomic_acquire_barrier();
+
+        <span class="comment">// 7.调用dispatch_once的block</span>
+        _dispatch_client_callout(ctxt, func);
+
+        dispatch_atomic_maximally_synchronizing_barrier();
+        <span class="comment">//dispatch_atomic_release_barrier(); // assumed contained in above</span>
+
+        <span class="comment">// 8. 更改请求成为DISPATCH_ONCE_DONE(原子性的操作)</span>
+        tmp = dispatch_atomic_xchg(vval, DISPATCH_ONCE_DONE);
+        tail = &amp;dow;
+
+        <span class="comment">// 9. 发现还有更改请求，继续遍历</span>
+        <span class="keyword">while</span> (tail != tmp) {
+
+            <span class="comment">// 10. 如果这个时候tmp的next指针还没更新完毕，等一会</span>
+            <span class="keyword">while</span> (!tmp-&gt;dow_next) {
+                _dispatch_hardware_pause();
+            }
+
+            <span class="comment">// 11. 取出当前的信号量，告诉等待者，我这次更改请求完成了，轮到下一个了</span>
+            sema = tmp-&gt;dow_sema;
+            tmp = (<span class="keyword">struct</span> _dispatch_once_waiter_s*)tmp-&gt;dow_next;
+            _dispatch_thread_semaphore_signal(sema);
+        }
+    } <span class="keyword">else</span> {
+        <span class="comment">// 12. 非首次请求，进入这块逻辑块</span>
+        dow.dow_sema = _dispatch_get_thread_semaphore();
+        <span class="keyword">for</span> (;;) {
+            <span class="comment">// 13. 遍历每一个后续请求，如果状态已经是Done，直接进行下一个</span>
+            <span class="comment">// 同时该状态检测还用于避免在后续wait之前，信号量已经发出(signal)造成</span>
+            <span class="comment">// 的死锁</span>
+            tmp = *vval;
+            <span class="keyword">if</span> (tmp == DISPATCH_ONCE_DONE) {
+                <span class="keyword">break</span>;
+            }
+            dispatch_atomic_store_barrier();
+            <span class="comment">// 14. 如果当前dispatch_once执行的block没有结束，那么就将这些</span>
+            <span class="comment">// 后续请求添加到链表当中</span>
+            <span class="keyword">if</span> (dispatch_atomic_cmpxchg(vval, tmp, &amp;dow)) {
+                dow.dow_next = tmp;
+                _dispatch_thread_semaphore_wait(dow.dow_sema);
+            }
+        }
+        _dispatch_put_thread_semaphore(dow.dow_sema);
+    }
+}
+</code></pre><p>根据以上注释对源代码的分析，我们可以大致知道如下几点：</p>
+<ol>
+<li><code>dispatch_once</code>并不是简单的只执行一次那么简单</li>
+<li><code>dispatch_once</code>本质上可以接受多次请求，会对此维护一个请求链表</li>
+<li>如果在block执行期间，多次进入调用同类的<code>dispatch_once</code>函数（即单例函数），会导致整体链表无限增长，造成永久性死锁。</li>
+</ol>
+<h4 id="备注">备注</h4><ol>
+<li>根据以上分析，相对应地写了一个简易的死锁Demo，就是在两个单例的初始化调用中直接相互调用。A&lt;-&gt;B。也许这个Demo过于简单，大家轻易不会犯。但是如果是A-&gt;B-&gt;C-&gt;A，甚至是更多个模块的相互引用，那又该如何轻易避免呢？</li>
+<li>以上的Demo，如果在Xcode模拟器测试环境下，是不会死锁从而导致应用启动被杀。这是因为模拟器不具备守护进程，如果要观察现象，可以输出Log或者直接利用真机进行测试。</li>
+<li>有时候，启动耗时是因为占用了太多的CPU资源。但是从我们的Crash Log中可以发现，我们仅仅占用了<strong>Elapsed application CPU time (seconds): 0.h秒, k% CPU</strong>。通过这个，我们也可以发现，CPU占用率高并不是导致启动阶段APP Crash的唯一原因。</li>
+</ol>
+<h4 id="反思">反思</h4><p>虽然这次的问题直接原因是<code>dispatch_once</code>引出的<strong>死锁</strong>问题，但是个人认为，这却是滥用单例造成的后果。各位可以打开自己公司的app源代码查看一下，究竟存在着多少的单例。</p>
+<p>实话实说，单例和全局变量几乎没有任何区别，不仅仅占用了全生命周期的内存，还对解耦造成了巨大的负作用。写起来容易，但是对于整个项目的架构梳理却是有着巨大的影响，因为在不读完整个相关代码的前提下，你压根不知道究竟哪里会触发单例的调用。</p>
+<p>因此在这里，谈谈个人认为可以不使用单例的几个方面：</p>
+<ol>
+<li>仅仅使用一次的模块，可以不使用单例，<strong>可以采用在对应的周期内维护成员实例变量进行替换</strong>。</li>
+<li>和状态无关的模块，<strong>可以采用静态（类）方法直接替换</strong>。</li>
+<li>可以通过页面跳转进行依赖注入的模块，<strong>可以采用依赖注入或者变量传递等方式解决</strong>。</li>
+</ol>
+<p><strong>当然，的确有一些情况我们仍然需要使用单例。那在这种情况，也请将<code>dispatch_once</code>调用的block内减少尽可能多的任务，最好是仅仅负责初始化，剩下的配置、调用等等在后续进行。</strong></p>
+
+      
+    </div>
+    <footer class="article-footer">
+      <a data-url="http://satanwoo.github.io/2016/04/11/dispatch-once/" data-id="cimuswbq500080yi1bmhqa0li" class="article-share-link">Share</a>
+      
+      
+  <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
+
+    </footer>
+  </div>
+  
+</article>
+
+
+  
     <article id="post-dispatch-in-swift" class="article article-type-post" itemscope itemprop="blogPost">
   <div class="article-meta">
     <a href="/2016/03/22/dispatch-in-swift/" class="article-date">
@@ -245,7 +482,7 @@ a4.<span class="function"><span class="title">staticInfo</span><span class="para
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/03/22/dispatch-in-swift/" data-id="cimc36zxs0008oji1sari24l5" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/03/22/dispatch-in-swift/" data-id="cimuswbq7000a0yi1jbt02o5o" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Swift/">Swift</a></li></ul>
@@ -337,7 +574,7 @@ a4.<span class="function"><span class="title">staticInfo</span><span class="para
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/03/14/RxSwift/" data-id="cimc36zyn000toji1nraz13hp" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/03/14/RxSwift/" data-id="cimuswbqx000v0yi10g7vskxv" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Swift/">Swift</a></li></ul>
@@ -425,7 +662,7 @@ val = edx(<span class="literal">true</span>)
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/03/14/SizeUp/" data-id="cimc36zyl000qoji12lgs92sj" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/03/14/SizeUp/" data-id="cimuswbqu000s0yi1l82eqocr" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Reverse-Engineering/">Reverse Engineering</a></li></ul>
@@ -565,7 +802,7 @@ val = edx(<span class="literal">true</span>)
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/03/14/DXXcodeConsoleUnicodePlugin/" data-id="cimc36zzo001ooji1rh69b2lw" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/03/14/DXXcodeConsoleUnicodePlugin/" data-id="cimuswbry001q0yi19bc67j8o" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
@@ -642,7 +879,7 @@ fi
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/02/27/check-manifest/" data-id="cimc36zxy000doji1vply58ko" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/02/27/check-manifest/" data-id="cimuswbqc000f0yi18d31vg64" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/shell/">shell</a></li></ul>
@@ -752,7 +989,7 @@ fi
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/02/27/pod-install-plugin/" data-id="cimc36zxe0003oji185818po9" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/02/27/pod-install-plugin/" data-id="cimuswbps00030yi1ai2goev0" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
@@ -1008,7 +1245,7 @@ fi
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/02/27/FBKVOController/" data-id="cimc36zzi001koji158iuw1yz" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/02/27/FBKVOController/" data-id="cimuswbrq001m0yi1q29zahc1" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
@@ -1122,7 +1359,7 @@ selectedTitleLabelsContentView<span class="class">.layer</span><span class="clas
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/02/05/DGRunKeeperSwitch/" data-id="cimc36zzs001qoji1mfjyuepe" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/02/05/DGRunKeeperSwitch/" data-id="cimuswbs0001s0yi1e8sy16et" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
@@ -1378,333 +1615,7 @@ NSLayoutConstraint *constraint = [NSLayoutConstraint <span class="string">constr
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/02/05/PureLayout/" data-id="cimc36zyx0010oji19d2vf79m" class="article-share-link">Share</a>
-      
-      
-  <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
-
-    </footer>
-  </div>
-  
-</article>
-
-
-  
-    <article id="post-Refactor-Mega-ViewController" class="article article-type-post" itemscope itemprop="blogPost">
-  <div class="article-meta">
-    <a href="/2015/12/30/Refactor-Mega-ViewController/" class="article-date">
-  <time datetime="2015-12-29T16:37:56.000Z" itemprop="datePublished">2015-12-30</time>
-</a>
-    
-  </div>
-  <div class="article-inner">
-    
-    
-      <header class="article-header">
-        
-  
-    <h1 itemprop="name">
-      <a class="article-title" href="/2015/12/30/Refactor-Mega-ViewController/">重构你的ViewController</a>
-    </h1>
-  
-
-      </header>
-    
-    <div class="article-entry" itemprop="articleBody">
-      
-        <p>这篇文章来自阅读<a href="https://realm.io/news/andy-matuschak-refactor-mega-controller/" target="_blank" rel="external">Let’s Play: Refactor the Mega Controller!</a></p>
-<p>在该文中，作者阐述了如何使用Swift重构一个臭名昭著的Massive View Controller。从中，我们可以一窥Swift诸多优秀的特性以及如何利用这些特性将ViewController的职责进行解耦。</p>
-<p>但是作者由于时间有限，并没有讲述完全，因此本文是我阅读<a href="https://github.com/andymatuschak/refactor-the-mega-controller" target="_blank" rel="external">源码</a>后的理解。</p>
-<p><strong>建议大家在阅读本文之前，能够先去看看链接中的视频。</strong></p>
-<h3 id="Let’s_get_started">Let’s get started</h3><p>首先我们下载源码，可以看到如下文件：</p>
-<pre><code>-<span class="ruby"> <span class="constant">NavigationController</span>.swift
-</span>-<span class="ruby"> <span class="constant">ViewController</span>.swift
-</span>-<span class="ruby"> <span class="constant">AddViewController</span>.swift</span>
-</code></pre><p>其中，<code>ViewController.swift</code>是项目的核心，代码行数超过<strong>246</strong>行。在这里我要强调一下，并不是代码行数多不好，而是要看你这个职责是不是相关。如果246行都是在实现一个数据结构或者算法，当然可行。但是如果246行里面包含了逻辑业务、网络请求、数据持久化，那必然是可以分离一部分职责出去。</p>
-<p>在本文的<code>ViewController.swift</code>，这个类在初始状态下包含了<code>UITableViewDataSource</code>, <code>UITableViewDelegate</code>, <code>UIViewControllerTransitioningDelegate</code>, <code>UIViewControllerAnimatedTransitioning</code>, <code>NSFetchedResultsController</code>以及一系类跟UI显示相关的代码。</p>
-<h4 id="1-_干掉UINavigationBar相关的内容">1. 干掉UINavigationBar相关的内容</h4><p>作者在app中构建了可变化的NavigationBar，因此bar的样式是根据不同状态进行改变的。原来的逻辑整体写在了<code>ViewController.swift</code>中，如下所示：</p>
-<pre><code> func updateNavigationBar() {
-        <span class="keyword">switch</span> fetchedResultsController!<span class="variable">.fetchedObjects</span>!<span class="variable">.count</span> {
-        <span class="keyword">case</span> <span class="number">0.</span>.<span class="number">.3</span>:
-            navigationController!<span class="variable">.navigationBar</span><span class="variable">.barTintColor</span> = <span class="literal">nil</span>
-            navigationController!<span class="variable">.navigationBar</span><span class="variable">.titleTextAttributes</span> = <span class="literal">nil</span>
-            navigationController!<span class="variable">.navigationBar</span><span class="variable">.tintColor</span> = <span class="literal">nil</span>
-        <span class="keyword">case</span> <span class="number">4.</span>.<span class="number">.9</span>:
-            navigationController!<span class="variable">.navigationBar</span><span class="variable">.barTintColor</span> = <span class="built_in">UIColor</span>(red: <span class="number">235</span>/<span class="number">255</span>, green: <span class="number">156</span>/<span class="number">255</span>, blue: <span class="number">77</span>/<span class="number">255</span>, alpha: <span class="number">1.0</span>)
-            navigationController!<span class="variable">.navigationBar</span><span class="variable">.titleTextAttributes</span> = [<span class="built_in">NSForegroundColorAttributeName</span>: <span class="built_in">UIColor</span><span class="variable">.whiteColor</span>()]
-            navigationController!<span class="variable">.navigationBar</span><span class="variable">.tintColor</span> = <span class="built_in">UIColor</span><span class="variable">.whiteColor</span>()
-        <span class="keyword">default</span>:
-            navigationController!<span class="variable">.navigationBar</span><span class="variable">.barTintColor</span> = <span class="built_in">UIColor</span>(red: <span class="number">248</span>/<span class="number">255</span>, green: <span class="number">73</span>/<span class="number">255</span>, blue: <span class="number">68</span>/<span class="number">255</span>, alpha: <span class="number">1.0</span>)
-            navigationController!<span class="variable">.navigationBar</span><span class="variable">.titleTextAttributes</span> = [<span class="built_in">NSForegroundColorAttributeName</span>: <span class="built_in">UIColor</span><span class="variable">.whiteColor</span>()]
-            navigationController!<span class="variable">.navigationBar</span><span class="variable">.tintColor</span> = <span class="built_in">UIColor</span><span class="variable">.whiteColor</span>()
-        }
-    }
-
-override func preferredStatusBarStyle() -&gt; <span class="built_in">UIStatusBarStyle</span> {
-    <span class="keyword">switch</span> fetchedResultsController?<span class="variable">.fetchedObjects</span>!<span class="variable">.count</span> {
-    <span class="keyword">case</span> <span class="variable">.Some</span>(<span class="number">0.</span>.<span class="number">.3</span>), <span class="variable">.None</span>:
-        <span class="keyword">return</span> <span class="variable">.Default</span>
-    <span class="keyword">case</span> <span class="variable">.Some</span>(_):
-        <span class="keyword">return</span> <span class="variable">.LightContent</span>
-    }
-}
-</code></pre><p>同时，还在几个事件回调的地方，如Core Data的<code>controllerDidChange</code>，调用了<code>setNeedsStatusBarAppearanceUpdate()</code>。</p>
-<p>这个想法粗略想想并没什么问题，因为我们需要根据一系列的事件变化来改变我们的界面样式，这是很明显的业务逻辑。而我们都很清楚，ViewController就是用来写业务逻辑的地方。</p>
-<p>先抛开ViewController是否是应该写业务逻辑的地方这一个有待商榷的论点之外，我们先看看，我们可以如何重构现有代码。</p>
-<p><strong>首先</strong>，<code>updateNavigationBar</code>中多个case中的代码有了重复，因此我们可以将其重构成一个函数，接受三个关于样式的参数，如下：</p>
-<pre><code>func applyTheme(<span class="string">barTintColor:</span>newBarTintColor, <span class="string">tintColor:</span>newTintColor, <span class="string">titleTextAttributes:</span>newTextAttributes) {
-    barTintColor = <span class="string">barTintColor:</span>newBarTintColor
-    tintColor = <span class="string">tintColor:</span>newTintColor
-    titleTextAttributes = <span class="string">titleTextAttributes:</span>newTextAttributes
-}
-</code></pre><p>重构完函数以后，我们发现在多个样式中用到了switch case进行业务逻辑参数转换样式参数的过程。<strong>这说明什么，我们可以将转换逻辑和switch case一起通过Enum进行重构（这里说的东西都是基于你懂Enum）</strong></p>
-<pre><code><span class="keyword">enum</span> NavigationTheme {
-    <span class="keyword">case</span> Normal
-    <span class="keyword">case</span> Warning
-    <span class="keyword">case</span> Doomed
-
-    var statusBarStyle: <span class="built_in">UIStatusBarStyle</span> {
-        <span class="keyword">switch</span> <span class="keyword">self</span> {
-        <span class="keyword">case</span> <span class="variable">.Normal</span>: <span class="keyword">return</span> <span class="variable">.Default</span>
-        <span class="keyword">case</span> <span class="variable">.Warning</span>, <span class="variable">.Doomed</span>: <span class="keyword">return</span> <span class="variable">.LightContent</span>
-        }
-    }
-
-    var barTintColor: <span class="built_in">UIColor</span>? {
-        <span class="keyword">switch</span> <span class="keyword">self</span> {
-        <span class="keyword">case</span> <span class="variable">.Normal</span>:
-            <span class="keyword">return</span> <span class="literal">nil</span>
-        <span class="keyword">case</span> <span class="variable">.Warning</span>:
-            <span class="keyword">return</span> <span class="built_in">UIColor</span>(red: <span class="number">235</span>/<span class="number">255</span>, green: <span class="number">156</span>/<span class="number">255</span>, blue: <span class="number">77</span>/<span class="number">255</span>, alpha: <span class="number">1.0</span>)
-        <span class="keyword">case</span> <span class="variable">.Doomed</span>:
-            <span class="keyword">return</span> <span class="built_in">UIColor</span>(red: <span class="number">248</span>/<span class="number">255</span>, green: <span class="number">73</span>/<span class="number">255</span>, blue: <span class="number">68</span>/<span class="number">255</span>, alpha: <span class="number">1.0</span>)
-        }
-    }
-
-    var titleTextAttributes: [String: <span class="built_in">NSObject</span>]? {
-        <span class="keyword">switch</span> <span class="keyword">self</span> {
-        <span class="keyword">case</span> <span class="variable">.Normal</span>:
-            <span class="keyword">return</span> <span class="literal">nil</span>
-        <span class="keyword">case</span> <span class="variable">.Warning</span>, <span class="variable">.Doomed</span>:
-            <span class="keyword">return</span> [<span class="built_in">NSForegroundColorAttributeName</span>: <span class="built_in">UIColor</span><span class="variable">.whiteColor</span>()]
-        }
-    }
-
-    var tintColor: <span class="built_in">UIColor</span>? {
-        <span class="keyword">switch</span> <span class="keyword">self</span> {
-        <span class="keyword">case</span> <span class="variable">.Normal</span>:
-            <span class="keyword">return</span> <span class="literal">nil</span>
-        <span class="keyword">case</span> <span class="variable">.Warning</span>, <span class="variable">.Doomed</span>:
-            <span class="keyword">return</span> <span class="built_in">UIColor</span><span class="variable">.whiteColor</span>()
-        }
-    }
-}
-
-extension NavigationTheme {
-    init(numberOfImminentTasks: Int) {
-        <span class="keyword">switch</span> numberOfImminentTasks {
-        <span class="keyword">case</span> -Int<span class="variable">.max</span> ... <span class="number">3</span>:
-            <span class="keyword">self</span> = <span class="variable">.Normal</span>
-        <span class="keyword">case</span> <span class="number">4.</span>.<span class="number">.9</span>:
-            <span class="keyword">self</span> = <span class="variable">.Warning</span>
-        <span class="keyword">default</span>:
-            <span class="keyword">self</span> = <span class="variable">.Doomed</span>
-        }
-    }
-}    
-</code></pre><p>由于Enum在swift中是一等公民，因此可以可以在其中构建大量的<strong>Computed Properties</strong>，这些计算变量依赖于当前enum的状态。不仅如此，我们还将之前分散的三种样式，组合成了一个<strong>紧凑的结构体</strong>，大大简化了变量传输。</p>
-<p>重构结束后，我们在<code>Viewcontroller.swift</code>中设置一个计算变量<code>navigationTheme</code>，其的构造函数是之前的<code>fetchedResultsController?.fetchedObjects?.count</code>。</p>
-<p>最后是在相应的事件后触发更新UINavigationBar即可，在本文的视线中，是采用了closure的形式完成：</p>
-<pre><code>navigationThemeDidChangeHandler = { [<span class="keyword">weak</span> <span class="keyword">self</span>] theme <span class="keyword">in</span>
-            <span class="keyword">if</span> <span class="keyword">let</span> navigationController = <span class="keyword">self</span>?.navigationController {
-                navigationController.navigationBar.applyTheme(theme)
-                navigationController.statusBarStyle = theme.statusBarStyle
-            }
-        }
-</code></pre><h3 id="2-_干掉时间相关的转换逻辑">2. 干掉时间相关的转换逻辑</h3><p>相信很多人做app的时候遇到过，服务器返回的是一系列标准时间参数，而你需要将其转换成界面需要的生日、星座、年龄等等，这又是一大堆的业务逻辑。为了解决这种逻辑代码和ViewController的耦合，很多人提出了<code>ViewModel</code>，将部分弱业务逻辑代码剥离出来，单独写在一个地方。</p>
-<p><strong>但是，我需要强调一点，这种形式的剥离，并不能叫ViewModal，而是一个简单的adapter而已。</strong></p>
-<p>在本文中，列表Cell里面需要根据日期距离当前时间的差距显示成昨天、今天、明天等等。因此，其构建了一个单独的的DateFormatter，根据传入的两个Date进行转换，代码如下：</p>
-<pre><code><span class="class"><span class="keyword">struct</span> <span class="title">RelativeTimeDateFormatter</span> </span>{
-    <span class="keyword">let</span> calendar: <span class="type">NSCalendar</span>
-
-    <span class="keyword">init</span>(calendar: <span class="type">NSCalendar</span> = <span class="type">NSCalendar</span>.autoupdatingCurrentCalendar()) {
-        <span class="keyword">self</span>.calendar = calendar
-    }
-
-    <span class="func"><span class="keyword">func</span> <span class="title">stringForDate</span><span class="params">(date: NSDate, relativeToDate baseDate: NSDate)</span></span> -&gt; <span class="type">String</span> {
-        <span class="keyword">var</span> beginningOfDate: <span class="type">NSDate</span>? = <span class="literal">nil</span>
-        <span class="keyword">var</span> beginningOfBaseDate: <span class="type">NSDate</span>? = <span class="literal">nil</span>
-
-        calendar.rangeOfUnit(.<span class="type">Day</span>, startDate: &amp;beginningOfDate, interval: <span class="literal">nil</span>, forDate: date)
-        calendar.rangeOfUnit(.<span class="type">Day</span>, startDate: &amp;beginningOfBaseDate, interval: <span class="literal">nil</span>, forDate: baseDate)
-        <span class="keyword">let</span> numberOfCalendarDaysBetweenDates = calendar.components(<span class="type">NSCalendarUnit</span>.<span class="type">Day</span>, fromDate: beginningOfBaseDate!, toDate: beginningOfDate!, options: <span class="type">NSCalendarOptions</span>()).day
-
-        <span class="keyword">switch</span> numberOfCalendarDaysBetweenDates {
-        <span class="keyword">case</span> -<span class="type">Int</span>.<span class="built_in">max</span> ... -<span class="number">2</span>:
-            <span class="keyword">return</span> <span class="string">"<span class="subst">\(<span class="built_in">abs</span>(numberOfCalendarDaysBetweenDates)</span>) days ago"</span>
-        <span class="keyword">case</span> -<span class="number">1</span>:
-            <span class="keyword">return</span> <span class="string">"Yesterday"</span>
-        <span class="keyword">case</span> <span class="number">0</span>:
-            <span class="keyword">return</span> <span class="string">"Today"</span>
-        <span class="keyword">case</span> <span class="number">1</span>:
-            <span class="keyword">return</span> <span class="string">"Tomorrow"</span>
-        <span class="keyword">default</span>:
-            <span class="keyword">return</span> <span class="string">"In <span class="subst">\(numberOfCalendarDaysBetweenDates)</span> days"</span>
-        }
-    }
-}
-</code></pre><p><strong>这里需要注意的是，NSCalendar的初始化非常耗时，过去在Objective-C时代常常使用dispatch_once构建单例传输，在这里通过结构体中的成员变量维护了一份，作用是同样的。</strong></p>
-<h3 id="3-_干掉NSPredicate">3. 干掉NSPredicate</h3><p>对于NSPredicate，有些人可能还不熟悉，他就是类似于SQLite中的查询语句，只不过其应用范围是CoreData。咦，查询语句还能重构？</p>
-<p>其实在本文中，对于NSPredicate的使用只有原先这一句  <code>fetchRequest.predicate = NSPredicate(format: &quot;dueDate &lt;= %@&quot;, argumentArray: [NSCalendar.currentCalendar().dateByAddingUnit(.Day, value: 10, toDate: NSDate(), options: NSCalendarOptions())!])</code></p>
-<p>这段代码从重复性上来说是不需要重构的。但是，我们可以看到，在这里的构造参数里面，我们还是进行了一定的业务逻辑转换。所以，和DateFormatter一样，我们也可以将这部分所谓为的”弱业务逻辑”代码进行剥离：</p>
-<pre><code>extension NSPredicate {
-    convenience init(forTasksWithinNumberOfDays <span class="string">numberOfDays:</span> Int, ofDate <span class="string">date:</span> NSDate, <span class="string">calendar:</span> NSCalendar = NSCalendar.currentCalendar()) {
-        self.init(<span class="string">format:</span> <span class="string">"dueDate &lt;= %@"</span>, <span class="string">argumentArray:</span> [calendar.dateByAddingUnit(.Day, <span class="string">value:</span> numberOfDays, <span class="string">toDate:</span> date, <span class="string">options:</span> NSCalendarOptions())!])
-    }
-}
-</code></pre><p><strong>除了业务逻辑剥离之外，其实我们也可以看到，在这个NSPredicate的新构造参数，可以接受一个<code>calendar</code>，这对于测试用例编写的依赖注入是非常有好处的。</strong></p>
-<h3 id="4-_Core_Data_Stack">4. Core Data Stack</h3><p>用过Core Data的人都知道，Core Data的使用非常麻烦，需要配置大量的选项，照着苹果源码写的经历相信大家都有过，那恶心的200-300行配置代码，真是么么哒了。</p>
-<p><strong>但是，这几百行代码又是无法省略的</strong>，那该怎么办呢？</p>
-<p>一个比较好的解决方案就<code>Core Data Stack</code>    。意为将CoreData的初始化以及多个NSManagerObjectContext封装进<code>CoreDataStack</code> 维护。 </p>
-<p>在本文中，因为只是使用了一个主线程的NSManagerObjectContext，所以可能读者在阅读源码的时候可能觉得这个重构只是将CoreData配置从View剥离了。但是实际上，使用CoreDataStack可以做到更多，建议大家阅读Github上相关项目。</p>
-<h3 id="5-_干掉NSFetchedResultsControllerDelegate">5. 干掉NSFetchedResultsControllerDelegate</h3><p>NSFetchedResultsController大家可以简单理解为获取CoreData数据的一个中介层。根据传输进入的谓语NSPredicate进行查询，查询结束后通过相应的Delegate事件回调。</p>
-<p>在作者的代码中，作者通过构建<code>manager</code>的方式剥离了NSFetchedResultsController的职责，将NSFetchedResultsController的初始化、回调封装进了<code>UpcomingTaskDataManager.swift</code>中。</p>
-<p><strong>不过值得注意的一点是，尽管作者封装的NSFetchedResultsControllerDelegate的回调，但是为了让调用者可以自定义处理事件，实际上作者还是需要暴露一些的Delegate，当然，新的回调相对来说进行了一定的简化，同时在数据回调时经过了业务转化。</strong></p>
-<pre><code><span class="class"><span class="keyword">protocol</span> <span class="title">UpcomingTaskDataManagerDelegate</span> </span>{
-    <span class="func"><span class="keyword">func</span> <span class="title">dataManagerWillChangeContent</span><span class="params">(dataManager: UpcomingTaskDataManager)</span></span>
-    <span class="func"><span class="keyword">func</span> <span class="title">dataManagerDidChangeContent</span><span class="params">(dataManager: UpcomingTaskDataManager)</span></span>
-    <span class="func"><span class="keyword">func</span> <span class="title">dataManager</span><span class="params">(dataManager: UpcomingTaskDataManager, didInsertRowAtIndexPath indexPath: NSIndexPath)</span></span>
-    <span class="func"><span class="keyword">func</span> <span class="title">dataManager</span><span class="params">(dataManager: UpcomingTaskDataManager, didDeleteRowAtIndexPath indexPath: NSIndexPath)</span></span>
-}
-</code></pre><h3 id="6-_CoreDataModel_&lt;=&gt;_Model">6. CoreDataModel &lt;=&gt; Model</h3><p>这一步是将从Core Data中获取的NSManagedObject Model 转换成业务中使用的Model。为什么要这么做呢？原因有三个：  </p>
-<ul>
-<li>CoreData中的属性一更改，就会触发NSFetchedResultsController，这会很影响性能。</li>
-<li>CoreData中的属性存在很多bug</li>
-<li>NSManagedObject不是一个struct类型，很有可能<strong>误伤</strong></li>
-</ul>
-<pre>
-import CoreData  
-import Foundation
-
-struct Task: Equatable {
-    var id: String
-    var title: String
-    var dueDate: NSDate
-}
-
-func ==(lhs: Task, rhs: Task) -> Bool {
-    return lhs.id == rhs.id && lhs.title == rhs.title && lhs.dueDate == rhs.dueDate
-}
-
-extension Task {
-    init(managedTask: NSManagedObject) {
-        self.id = managedTask.valueForKey("id") as! String
-        self.title = managedTask.valueForKey("title") as! String
-        self.dueDate = managedTask.valueForKey("dueDate") as! NSDate
-    }
-}
-</pre>
-
-<p>作者用以上的Task类型替换了CoreData中的ManagedObject，可以有效的避免以上问题。</p>
-<h3 id="7-封装数据结构">7.封装数据结构</h3><p>在这一步里，我将作者自定义<code>TaskTableViewCell</code>和构建<code>AddCompletionSegue</code>合并到了一块说。</p>
-<p>这两步的重构，看似简单，但是其实也蕴含了一个思想：<strong>类型越确定，编程越容易，运行越安全</strong></p>
-<p>在原文的实现，一开始作者都是通过采用基础的数据结构UITableViewCell和UISegue。这样带来的坏处就是类型不明确导致的职责不明确。对于基础的数据结构，我们常常还要进行类型判断和转换，容易犯错。</p>
-<h3 id="8-干掉UITableViewDelegate和UITableViewDataSource">8.干掉UITableViewDelegate和UITableViewDataSource</h3><p>这一步想必大家都很熟悉了，微博上整天热传了<em>用ViewModel重构你的ViewController</em>经常提及的就是干掉UITableViewDelegate和UITableViewDataSource。</p>
-<p>那说了那么多，我们来看看究竟如何干掉它。</p>
-<p>毫无以为，我们首先要构建一个类型，来实现UITableViewDelegate和DataSource，如下所示：</p>
-<pre><code><span class="comment">// 1. </span>
-<span class="class"><span class="keyword">class</span> <span class="title">UpcomingTaskDataManagerTableViewAdapter</span>&lt;<span class="title">CellType</span>: <span class="title">UITableViewCell</span>&gt;: <span class="title">NSObject</span>, <span class="title">UITableViewDataSource</span>, <span class="title">UpcomingTaskDataManagerDelegate</span> </span>{
-    private <span class="keyword">let</span> tableView: <span class="type">UITableView</span>
-    private <span class="keyword">let</span> upcomingTaskDataManager: <span class="type">UpcomingTaskDataManager</span>
-    private <span class="keyword">let</span> cellReuseIdentifier: <span class="type">String</span>
-    private <span class="keyword">let</span> cellConfigurationHandler: (<span class="type">CellType</span>, <span class="type">Task</span>) -&gt; ()
-    private <span class="keyword">let</span> didChangeHandler: () -&gt; <span class="type">Void</span>
-
-<span class="comment">// .2</span>
-    <span class="keyword">init</span>(tableView: <span class="type">UITableView</span>, upcomingTaskDataManager: <span class="type">UpcomingTaskDataManager</span>, cellReuseIdentifier: <span class="type">String</span>, cellConfigurationHandler: (<span class="type">CellType</span>, <span class="type">Task</span>) -&gt; (), didChangeHandler: () -&gt; <span class="type">Void</span>) {
-        <span class="keyword">self</span>.tableView = tableView
-        <span class="keyword">self</span>.upcomingTaskDataManager = upcomingTaskDataManager
-        <span class="keyword">self</span>.cellReuseIdentifier = cellReuseIdentifier
-        <span class="keyword">self</span>.cellConfigurationHandler = cellConfigurationHandler
-        <span class="keyword">self</span>.didChangeHandler = didChangeHandler
-
-        <span class="keyword">super</span>.<span class="keyword">init</span>()
-    }
-
-<span class="comment">// 3.</span>
-    <span class="func"><span class="keyword">func</span> <span class="title">tableView</span><span class="params">(tableView: UITableView, commitEditingStyle editingStyle: UITableViewCellEditingStyle, forRowAtIndexPath indexPath: NSIndexPath)</span></span> {
-        upcomingTaskDataManager.deleteTask(upcomingTaskDataManager.taskSections[indexPath.section].items[indexPath.row])
-    }
-
-    <span class="func"><span class="keyword">func</span> <span class="title">numberOfSectionsInTableView</span><span class="params">(tableView: UITableView)</span></span> -&gt; <span class="type">Int</span> {
-        <span class="keyword">return</span> upcomingTaskDataManager.taskSections.<span class="built_in">count</span>
-    }
-
-    <span class="func"><span class="keyword">func</span> <span class="title">tableView</span><span class="params">(tableView: UITableView, titleForHeaderInSection section: Int)</span></span> -&gt; <span class="type">String</span>? {
-        <span class="keyword">return</span> upcomingTaskDataManager.taskSections[section].title
-    }
-
-    <span class="func"><span class="keyword">func</span> <span class="title">tableView</span><span class="params">(tableView: UITableView, numberOfRowsInSection section: Int)</span></span> -&gt; <span class="type">Int</span> {
-        <span class="keyword">return</span> upcomingTaskDataManager.taskSections[section].items.<span class="built_in">count</span>
-    }
-
-    <span class="func"><span class="keyword">func</span> <span class="title">tableView</span><span class="params">(tableView: UITableView, cellForRowAtIndexPath indexPath: NSIndexPath)</span></span> -&gt; <span class="type">UITableViewCell</span> {
-        <span class="keyword">let</span> task = upcomingTaskDataManager.taskSections[indexPath.section].items[indexPath.row]
-        <span class="keyword">let</span> cell = tableView.dequeueReusableCellWithIdentifier(cellReuseIdentifier, forIndexPath: indexPath) <span class="keyword">as</span>! <span class="type">CellType</span>
-        cellConfigurationHandler(cell, task)
-        <span class="keyword">return</span> cell
-    }
-</code></pre><ol>
-<li>这个<code>UpcomingTaskDataManagerTableViewAdapter</code>通过传入一个CellType支持泛型。  </li>
-<li>通过接受几个closure来进行自定义的配置，包括cell的样式配置以及tableview数据更新后的回调。  </li>
-<li>实现的UITableViewDataSource</li>
-</ol>
-<p>同样，由于职责的重新分配，我们要将跟<code>TaskManager</code>（包括NSFetchedResultsController）相关的划入到这个adapter中。</p>
-<h3 id="大结局">大结局</h3><p>最后重构后的ViewController，只有<strong>37</strong>代码，效果如下：</p>
-<pre><code><span class="class"><span class="keyword">class</span> <span class="title">ViewController</span>: <span class="title">UITableViewController</span> </span>{
-    <span class="keyword">var</span> navigationThemeDidChangeHandler: ((<span class="type">NavigationTheme</span>) -&gt; <span class="type">Void</span>)?
-    <span class="keyword">var</span> navigationTheme: <span class="type">NavigationTheme</span> {
-        <span class="keyword">return</span> <span class="type">NavigationTheme</span>(numberOfImminentTasks: upcomingTaskDataManager.totalNumberOfTasks)
-    }
-
-    private <span class="keyword">let</span> upcomingTaskDataManager = <span class="type">UpcomingTaskDataManager</span>()
-    private <span class="keyword">var</span> upcomingTaskDataManagerTableViewAdapter: <span class="type">UpcomingTaskDataManagerTableViewAdapter</span>&lt;<span class="type">TaskTableViewCell</span>&gt;!
-
-    <span class="keyword">override</span> <span class="func"><span class="keyword">func</span> <span class="title">viewDidLoad</span><span class="params">()</span></span> {
-        <span class="keyword">super</span>.viewDidLoad()
-
-        upcomingTaskDataManagerTableViewAdapter = <span class="type">UpcomingTaskDataManagerTableViewAdapter</span>(
-            tableView: tableView,
-            upcomingTaskDataManager: upcomingTaskDataManager,
-            cellReuseIdentifier: <span class="string">"Cell"</span>,
-            cellConfigurationHandler: { cell, task <span class="keyword">in</span>
-                cell.viewData = <span class="type">TaskTableViewCell</span>.<span class="type">ViewData</span>(task: task, relativeToDate: <span class="type">NSDate</span>())
-            },
-            didChangeHandler: { [<span class="keyword">weak</span> <span class="keyword">self</span>] <span class="keyword">in</span> <span class="keyword">self</span>?.updateNavigationBar() }
-        )
-        upcomingTaskDataManager.delegate = upcomingTaskDataManagerTableViewAdapter
-        tableView.dataSource = upcomingTaskDataManagerTableViewAdapter
-
-        updateNavigationBar()
-    }
-
-    <span class="keyword">override</span> <span class="func"><span class="keyword">func</span> <span class="title">tableView</span><span class="params">(tableView: UITableView, canEditRowAtIndexPath indexPath: NSIndexPath)</span></span> -&gt; <span class="type">Bool</span> {
-        <span class="keyword">return</span> <span class="literal">true</span>
-    }
-
-    <span class="func"><span class="keyword">func</span> <span class="title">updateNavigationBar</span><span class="params">()</span></span> {
-        navigationThemeDidChangeHandler?(navigationTheme)
-    }
-
-    <span class="preprocessor">@IBAction</span> <span class="func"><span class="keyword">func</span> <span class="title">unwindFromAddController</span><span class="params">(segue: AddCompletionSegue)</span></span> {
-        upcomingTaskDataManager.createTaskWithTitle(segue.taskTitle, dueDate: segue.taskDueDate)
-    }
-}
-</code></pre>
-      
-    </div>
-    <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/12/30/Refactor-Mega-ViewController/" data-id="cimc36zyt000yoji1nkqdm324" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/02/05/PureLayout/" data-id="cimuswbr500120yi10vbz1a71" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
@@ -1731,7 +1642,7 @@ extension Task {
   <div class="widget-wrap">
     <h3 class="widget-title">Tags</h3>
     <div class="widget">
-      <ul class="tag-list"><li class="tag-list-item"><a class="tag-list-link" href="/tags/Android/">Android</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/JavaScript/">JavaScript</a><span class="tag-list-count">2</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Math/">Math</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/R/">R</a><span class="tag-list-count">2</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Reverse-Engineering/">Reverse Engineering</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Swift/">Swift</a><span class="tag-list-count">6</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/iOS/">iOS</a><span class="tag-list-count">14</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/shell/">shell</a><span class="tag-list-count">1</span></li></ul>
+      <ul class="tag-list"><li class="tag-list-item"><a class="tag-list-link" href="/tags/Android/">Android</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/JavaScript/">JavaScript</a><span class="tag-list-count">2</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Math/">Math</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/R/">R</a><span class="tag-list-count">2</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Reverse-Engineering/">Reverse Engineering</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Swift/">Swift</a><span class="tag-list-count">6</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/iOS/">iOS</a><span class="tag-list-count">15</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/shell/">shell</a><span class="tag-list-count">1</span></li></ul>
     </div>
   </div>
 
@@ -1749,7 +1660,7 @@ extension Task {
   <div class="widget-wrap">
     <h3 class="widget-title">Archives</h3>
     <div class="widget">
-      <ul class="archive-list"><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/03/">March 2016</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/02/">February 2016</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/12/">December 2015</a><span class="archive-list-count">6</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/11/">November 2015</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/10/">October 2015</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/09/">September 2015</a><span class="archive-list-count">4</span></li></ul>
+      <ul class="archive-list"><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/04/">April 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/03/">March 2016</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/02/">February 2016</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/12/">December 2015</a><span class="archive-list-count">6</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/11/">November 2015</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/10/">October 2015</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/09/">September 2015</a><span class="archive-list-count">4</span></li></ul>
     </div>
   </div>
 
@@ -1759,6 +1670,10 @@ extension Task {
     <h3 class="widget-title">Recents</h3>
     <div class="widget">
       <ul>
+        
+          <li>
+            <a href="/2016/04/11/dispatch-once/">滥用单例之dispatch_once死锁</a>
+          </li>
         
           <li>
             <a href="/2016/03/22/dispatch-in-swift/">Swift 中的静态Dispatch VS 动态Dispatch</a>
@@ -1774,10 +1689,6 @@ extension Task {
         
           <li>
             <a href="/2016/03/14/DXXcodeConsoleUnicodePlugin/">DXXcodeConsoleUnicodePlugin源码解析</a>
-          </li>
-        
-          <li>
-            <a href="/2016/02/27/check-manifest/">Check Pods Manifest.lock</a>
           </li>
         
       </ul>

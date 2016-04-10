@@ -4,7 +4,7 @@
   
   <link href="/atom.xml" rel="self"/>
   <link href="http://satanwoo.github.io/"/>
-  <updated>2016-03-28T14:24:49.000Z</updated>
+  <updated>2016-04-10T16:44:58.000Z</updated>
   <id>http://satanwoo.github.io/</id>
   
   <author>
@@ -13,6 +13,222 @@
   </author>
   
   <generator uri="http://hexo.io/">Hexo</generator>
+  
+  <entry>
+    <title><![CDATA[滥用单例之dispatch_once死锁]]></title>
+    <link href="http://satanwoo.github.io/2016/04/11/dispatch-once/"/>
+    <id>http://satanwoo.github.io/2016/04/11/dispatch-once/</id>
+    <published>2016-04-10T16:41:09.000Z</published>
+    <updated>2016-04-10T16:44:58.000Z</updated>
+    <content type="html"><![CDATA[<p>###现象</p>
+<p>上周排查了一个bug，现象很简单，就是个Crash问题。但是读了一下crash Log以后，却发现堆栈报的错误信息却是第一次见到（<strong>吹牛的说，我在国内的iOS也能算第十二人了</strong>），包含以下还未符号化信息：</p>
+<pre><code>Application Specific Information:
+com.xxx.yyy failed to scene-<span class="operator"><span class="keyword">create</span> <span class="keyword">in</span> <span class="keyword">time</span>
+
+Elapsed total CPU <span class="keyword">time</span> (seconds): hhh秒 (<span class="keyword">user</span> hhh, <span class="keyword">system</span> <span class="number">0.000</span>), <span class="keyword">k</span>% CPU
+Elapsed application CPU <span class="keyword">time</span> (seconds): <span class="number">0.</span>h秒, <span class="keyword">k</span>% CPU
+
+<span class="keyword">Thread</span> <span class="number">0</span> <span class="keyword">name</span>:  Dispatch queue: com.apple.<span class="keyword">main</span>-<span class="keyword">thread</span>
+<span class="keyword">Thread</span> <span class="number">0</span>:
+<span class="number">0</span>   libsystem_kernel.dylib            <span class="number">0x36cb2540</span> semaphore_wait_trap + <span class="number">8</span>
+<span class="number">1</span>   libsystem_platform.dylib          <span class="number">0x36d3d430</span> _os_semaphore_wait + <span class="number">8</span>
+<span class="number">2</span>   libdispatch.dylib                 <span class="number">0x36be04a6</span> dispatch_once_f + <span class="number">250</span>
+<span class="number">3</span>   xxxx                              偏移量 <span class="number">0x4000</span> + <span class="number">947290</span>
+...
+...</span>
+</code></pre><p>无符号化的crash 堆栈暂时不去管它，我们重点关注<strong>com.xxx.yyy failed to scene-create in time</strong>。如果理解无误的话，这句话提示我们：我们的应用程序在规定的时间没能加载成功，无法显示。看起来这个原因是启动加载过长直接被干掉。那么问题来了，原因具体是啥？</p>
+<h4 id="符号化">符号化</h4><p>首先我们需要符号化一下，这里涉及公司内部信息，所以我们自己构造个demo试试。<br>demo的代码很简单，如下：</p>
+<pre><code><span class="preprocessor">#import <span class="title">"ManageA.h"</span></span>
+
+<span class="class"><span class="keyword">@implementation</span> <span class="title">ManageA</span></span>
+
++ (ManageA *)sharedInstance
+{
+    <span class="keyword">static</span> ManageA *manager = <span class="literal">nil</span>;
+    <span class="keyword">static</span> <span class="built_in">dispatch_once_t</span> token;
+
+    <span class="built_in">dispatch_once</span>(&amp;token, ^{
+        manager = [[ManageA alloc] init];
+    });
+
+    <span class="keyword">return</span> manager;
+}
+
+- (instancetype)init
+{
+    <span class="keyword">self</span> = [<span class="keyword">super</span> init];
+    <span class="keyword">if</span> (<span class="keyword">self</span>) {
+        [ManageB sharedInstance];
+    }
+    <span class="keyword">return</span> <span class="keyword">self</span>;
+}
+
+<span class="keyword">@end</span>
+
+<span class="class"><span class="keyword">@implementation</span> <span class="title">ManageB</span></span>
+
++ (ManageB *)sharedInstance
+{
+    <span class="keyword">static</span> ManageB *manager = <span class="literal">nil</span>;
+    <span class="keyword">static</span> <span class="built_in">dispatch_once_t</span> token;
+
+    <span class="built_in">dispatch_once</span>(&amp;token, ^{
+        manager = [[ManageB alloc] init];
+    });
+
+    <span class="keyword">return</span> manager;
+}
+
+- (instancetype)init
+{
+    <span class="keyword">self</span> = [<span class="keyword">super</span> init];
+    <span class="keyword">if</span> (<span class="keyword">self</span>) {
+        [ManageA sharedInstance];
+    }
+    <span class="keyword">return</span> <span class="keyword">self</span>;
+}
+</code></pre><p>运行后的堆栈基本如下：</p>
+<pre><code><span class="preprocessor">#<span class="number">0</span>    <span class="number">0x000000011054acd2</span> in semaphore_wait_trap ()</span>
+<span class="preprocessor">#<span class="number">1</span>    <span class="number">0x00000001101b1b1a</span> in _dispatch_thread_semaphore_wait ()</span>
+<span class="preprocessor">#<span class="number">2</span>    <span class="number">0x00000001101b1d48</span> in dispatch_once_f ()</span>
+<span class="preprocessor">#<span class="number">3</span>    <span class="number">0x000000010d01c857</span> in _dispatch_once [inlined] at once.h:<span class="number">68</span></span>
+<span class="preprocessor">#<span class="number">4</span>    <span class="number">0x000000010d01c839</span> in +[ManageA sharedInstance] at ManageA.m:<span class="number">18</span></span>
+<span class="preprocessor">#<span class="number">5</span>    <span class="number">0x000000010d01cad8</span> in -[ManageB init] at ManageA.m:<span class="number">54</span></span>
+<span class="preprocessor">#<span class="number">6</span>    <span class="number">0x000000010d01ca42</span> in __25+[ManageB sharedInstance]_block_invoke at ManageA.m:<span class="number">44</span></span>
+<span class="preprocessor">#<span class="number">7</span>    <span class="number">0x00000001101c649b</span> in _dispatch_client_callout ()</span>
+<span class="preprocessor">#<span class="number">8</span>    <span class="number">0x00000001101b1e28</span> in dispatch_once_f ()</span>
+<span class="preprocessor">#<span class="number">9</span>    <span class="number">0x000000010d01c9e7</span> in _dispatch_once [inlined] at once.h:<span class="number">68</span></span>
+<span class="preprocessor">#<span class="number">10</span>    <span class="number">0x000000010d01c9c9</span> in +[ManageB sharedInstance] at ManageA.m:<span class="number">43</span></span>
+<span class="preprocessor">#<span class="number">11</span>    <span class="number">0x000000010d01c948</span> in -[ManageA init] at ManageA.m:<span class="number">29</span></span>
+<span class="preprocessor">#<span class="number">12</span>    <span class="number">0x000000010d01c8b2</span> in __25+[ManageA sharedInstance]_block_invoke at ManageA.m:<span class="number">19</span></span>
+<span class="preprocessor">#<span class="number">13</span>    <span class="number">0x00000001101c649b</span> in _dispatch_client_callout ()</span>
+<span class="preprocessor">#<span class="number">14</span>    <span class="number">0x00000001101b1e28</span> in dispatch_once_f ()</span>
+<span class="preprocessor">#<span class="number">15</span>    <span class="number">0x000000010d01c857</span> in _dispatch_once [inlined] at once.h:<span class="number">68</span></span>
+<span class="preprocessor">#<span class="number">16</span>    <span class="number">0x000000010d01c839</span> in +[ManageA sharedInstance] at /ManageA.m:<span class="number">18</span></span>
+<span class="preprocessor">#<span class="number">17</span>    <span class="number">0x000000010d01c5cc</span> in -[AppDelegate application:didFinishLaunchingWithOptions:]         at /AppDelegate.m:<span class="number">21</span></span>
+</code></pre><p>从中我们可以发现，的确在这段调用栈中，出现了多次敏感字样<code>sharedInstance</code>和<code>dispatch_once_f</code>字样。</p>
+<p>在查阅相关资料后，感觉是<code>dispatch_once_f</code>函数造成了信号量的永久等待，从而引发死锁。那么，为什么<code>dispatch_once</code>会死锁呢？以前说的<strong>最安全的单例构造方式</strong>还正确不正确呢？</p>
+<p>所以，我们一起来看看下面关于<code>dispatch_once</code>的源码分析。</p>
+<h4 id="dispatch_once源码分析">dispatch_once源码分析</h4><p>从<a href="git://git.macosforge.org/libdispatch.git" target="_blank" rel="external">libdispatch</a>获取最新版本代码，进入对应的文件<strong>once.c</strong>。去除注释后代码如下，共<strong>66</strong>行代码，但是真的是有很多奇妙的地方。</p>
+<pre><code><span class="preprocessor">#<span class="keyword">include</span> <span class="string">"internal.h"</span></span>
+
+<span class="preprocessor">#<span class="keyword">undef</span> dispatch_once</span>
+<span class="preprocessor">#<span class="keyword">undef</span> dispatch_once_f</span>
+
+<span class="keyword">struct</span> _dispatch_once_waiter_s {
+    <span class="keyword">volatile</span> <span class="keyword">struct</span> _dispatch_once_waiter_s *<span class="keyword">volatile</span> dow_next;
+    <span class="keyword">_dispatch_thread_semaphore_t</span> dow_sema;
+};
+
+<span class="preprocessor">#<span class="keyword">define</span> DISPATCH_ONCE_DONE ((struct _dispatch_once_waiter_s *)~<span class="number">0l</span>)</span>
+
+<span class="preprocessor">#<span class="keyword">ifdef</span> __BLOCKS__</span>
+<span class="comment">// 1. 我们的应用程序调用的入口</span>
+<span class="function"><span class="keyword">void</span>
+<span class="title">dispatch_once</span><span class="params">(dispatch_once_t *val, dispatch_block_t block)</span>
+</span>{
+    <span class="keyword">struct</span> Block_basic *bb = (<span class="keyword">void</span> *)block;
+
+    <span class="comment">// 2. 内部逻辑</span>
+    dispatch_once_f(val, block, (<span class="keyword">void</span> *)bb-&gt;Block_invoke);
+}
+<span class="preprocessor">#<span class="keyword">endif</span></span>
+
+<span class="function">DISPATCH_NOINLINE
+<span class="keyword">void</span>
+<span class="title">dispatch_once_f</span><span class="params">(dispatch_once_t *val, <span class="keyword">void</span> *ctxt, dispatch_function_t func)</span>
+</span>{
+    <span class="keyword">struct</span> _dispatch_once_waiter_s * <span class="keyword">volatile</span> *vval =
+            (<span class="keyword">struct</span> _dispatch_once_waiter_s**)val;
+
+    <span class="comment">// 3. 地址类似于简单的哨兵位</span>
+    <span class="keyword">struct</span> _dispatch_once_waiter_s dow = { <span class="literal">NULL</span>, <span class="number">0</span> };
+
+    <span class="comment">// 4. 在Dispatch_Once的block执行期进入的dispatch_once_t更改请求的链表</span>
+    <span class="keyword">struct</span> _dispatch_once_waiter_s *tail, *tmp;
+
+    <span class="comment">// 5.局部变量，用于在遍历链表过程中获取每一个在链表上的更改请求的信号量</span>
+    <span class="keyword">_dispatch_thread_semaphore_t</span> sema;
+
+    <span class="comment">// 6. Compare and Swap（用于首次更改请求）</span>
+    <span class="keyword">if</span> (dispatch_atomic_cmpxchg(vval, <span class="literal">NULL</span>, &amp;dow)) {
+        dispatch_atomic_acquire_barrier();
+
+        <span class="comment">// 7.调用dispatch_once的block</span>
+        _dispatch_client_callout(ctxt, func);
+
+        dispatch_atomic_maximally_synchronizing_barrier();
+        <span class="comment">//dispatch_atomic_release_barrier(); // assumed contained in above</span>
+
+        <span class="comment">// 8. 更改请求成为DISPATCH_ONCE_DONE(原子性的操作)</span>
+        tmp = dispatch_atomic_xchg(vval, DISPATCH_ONCE_DONE);
+        tail = &amp;dow;
+
+        <span class="comment">// 9. 发现还有更改请求，继续遍历</span>
+        <span class="keyword">while</span> (tail != tmp) {
+
+            <span class="comment">// 10. 如果这个时候tmp的next指针还没更新完毕，等一会</span>
+            <span class="keyword">while</span> (!tmp-&gt;dow_next) {
+                _dispatch_hardware_pause();
+            }
+
+            <span class="comment">// 11. 取出当前的信号量，告诉等待者，我这次更改请求完成了，轮到下一个了</span>
+            sema = tmp-&gt;dow_sema;
+            tmp = (<span class="keyword">struct</span> _dispatch_once_waiter_s*)tmp-&gt;dow_next;
+            _dispatch_thread_semaphore_signal(sema);
+        }
+    } <span class="keyword">else</span> {
+        <span class="comment">// 12. 非首次请求，进入这块逻辑块</span>
+        dow.dow_sema = _dispatch_get_thread_semaphore();
+        <span class="keyword">for</span> (;;) {
+            <span class="comment">// 13. 遍历每一个后续请求，如果状态已经是Done，直接进行下一个</span>
+            <span class="comment">// 同时该状态检测还用于避免在后续wait之前，信号量已经发出(signal)造成</span>
+            <span class="comment">// 的死锁</span>
+            tmp = *vval;
+            <span class="keyword">if</span> (tmp == DISPATCH_ONCE_DONE) {
+                <span class="keyword">break</span>;
+            }
+            dispatch_atomic_store_barrier();
+            <span class="comment">// 14. 如果当前dispatch_once执行的block没有结束，那么就将这些</span>
+            <span class="comment">// 后续请求添加到链表当中</span>
+            <span class="keyword">if</span> (dispatch_atomic_cmpxchg(vval, tmp, &amp;dow)) {
+                dow.dow_next = tmp;
+                _dispatch_thread_semaphore_wait(dow.dow_sema);
+            }
+        }
+        _dispatch_put_thread_semaphore(dow.dow_sema);
+    }
+}
+</code></pre><p>根据以上注释对源代码的分析，我们可以大致知道如下几点：</p>
+<ol>
+<li><code>dispatch_once</code>并不是简单的只执行一次那么简单</li>
+<li><code>dispatch_once</code>本质上可以接受多次请求，会对此维护一个请求链表</li>
+<li>如果在block执行期间，多次进入调用同类的<code>dispatch_once</code>函数（即单例函数），会导致整体链表无限增长，造成永久性死锁。</li>
+</ol>
+<h4 id="备注">备注</h4><ol>
+<li>根据以上分析，相对应地写了一个简易的死锁Demo，就是在两个单例的初始化调用中直接相互调用。A&lt;-&gt;B。也许这个Demo过于简单，大家轻易不会犯。但是如果是A-&gt;B-&gt;C-&gt;A，甚至是更多个模块的相互引用，那又该如何轻易避免呢？</li>
+<li>以上的Demo，如果在Xcode模拟器测试环境下，是不会死锁从而导致应用启动被杀。这是因为模拟器不具备守护进程，如果要观察现象，可以输出Log或者直接利用真机进行测试。</li>
+<li>有时候，启动耗时是因为占用了太多的CPU资源。但是从我们的Crash Log中可以发现，我们仅仅占用了<strong>Elapsed application CPU time (seconds): 0.h秒, k% CPU</strong>。通过这个，我们也可以发现，CPU占用率高并不是导致启动阶段APP Crash的唯一原因。</li>
+</ol>
+<h4 id="反思">反思</h4><p>虽然这次的问题直接原因是<code>dispatch_once</code>引出的<strong>死锁</strong>问题，但是个人认为，这却是滥用单例造成的后果。各位可以打开自己公司的app源代码查看一下，究竟存在着多少的单例。</p>
+<p>实话实说，单例和全局变量几乎没有任何区别，不仅仅占用了全生命周期的内存，还对解耦造成了巨大的负作用。写起来容易，但是对于整个项目的架构梳理却是有着巨大的影响，因为在不读完整个相关代码的前提下，你压根不知道究竟哪里会触发单例的调用。</p>
+<p>因此在这里，谈谈个人认为可以不使用单例的几个方面：</p>
+<ol>
+<li>仅仅使用一次的模块，可以不使用单例，<strong>可以采用在对应的周期内维护成员实例变量进行替换</strong>。</li>
+<li>和状态无关的模块，<strong>可以采用静态（类）方法直接替换</strong>。</li>
+<li>可以通过页面跳转进行依赖注入的模块，<strong>可以采用依赖注入或者变量传递等方式解决</strong>。</li>
+</ol>
+<p><strong>当然，的确有一些情况我们仍然需要使用单例。那在这种情况，也请将<code>dispatch_once</code>调用的block内减少尽可能多的任务，最好是仅仅负责初始化，剩下的配置、调用等等在后续进行。</strong></p>
+]]></content>
+    <summary type="html">
+    <![CDATA[<p>###现象</p>
+<p>上周排查了一个bug，现象很简单，就是个Crash问题。但是读了一下crash Log以后，却发现堆栈报的错误信息却是第一次见到（<strong>吹牛的说，我在国内的iOS也能算第十二人了</strong>），包含以下还未符号化信息：</p>
+<p]]>
+    </summary>
+    
+      <category term="iOS" scheme="http://satanwoo.github.io/tags/iOS/"/>
+    
+  </entry>
   
   <entry>
     <title><![CDATA[Swift 中的静态Dispatch VS 动态Dispatch]]></title>
@@ -2695,212 +2911,6 @@ modalVC<span class="class">.modalPresentationStyle</span> = <span class="class">
     </summary>
     
       <category term="iOS" scheme="http://satanwoo.github.io/tags/iOS/"/>
-    
-  </entry>
-  
-  <entry>
-    <title><![CDATA[Object-Path 源码解读]]></title>
-    <link href="http://satanwoo.github.io/2015/11/05/Object-Path-Source-Code/"/>
-    <id>http://satanwoo.github.io/2015/11/05/Object-Path-Source-Code/</id>
-    <published>2015-11-04T16:18:02.000Z</published>
-    <updated>2015-11-09T17:57:55.000Z</updated>
-    <content type="html"><![CDATA[<h3 id="Object-Path">Object-Path</h3><p>今天看到了一个非常有意思的JavaScript库，乍一看有点iOS keypath chain的意思，名字叫Object-Path，<a href="https://github.com/mariocasciaro/object-path" target="_blank" rel="external">地址点我</a>，主要的功能包含了：</p>
-<ul>
-<li>Set</li>
-<li>Get</li>
-<li>Del</li>
-<li>Empty </li>
-<li>Insert </li>
-<li>EnsureExist</li>
-<li>Push</li>
-</ul>
-<p>从它的Example中我们可以先一览它的功能：</p>
-<pre><code><span class="keyword">var</span> obj = {
-  a: {
-    b: <span class="string">"d"</span>,
-    c: [<span class="string">"e"</span>, <span class="string">"f"</span>],
-    <span class="string">'\u1200'</span>: <span class="string">'unicode key'</span>,
-    <span class="string">'dot.dot'</span>: <span class="string">'key'</span>
-  }
-};
-
-<span class="keyword">var</span> objectPath = require(<span class="string">"object-path"</span>);
-
-<span class="comment">//get deep property</span>
-objectPath.<span class="keyword">get</span>(obj, <span class="string">"a.b"</span>);  <span class="comment">//returns "d"</span>
-objectPath.<span class="keyword">get</span>(obj, [<span class="string">"a"</span>, <span class="string">"dot.dot"</span>]);  <span class="comment">//returns "key"</span>
-objectPath.<span class="keyword">get</span>(obj, <span class="string">'a.\u1200'</span>);  <span class="comment">//returns "unicode key"</span>
-</code></pre><p>从这个例子中，我们可以发现对于一个Object <strong>obc</strong>，除了默认的直接通过点 <strong>.</strong>方式访问一个属性外， 如obj.a。我们还可以通过点 <strong>.</strong> 来进行<strong>“链式”</strong>访问其属性的属性（如果存在的话），如obj.a.b。这看起来真的和iOS中的keypath coding非常相似，所以，今天就让我们来分析下其实现吧！</p>
-<h3 id="源码解析">源码解析</h3><h4 id="Set方法">Set方法</h4><pre><code>例子：objectPath.<span class="keyword">set</span>(obj, <span class="string">"a.h"</span>, <span class="string">"m"</span>); 
-</code></pre><p>Set方法是用来给obj的某个<strong>“链式”</strong>属性进行赋值的，源码如下：</p>
-<pre><code><span class="function">function <span class="title">set</span><span class="params">(obj, path, value, doNotReplace)</span></span>{
-     <span class="comment">// 1. </span>
-    <span class="keyword">if</span> (isNumber(path)) {
-      path = [path];
-    }
-
-    <span class="comment">// 2.</span>
-    <span class="keyword">if</span> (isEmpty(path)) {
-      <span class="keyword">return</span> obj;
-    }
-
-    <span class="comment">// 3.</span>
-    <span class="keyword">if</span> (isString(path)) {
-      <span class="keyword">return</span> <span class="built_in">set</span>(obj, path.split(<span class="string">'.'</span>).<span class="built_in">map</span>(getKey), value, doNotReplace);
-    }
-
-    <span class="comment">// 4.</span>
-    var currentPath = path[<span class="number">0</span>];
-
-    <span class="keyword">if</span> (path.length === <span class="number">1</span>) {
-      var oldVal = obj[currentPath];
-      <span class="keyword">if</span> (oldVal === <span class="keyword">void</span> <span class="number">0</span> || !doNotReplace) {
-        obj[currentPath] = value;
-      }
-      <span class="keyword">return</span> oldVal;
-    }
-
-     <span class="comment">// 5.</span>
-    <span class="keyword">if</span> (obj[currentPath] === <span class="keyword">void</span> <span class="number">0</span>) {
-      <span class="comment">//check if we assume an array</span>
-      <span class="keyword">if</span>(isNumber(path[<span class="number">1</span>])) {
-        obj[currentPath] = [];
-      } <span class="keyword">else</span> {
-        obj[currentPath] = {};
-      }
-    }
-
-    <span class="keyword">return</span> <span class="built_in">set</span>(obj[currentPath], path.slice(<span class="number">1</span>), value, doNotReplace);
-  }
-</code></pre><ul>
-<li><ol>
-<li>判断传入的path是否是Number类型，如果不是的话，构建一个包含这个pathde数组，这里为什么要这样处理，在下文解释。<strong>注：JavaScript中不存在浮点数、整数等等不同数值类型，统一为Number</strong></li>
-</ol>
-</li>
-<li><ol>
-<li>判断传入的path是不是“空”，空的情况包含：undefined，空数组，没有任何自身属性的对象。下文我们会详细查看<strong>isEmpty</strong>的实现。</li>
-</ol>
-</li>
-<li><ol>
-<li>判断是否是字符串，如果是字符串，就通过<strong>“.”</strong>进行分割，分割完成构建数组，然后进行set方法的重新调用。</li>
-</ol>
-</li>
-<li><ol>
-<li>判断是否当前path深度只为一层，<em>var currentPath = path[0]</em>，如果是一层的话，根据是否要doNotReplace进行值的替换。</li>
-</ol>
-</li>
-</ul>
-<p>这里有个很有意思的实现 <strong>oldVal === void 0</strong>，void 0是什么鬼，我们经常会看见<strong>JavaScript::void(0)代表网页的死链接</strong>，那么oldVal == void 0又是什么意思呢？</p>
-<p><strong>其实，void 0就是undefined！</strong>在现代的浏览器中，它们两已经完全的等同了。而写成void 0的形式，是为了兼容。在过去的浏览器中，undefined不是一个关键字，它是个全局变量。因此，你完全可以徒手改变它的含义，</p>
-<pre><code><span class="keyword">var</span> <span class="literal">undefined</span> = <span class="number">1</span>;
-<span class="built_in">console</span>.log(<span class="literal">undefined</span>);
-</code></pre><p>这样的改变，就会undefined原本的含义错乱。而<strong>由于void是一个操作符，你无法改写它的含义，因此void 0是一种更安全的写法！</strong></p>
-<p>在这里的含义就是，判断<strong>oldVal === void 0</strong>是不是未定义罢了。</p>
-<ul>
-<li><ol>
-<li>如果不是一层深度的path，并且当前的obj[currentPath]是未定义的。那么就需要判断path[1]，也就是path数组中的第二个属性是什么了。<strong>如果是数字，就将obj[currentPath]构建为数组［］，否则构建一个对象｛｝。</strong></li>
-</ol>
-</li>
-</ul>
-<p>为什么要分开处理呢？这里就需要提及JavaScript访问属性的一个特别的地方。对于如下这样一个对象，</p>
-<pre><code><span class="keyword">var</span> obj = <span class="comment">{a:5}</span>
-</code></pre><p>来说，我们实现<strong>obj.a 或者 obj[“a”]</strong>都可以获得正确的结果5，但是对于另一个对象，</p>
-<pre><code>var obj = {<span class="number">1</span>: <span class="number">5</span>}
-</code></pre><p>我们只能使用obj[“1”]的方式来访问结果5，而不能使用obj.1。如果使用obj.1，就能报错误：<div style="color:red">Uncaught SyntaxError: Unexpected number(…)</div></p>
-<p>究其原因，就在于JavaScript在处理对象的key的时候，都是将key当成字符串处理的。</p>
-<p>所以，在这里构建完相对应的下一层级obj[currrentPath]，递归调用set方法即可。</p>
-<h4 id="Del方法">Del方法</h4><pre><code><span class="function">function <span class="title">del</span><span class="params">(obj, path)</span> </span>{
-    <span class="keyword">if</span> (isNumber(path)) {
-     path = [path];
-    }
-
-    <span class="keyword">if</span> (isEmpty(obj)) {
-     <span class="keyword">return</span> <span class="keyword">void</span> <span class="number">0</span>;
-    }
-
-    <span class="keyword">if</span> (isEmpty(path)) {
-     <span class="keyword">return</span> obj;
-    }
-
-    <span class="keyword">if</span>(isString(path)) {
-     <span class="keyword">return</span> del(obj, path.split(<span class="string">'.'</span>));
-    }
-
-    <span class="comment">// 重点</span>
-    var currentPath = getKey(path[<span class="number">0</span>]);
-    var oldVal = obj[currentPath];
-
-    <span class="keyword">if</span>(path.length === <span class="number">1</span>) {
-     <span class="keyword">if</span> (oldVal !== <span class="keyword">void</span> <span class="number">0</span>) {
-       <span class="keyword">if</span> (isArray(obj)) {
-         obj.splice(currentPath, <span class="number">1</span>);
-       } <span class="keyword">else</span> {
-         <span class="keyword">delete</span> obj[currentPath];
-       }
-     }
-    } <span class="keyword">else</span> {
-     <span class="keyword">if</span> (obj[currentPath] !== <span class="keyword">void</span> <span class="number">0</span>) {
-       <span class="keyword">return</span> del(obj[currentPath], path.slice(<span class="number">1</span>));
-     }
-    }
-
-    <span class="keyword">return</span> obj;
-}
-</code></pre><p>让我们再来看看Del方法，这个方法用于“链式”删除一些属性对应的值。由于之前的逻辑和Set类似，我们直接从重点开始看起。</p>
-<ul>
-<li>首先先从path[0]中获取key，然后取出对应的oldVal。</li>
-<li><p>如果path深度为1，并且oldVal不是未定义的话，究进行删除，删除分为两种：</p>
-<p>（1）如果是数组的话,通过splice删除数组中currentPath位置上的属性值<br>（2）如果是object，直接进行删除即可</p>
-</li>
-<li><p>如果深度不为1，并且oldValue不是未定义，递归调用del函数即可。</p>
-</li>
-</ul>
-<p>这里有一点需要注意，我们看到在获取currentPath的过程中，调用了getKey这个函数，让我们赶紧去看看这个getKey的实现。</p>
-<pre><code><span class="function"><span class="keyword">function</span> <span class="title">getKey</span>(<span class="params">key</span>)</span>{
-    <span class="keyword">var</span> intKey = <span class="built_in">parseInt</span>(key);
-    <span class="keyword">if</span> (intKey.toString() === key) {
-      <span class="keyword">return</span> intKey;
-    }
-    <span class="keyword">return</span> key;
-} 
-</code></pre><p>这里的逻辑不难理解，通过parseInt将key转成整型，如果转换后的结果通过toString函数和原有的key一致，就直接返回整形，否则返回原有的key。<strong>通过===(强等于号)不难理解，这里if的满足条件当且仅当key本身是string类型，同时其值是个整数才可以满足，如”5”等，像类似”a.2”, “5.5”就不会满足。</strong></p>
-<p>剩下的诸如Get, Has方法，实现都大同小异，我们就不再一一解读了，大家有兴趣可以自行阅读。</p>
-<h3 id="补充知识：JavaScript类型判断">补充知识：JavaScript类型判断</h3><pre><code><span class="function"><span class="keyword">function</span> <span class="title">isNumber</span><span class="params">(value)</span></span>{
-  <span class="keyword">return</span> <span class="keyword">typeof</span> value === <span class="string">'number'</span> || toString(value) === <span class="string">"[object Number]"</span>;
-}
-
-<span class="function"><span class="keyword">function</span> <span class="title">isString</span><span class="params">(obj)</span></span>{
-  <span class="keyword">return</span> <span class="keyword">typeof</span> obj === <span class="string">'string'</span> || toString(obj) === <span class="string">"[object String]"</span>;
-}
-
-<span class="function"><span class="keyword">function</span> <span class="title">isObject</span><span class="params">(obj)</span></span>{
-  <span class="keyword">return</span> <span class="keyword">typeof</span> obj === <span class="string">'object'</span> &amp;&amp; toString(obj) === <span class="string">"[object Object]"</span>;
-}
-
-<span class="function"><span class="keyword">function</span> <span class="title">isArray</span><span class="params">(obj)</span></span>{
-  <span class="keyword">return</span> <span class="keyword">typeof</span> obj === <span class="string">'object'</span> &amp;&amp; <span class="keyword">typeof</span> obj.length === <span class="string">'number'</span> &amp;&amp; toString(obj) === <span class="string">'[object Array]'</span>;
-}
-
-<span class="function"><span class="keyword">function</span> <span class="title">isBoolean</span><span class="params">(obj)</span></span>{
-  <span class="keyword">return</span> <span class="keyword">typeof</span> obj === <span class="string">'boolean'</span> || toString(obj) === <span class="string">'[object Boolean]'</span>;
-}
-</code></pre><p>在Object-Path的实现中，大量的类型判断工作都是通过如上一些函数来搞定的。有人会问了，判断一个类型为啥要这么麻烦，直接用instanceOf或者typeof不可以吗？</p>
-<ul>
-<li>用instanceOf是肯定错误的，如果被判断的对象不处于同一个页面，那么instanceOf就肯定失效了。</li>
-</ul>
-<blockquote><br>比如，一个页面（父页面）有一个框架，框架中引用了一个页面（子页面），在子页面中声明了一个array，并将其赋值给父页面的一个变量，这时判断该变量是否是array类型，就是失败<br></blockquote>
-
-<ul>
-<li>用typeof的缺陷在于，JavaScript中存在基本类型和包装类型，对于数值5来说，它是基本类型Number，通过typeof可以准备的判断出。但是如果是包装对象<b>var k = new Number(5)</b>，在意义上其仍然应该是属于数值类型，但是通过typeof获得的结果是object，因此就不正确。</li>
-</ul>
-<p><strong>所以，在这里的实现，我们采用了Object.prototype.toString.call(obj)的方式来获取正确的类型。</strong></p>
-<p>嘿嘿，今天就到这里啦。</p>
-]]></content>
-    <summary type="html">
-    <![CDATA[<h3 id="Object-Path">Object-Path</h3><p>今天看到了一个非常有意思的JavaScript库，乍一看有点iOS keypath chain的意思，名字叫Object-Path，<a href="https://github.com/marioc]]>
-    </summary>
-    
-      <category term="JavaScript" scheme="http://satanwoo.github.io/tags/JavaScript/"/>
     
   </entry>
   
