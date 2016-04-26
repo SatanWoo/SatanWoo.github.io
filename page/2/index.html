@@ -62,6 +62,262 @@
       <div class="outer">
         <section id="main">
   
+    <article id="post-PureLayout" class="article article-type-post" itemscope itemprop="blogPost">
+  <div class="article-meta">
+    <a href="/2016/02/05/PureLayout/" class="article-date">
+  <time datetime="2016-02-05T14:33:20.000Z" itemprop="datePublished">2016-02-05</time>
+</a>
+    
+  </div>
+  <div class="article-inner">
+    
+    
+      <header class="article-header">
+        
+  
+    <h1 itemprop="name">
+      <a class="article-title" href="/2016/02/05/PureLayout/">PureLayout 源码解析</a>
+    </h1>
+  
+
+      </header>
+    
+    <div class="article-entry" itemprop="articleBody">
+      
+        <p>在开始这篇文章之前，想必大家都应该使用过Autolayout方式的界面布局，相信大家都有过类似于如下这样的API调用：    </p>
+<pre><code>[NSLayoutConstraint(item: self.viewA, attribute: .CenterY, relatedBy: .Equal, toItem: self.viewB, attribute: .CenterY, multiplier: <span class="number">1.0</span>, constant: <span class="number">0.0</span>)]
+</code></pre><p>抑或是Visual Format Language</p>
+<pre><code>NSLayoutConstraint.constraintsWithVisualFormat(<span class="string">"|-(leftPadding)-[imageView(imageViewWidth)]-(rigntPadding)-[labelA]-(4)-[labelB]-(&gt;=44)-|"</span>, <span class="string">options:</span> NSLayoutFormatOptions(<span class="string">rawValue:</span> <span class="number">0</span>), <span class="string">metrics:</span> methics, <span class="string">views:</span> views)
+</code></pre><p>这种冗长而又晦涩的代码，真是恶心人啊。因此在Github上涌现了一大堆简化布局的开源库，如SnapKit, Mansory以及今天我们要说的PureLayout。  </p>
+<p>在这之中，PureLayout是最轻量级的，它仅仅是对Autolayout现成的语法进行了一层封装，相较于Mansory引入的一些<strong>新概念</strong>，Purelayout更直接易懂。</p>
+<h3 id="源码解析">源码解析</h3><p>Purelayout的源码基本没什么难懂的地方，我们首先来看一下其项目结构：</p>
+<ul>
+<li>PurelayoutDefines.h</li>
+<li>ALView + PureLayout.h/.m</li>
+<li>NSArray + PureLayout.h/.m</li>
+<li>NSLayoutConstraint + Purelayout.h/.m</li>
+</ul>
+<h4 id="PurelayoutDefines">PurelayoutDefines</h4><p>首先从PurelayoutDefines上入手，这个文件主要是进行一些类似<strong>Domain Specific Language</strong>定义的转化，如：</p>
+<pre><code>typedef NS_ENUM(NSInteger, ALEdge) {
+    /** The <span class="built_in">left</span> edge of the view. */
+    ALEdgeLeft = NSLayoutAttributeLeft,
+    /** The <span class="built_in">right</span> edge of the view. */
+    ALEdgeRight = NSLayoutAttributeRight,
+    /** The top edge of the view. */
+    ALEdgeTop = NSLayoutAttributeTop,
+    /** The bottom edge of the view. */
+    ALEdgeBottom = NSLayoutAttributeBottom,
+    /** The leading edge of the view (<span class="built_in">left</span> edge <span class="keyword">for</span> <span class="built_in">left</span>-<span class="keyword">to</span>-<span class="built_in">right</span> languages like English, <span class="built_in">right</span> edge <span class="keyword">for</span> <span class="built_in">right</span>-<span class="keyword">to</span>-<span class="built_in">left</span> languages like Arabic). */
+    ALEdgeLeading = NSLayoutAttributeLeading,
+    /** The trailing edge of the view (<span class="built_in">right</span> edge <span class="keyword">for</span> <span class="built_in">left</span>-<span class="keyword">to</span>-<span class="built_in">right</span> languages like English, <span class="built_in">left</span> edge <span class="keyword">for</span> <span class="built_in">right</span>-<span class="keyword">to</span>-<span class="built_in">left</span> languages like Arabic). */
+    ALEdgeTrailing = NSLayoutAttributeTrailing
+};
+</code></pre><p>上述这段代码，就是将传统的UIKit中的NSLayoutAttribute的枚举类型全部转换成对应的PureLayout中的定义，如ALEdgeRight对应到NSLayoutAttributeRight。</p>
+<p><strong>LayoutMargins</strong><br>在这里补充一点题外知识，在iOS8中，苹果为Autolayout引入了LayoutMargins这一概念。这个概念乍一听可能都不了解，但是大家回忆下，比如在Storyboard中，我们拖拽一个UIView到ViewController的view并设置边距的时候，上边距和下边距对应的限制都是layout guide，如下图所示：</p>
+<p><img src="http://7lrzqz.com1.z0.glb.clouddn.com/%E5%B1%8F%E5%B9%95%E5%BF%AB%E7%85%A7%202016-01-26%20%E4%B8%8B%E5%8D%882.55.37.png" alt=""></p>
+<p><img src="http://7lrzqz.com1.z0.glb.clouddn.com/%E5%B1%8F%E5%B9%95%E5%BF%AB%E7%85%A7%202016-01-26%20%E4%B8%8B%E5%8D%882.56.23.png" alt=""><br><img src="http://7lrzqz.com1.z0.glb.clouddn.com/%E5%B1%8F%E5%B9%95%E5%BF%AB%E7%85%A7%202016-01-26%20%E4%B8%8B%E5%8D%882.56.13.png" alt=""></p>
+<p><strong>简单来说，在iOS7上就已经存在了LayoutMargin了，当时的作用是用来限制view的真实内容不会被UINavigationBar（上部）以及UIToolbar（下部）所遮盖</strong>。而从iOS8中开始，苹果将这一技术引入到了任意一个UIView中。</p>
+<h4 id="ALView_+_Purelayout">ALView + Purelayout</h4><p><strong>ALView实际上是UIView或者NSView的别名，通过添加ALView的分类，可以通过Define在编译期进行替换，避免为NSView和UIView各创建一份重复的代码</strong>。这个类中的API过多，因此我们以轴对齐为典型的例子来分解下源码：</p>
+<ol>
+<li>轴对齐<br>在PureLayout中，包括<code>Vertical</code>, <code>Horizontal</code>, <code>Baseline</code>等几种轴对齐方式，其中Baseline指的是View中潜在包含文字的Baseline。</li>
+</ol>
+<p>好，我们来看看相关的API</p>
+<pre><code><span class="comment">/** Aligns an axis of the view to the same axis of another view. */</span>
+<span class="tag">-</span> (<span class="tag">NSLayoutConstraint</span> *)<span class="rule"><span class="attribute">autoAlignAxis</span>:<span class="value">(ALAxis)axis toSameAxisOfView:(ALView *)otherView</span></span>;
+</code></pre><p>从该API的名称，我们可以直观的感觉出其作用是用于将两个View按照同一个轴对齐。这个API是一个<strong>Convenience Init</strong>，其层层传递</p>
+<pre><code>- (NSLayoutConstraint *)<span class="string">autoAlignAxis:</span>(ALAxis)axis <span class="string">toSameAxisOfView:</span>(ALView *)otherView
+{
+    <span class="keyword">return</span> [self <span class="string">autoAlignAxis:</span>axis <span class="string">toSameAxisOfView:</span>otherView <span class="string">withOffset:</span><span class="number">0.0</span>];
+}
+
+- (NSLayoutConstraint *)<span class="string">autoAlignAxis:</span>(ALAxis)axis <span class="string">toSameAxisOfView:</span>(ALView *)otherView <span class="string">withOffset:</span>(CGFloat)offset
+{
+    <span class="keyword">return</span> [self <span class="string">autoConstrainAttribute:</span>(ALAttribute)axis <span class="string">toAttribute:</span>(ALAttribute)axis <span class="string">ofView:</span>otherView <span class="string">withOffset:</span>offset];
+}
+</code></pre><p>最后调用了</p>
+<pre><code><span class="pp">- <span class="params">(<span class="variable">NSLayoutConstraint</span> *)</span>autoConstrainAttribute:<span class="params">(<span class="variable">ALAttribute</span>)</span>attribute toAttribute:<span class="params">(<span class="variable">ALAttribute</span>)</span>toAttribute ofView:<span class="params">(<span class="variable">ALView</span> *)</span>otherView withOffset:<span class="params">(<span class="variable">CGFloat</span>)</span>offset`</span>
+</code></pre><p>好，那就让我们来看看这个上述这个函数的实现，如下所示：</p>
+<pre><code><span class="comment">//1.</span>
+self.translatesAutoresizingMaskIntoConstraints = NO;
+
+<span class="comment">//2.</span>
+NSLayoutAttribute layoutAttribute = [NSLayoutConstraint <span class="string">al_layoutAttributeForAttribute:</span>attribute];
+NSLayoutAttribute toLayoutAttribute = [NSLayoutConstraint <span class="string">al_layoutAttributeForAttribute:</span>toAttribute];
+
+<span class="comment">//3.</span>
+NSLayoutConstraint *constraint = [NSLayoutConstraint <span class="string">constraintWithItem:</span>self <span class="string">attribute:</span>layoutAttribute <span class="string">relatedBy:</span>relation <span class="string">toItem:</span>otherView <span class="string">attribute:</span>toLayoutAttribute <span class="string">multiplier:</span><span class="number">1.0</span> <span class="string">constant:</span>offset];
+
+<span class="comment">//4.</span>
+[constraint autoInstall];
+<span class="keyword">return</span> constraint;
+</code></pre><ul>
+<li>1.首先将translatesAutoresizingMaskIntoConstraints设置为false，对于要使用autolayout的UIView，必须设置为false，也就是不将传统frame布局中的Autoresizing Mask转换成约束。</li>
+<li>2.根据传入的<strong>PureLayout属性</strong>转换成对应的NSLayoutAttribute</li>
+<li>3.调用冗长恶心的Autolayout API构建约束</li>
+<li>4.添加约束</li>
+</ul>
+<p>在这里，我们需要注意一下这个<code>[constraint autoInstall]</code>，让我们来探一探实现：</p>
+<pre><code>- (<span class="keyword">void</span>)autoInstall
+{
+<span class="comment">// 1. iOS8+</span>
+<span class="preprocessor">#if __PureLayout_MinBaseSDK_iOS_8_0 || __PureLayout_MinBaseSDK_OSX_10_10</span>
+    <span class="keyword">if</span> ([<span class="keyword">self</span> respondsToSelector:<span class="keyword">@selector</span>(setActive:)]) {
+        [<span class="built_in">NSLayoutConstraint</span> al_applyGlobalStateToConstraint:<span class="keyword">self</span>];
+        <span class="comment">// 1.1</span>
+        <span class="keyword">if</span> ([<span class="built_in">NSLayoutConstraint</span> al_preventAutomaticConstraintInstallation]) {         
+            [[<span class="built_in">NSLayoutConstraint</span> al_currentArrayOfCreatedConstraints] addObject:<span class="keyword">self</span>];
+        } <span class="keyword">else</span> {
+        <span class="comment">// 1.2 </span>
+            <span class="keyword">self</span><span class="variable">.active</span> = <span class="literal">YES</span>;
+        }
+        <span class="keyword">return</span>;
+    }
+<span class="preprocessor">#endif /* __PureLayout_MinBaseSDK_iOS_8_0 || __PureLayout_MinBaseSDK_OSX_10_10 */</span>
+
+<span class="comment">// 2. iOS 7</span>
+    <span class="built_in">NSAssert</span>(<span class="keyword">self</span><span class="variable">.firstItem</span> || <span class="keyword">self</span><span class="variable">.secondItem</span>, <span class="string">@"Can't install a constraint with nil firstItem and secondItem."</span>);
+    <span class="keyword">if</span> (<span class="keyword">self</span><span class="variable">.firstItem</span>) {
+        <span class="keyword">if</span> (<span class="keyword">self</span><span class="variable">.secondItem</span>) {
+            <span class="built_in">NSAssert</span>([<span class="keyword">self</span><span class="variable">.firstItem</span> isKindOfClass:[ALView class]] &amp;&amp; [<span class="keyword">self</span><span class="variable">.secondItem</span> isKindOfClass:[ALView class]], <span class="string">@"Can only automatically install a constraint if both items are views."</span>);
+            ALView *commonSuperview = [<span class="keyword">self</span><span class="variable">.firstItem</span> al_commonSuperviewWithView:<span class="keyword">self</span><span class="variable">.secondItem</span>];
+            [commonSuperview al_addConstraint:<span class="keyword">self</span>];
+        } <span class="keyword">else</span> {
+            <span class="built_in">NSAssert</span>([<span class="keyword">self</span><span class="variable">.firstItem</span> isKindOfClass:[ALView class]], <span class="string">@"Can only automatically install a constraint if the item is a view."</span>);
+            [<span class="keyword">self</span><span class="variable">.firstItem</span> al_addConstraint:<span class="keyword">self</span>];
+        }
+    } <span class="keyword">else</span> {
+        <span class="built_in">NSAssert</span>([<span class="keyword">self</span><span class="variable">.secondItem</span> isKindOfClass:[ALView class]], <span class="string">@"Can only automatically install a constraint if the item is a view."</span>);
+        [<span class="keyword">self</span><span class="variable">.secondItem</span> al_addConstraint:<span class="keyword">self</span>];
+    }
+}
+</code></pre><p>整个实现的部分被一分为二，上半部分专门针对iOS8+的，下半部分针对iOS7（<strong>事实上在整个PureLayout的设计中，大部分地方的处理方式都一分为二了</strong>）</p>
+<p>我们暂时也不管<code>al_applyGlobalStateToConstraint:self</code> 以及 <code>al_preventAutomaticConstraintInstallation</code>的作用，我们从1.2看起。</p>
+<ul>
+<li>在iOS8上，启用或者禁用一个AutoLayout的Constraint变得更加容易了，仅仅需要设置active即可</li>
+<li>在iOS7上，需要手动的addConstraint或者removeConstraint</li>
+<li>在处理iOS7的逻辑当中，需要判断当前这个Constraint是否是针对两个Item的，如果是，找到他们的公共父View，在父View在添加约束，比如添加View A和View B之间的间距；而如果是单一一个View，比如是设置高度或者宽度的，直接在当前View添加即可。</li>
+<li>通过调用<code>al_addConstraint</code>进行约束实际的添加。</li>
+</ul>
+<p>而<strong>al_addConstraint</strong>的实现则如下所示：</p>
+<pre><code><span class="attr_selector">[NSLayoutConstraint al_applyGlobalStateToConstraint:constraint]</span>;
+<span class="tag">if</span> ([NSLayoutConstraint al_preventAutomaticConstraintInstallation]) {
+    <span class="attr_selector">[[NSLayoutConstraint al_currentArrayOfCreatedConstraints]</span> <span class="tag">addObject</span><span class="pseudo">:constraint</span>];
+} <span class="tag">else</span> {
+    <span class="attr_selector">[self addConstraint:constraint]</span>;
+}
+</code></pre><p>这里又出现了<code>al_applyGlobalStateToConstraint:constraint</code>以及<code>al_preventAutomaticConstraintInstallation</code>了，这次我们可不能再躲着它了，赶紧瞧一瞧。</p>
+<p>首先是<code>al_applyGlobalStateToConstraint:constraint</code>，这个参数对应的是一个全局静态变量，用于判断：</p>
+<pre><code><span class="keyword">if</span> ([<span class="built_in">NSLayoutConstraint</span> al_isExecutingPriorityConstraintsBlock]) {
+    constraint<span class="variable">.priority</span> = [<span class="built_in">NSLayoutConstraint</span> al_currentGlobalConstraintPriority];
+}
+</code></pre><p>而这个<code>al_isExecutingPriorityConstraintsBlock</code>则是用于如下这个函数：</p>
+<pre><code>+ (void)autoSetPriority:(ALLayoutPriority)priority forConstraints:(ALConstraintsBlock)<span class="keyword">block
+</span>{
+    NSAssert(<span class="keyword">block, </span><span class="comment">@"The constraints block cannot be nil.");</span>
+    <span class="preprocessor">if</span> (<span class="keyword">block) </span>{
+        [[<span class="keyword">self </span>al_globalConstraintPriorities] <span class="keyword">addObject:@(priority)];
+</span>        <span class="keyword">block();
+</span>        [[<span class="keyword">self </span>al_globalConstraintPriorities] removeLastObject]<span class="comment">;</span>
+    }
+}
+</code></pre><p>这里可能大家有点晦涩，主要在于PureLayout对于给Constraint设置Priority定义了一个Block-based的方法，也就是<code>autoSetPriority</code>。在回调的Block中，可以对多个Constraint设置同一个大小的Priority。（<strong>其实我也不是很理解这个集体加Priority设计的目的</strong>）</p>
+<p><strong>不过需要有一点可以肯定的是，设置Constraint的Priority的时机一定要在<code>addConstraint</code>或者<code>active = true</code>之前</strong></p>
+<p>而对于<code>al_preventAutomaticConstraintInstallation</code>这个变量，作者在API中描述了如下一段话：</p>
+<blockquote>Creates all of the constraints in the block, then installs (activates) them all at once.<br> All constraints created from calls to the PureLayout API in the block are returned in a single array.<br> This may be more efficient than installing (activating) each constraint one-by-one.</blockquote>
+
+<p>简而言之，一次性添加所有约束（实际上调用了UIKit的API<code>activateConstraints</code>），比一个个添加要有效率。<strong>然而，Purelayout的这个特性对于iOS7来说，用不上，只能通过<code>addConstraint</code>一个个装，哈哈，么么哒</strong></p>
+<h4 id="NSArray_+_Purelayout">NSArray + Purelayout</h4><p>说完了ALView的layout，我们接下来说说另外的NSArray + Purelayout。顾名思义，该分类的主要目的就是给一个NSArray中的所有UIView添加约束。</p>
+<p>比如这个API：</p>
+<pre><code>- <span class="list">(<span class="keyword">__NSArray_of</span><span class="list">(<span class="keyword">NSLayoutConstraint</span> <span class="variable">*) *</span>)</span>autoDistributeViewsAlongAxis:<span class="list">(<span class="keyword">ALAxis</span>)</span>axis
+                                                           alignedTo:<span class="list">(<span class="keyword">ALAttribute</span>)</span>alignment
+                                                    withFixedSpacing:<span class="list">(<span class="keyword">CGFloat</span>)</span>spacing
+                                                        insetSpacing:<span class="list">(<span class="keyword">BOOL</span>)</span>shouldSpaceInsets
+                                                        matchedSizes:<span class="list">(<span class="keyword">BOOL</span>)</span>shouldMatchSizes</span>
+</code></pre><p>其实现如下：</p>
+<pre><code><span class="built_in">NSAssert</span>([<span class="keyword">self</span> al_containsMinimumNumberOfViews:<span class="number">1</span>], <span class="string">@"This array must contain at least 1 view to distribute."</span>);
+
+<span class="comment">//1. 第一部分</span>
+    ALDimension matchedDimension;
+    ALEdge firstEdge, lastEdge;
+    <span class="keyword">switch</span> (axis) {
+        <span class="keyword">case</span> ALAxisHorizontal:
+        <span class="keyword">case</span> ALAxisBaseline: <span class="comment">// same value as ALAxisLastBaseline</span>
+<span class="preprocessor">#if __PureLayout_MinBaseSDK_iOS_8_0</span>
+        <span class="keyword">case</span> ALAxisFirstBaseline:
+<span class="preprocessor">#endif /* __PureLayout_MinBaseSDK_iOS_8_0 */</span>
+            matchedDimension = ALDimensionWidth;
+            firstEdge = ALEdgeLeading;
+            lastEdge = ALEdgeTrailing;
+            <span class="keyword">break</span>;
+        <span class="keyword">case</span> ALAxisVertical:
+            matchedDimension = ALDimensionHeight;
+            firstEdge = ALEdgeTop;
+            lastEdge = ALEdgeBottom;
+            <span class="keyword">break</span>;
+        <span class="keyword">default</span>:
+            <span class="built_in">NSAssert</span>(<span class="literal">nil</span>, <span class="string">@"Not a valid ALAxis."</span>);
+            <span class="keyword">return</span> <span class="literal">nil</span>;
+    }
+    <span class="built_in">CGFloat</span> leadingSpacing = shouldSpaceInsets ? spacing : <span class="number">0.0</span>;
+    <span class="built_in">CGFloat</span> trailingSpacing = shouldSpaceInsets ? spacing : <span class="number">0.0</span>;
+
+<span class="comment">//2. 第二部分  </span>
+    __<span class="built_in">NSMutableArray_of</span>(<span class="built_in">NSLayoutConstraint</span> *) *constraints = [<span class="built_in">NSMutableArray</span> new];
+    ALView *previousView = <span class="literal">nil</span>;
+    <span class="keyword">for</span> (<span class="keyword">id</span> object <span class="keyword">in</span> <span class="keyword">self</span>) {
+        <span class="keyword">if</span> ([object isKindOfClass:[ALView class]]) {
+            ALView *view = (ALView *)object;
+            view<span class="variable">.translatesAutoresizingMaskIntoConstraints</span> = <span class="literal">NO</span>;
+            <span class="keyword">if</span> (previousView) {
+                <span class="comment">// Second, Third, ... View</span>
+                [constraints addObject:[view autoPinEdge:firstEdge toEdge:lastEdge ofView:previousView withOffset:spacing]];
+                <span class="keyword">if</span> (shouldMatchSizes) {
+                    [constraints addObject:[view autoMatchDimension:matchedDimension toDimension:matchedDimension ofView:previousView]];
+                }
+                [constraints addObject:[view al_alignAttribute:alignment toView:previousView forAxis:axis]];
+            }
+            <span class="keyword">else</span> {
+                <span class="comment">// First view</span>
+                [constraints addObject:[view autoPinEdgeToSuperviewEdge:firstEdge withInset:leadingSpacing]];
+            }
+            previousView = view;
+        }
+    }
+    <span class="keyword">if</span> (previousView) {
+        <span class="comment">// Last View</span>
+        [constraints addObject:[previousView autoPinEdgeToSuperviewEdge:lastEdge withInset:trailingSpacing]];
+    }
+    <span class="keyword">return</span> constraints;            
+</code></pre><ol>
+<li>这个API的目的是将一组UIView按照Spacing间距进行均分，同时每个UIView的宽度或者高度保持一致。</li>
+<li>第一部分是根据传入的轴，进行判断，是在竖直方向均分还是水平方向均分，同时影响的还有是宽度一致还是高度一致。</li>
+<li>第二部分是根据传入的轴（比如水平方向），将前一个View的右边距和后一个View的左边距添加间距，循环添加，直至最后一个View的右边距和父View的右边距添加完成约束。  </li>
+</ol>
+<p>其他方面，这个分类的作用基本和<code>ALView + PureLayout一致</code>，也就不再重复解释了。<br>至此，PureLayout的源码解析基本上差不多了，其余类似于边对齐的API，如：</p>
+<pre><code><span class="pp">- <span class="params">(<span class="variable">NSLayoutConstraint</span> *)</span>autoPinEdge:<span class="params">(<span class="variable">ALEdge</span>)</span>edge toEdge:<span class="params">(<span class="variable">ALEdge</span>)</span>toEdge ofView:<span class="params">(<span class="variable">ALView</span> *)</span>otherView;</span>
+</code></pre><p>又或者是约束尺寸的，如：</p>
+<pre><code>- <span class="list">(<span class="keyword">__NSArray_of</span><span class="list">(<span class="keyword">NSLayoutConstraint</span> <span class="variable">*) *</span>)</span>autoSetDimensionsToSize:<span class="list">(<span class="keyword">CGSize</span>)</span>size<span class="comment">;</span></span>
+</code></pre><p>都大同小异，在此就不一一赘述了。</p>
+<p>最后，<strong>强调一点</strong>：</p>
+<ol>
+<li>PureLayout必须在主线程使用，其本身实现非常依赖于静态的全局变量。</li>
+</ol>
+
+      
+    </div>
+    <footer class="article-footer">
+      <a data-url="http://satanwoo.github.io/2016/02/05/PureLayout/" data-id="cinhmgxpp0014byi167vdengu" class="article-share-link">Share</a>
+      
+      
+  <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
+
+    </footer>
+  </div>
+  
+</article>
+
+
+  
     <article id="post-Refactor-Mega-ViewController" class="article article-type-post" itemscope itemprop="blogPost">
   <div class="article-meta">
     <a href="/2015/12/30/Refactor-Mega-ViewController/" class="article-date">
@@ -376,7 +632,7 @@ extension Task {
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/12/30/Refactor-Mega-ViewController/" data-id="cimuszn5n00104bi1j9yfavy6" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/12/30/Refactor-Mega-ViewController/" data-id="cinhmgxpn0012byi12wodb41h" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
@@ -527,7 +783,7 @@ extension Task {
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/12/20/Learn-R-2/" data-id="cimuszn5t00164bi1s91l382w" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/12/20/Learn-R-2/" data-id="cinhmgxpu0018byi1o5g9sfnh" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/R/">R</a></li></ul>
@@ -581,7 +837,7 @@ extension Task {
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/12/15/Regression-Model-1/" data-id="cimuszn5k000x4bi1gx57gkh6" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/12/15/Regression-Model-1/" data-id="cinhmgxpk000zbyi19bo7vu0c" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Math/">Math</a></li></ul>
@@ -724,7 +980,7 @@ $foo
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/12/13/Learn-R-1/" data-id="cimuszn5v00194bi1zw4ewotj" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/12/13/Learn-R-1/" data-id="cinhmgxpx001bbyi1rqextn1a" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/R/">R</a></li></ul>
@@ -830,7 +1086,7 @@ frame <span class="preprocessor">#<span class="number">20</span>: libdyld.dylib`
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/12/11/LLDB-1/" data-id="cimuszn60001e4bi1e7opgth1" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/12/11/LLDB-1/" data-id="cinhmgxq2001gbyi17pndphha" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
@@ -1129,7 +1385,7 @@ TBBoundingBox TBBoundingBoxMake(<span class="built_in">double</span> x0, <span c
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/12/11/TBAnnotationClustering/" data-id="cimuszn51000k4bi1sk4ievk8" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/12/11/TBAnnotationClustering/" data-id="cinhmgxp2000mbyi1v4ezdko5" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
@@ -1354,7 +1610,7 @@ BOOL success = class_addMethod(<span class="keyword">class</span>, originalSelec
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/11/26/FDFullScreenPopGesture-Source-Code/" data-id="cimuszn66001k4bi12k3lbrej" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/11/26/FDFullScreenPopGesture-Source-Code/" data-id="cinhmgxqa001mbyi1oc0obgyr" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
@@ -1464,7 +1720,7 @@ replicationLayer.instanceDelay = <span class="number">0.3</span>
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/11/17/Fun-of-CAReplicationLayer/" data-id="cimuszn64001i4bi1tpp9r4wj" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/11/17/Fun-of-CAReplicationLayer/" data-id="cinhmgxq8001kbyi1l90tx4g0" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Swift/">Swift</a></li></ul>
@@ -1670,170 +1926,10 @@ modalVC<span class="class">.modalPresentationStyle</span> = <span class="class">
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/11/12/Swift-UITransition-iOS8/" data-id="cimuszn54000m4bi1s2hx3wit" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/11/12/Swift-UITransition-iOS8/" data-id="cinhmgxp6000obyi1z13nnloa" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Swift/">Swift</a></li></ul>
-
-    </footer>
-  </div>
-  
-</article>
-
-
-  
-    <article id="post-Understand-Viper" class="article article-type-post" itemscope itemprop="blogPost">
-  <div class="article-meta">
-    <a href="/2015/11/05/Understand-Viper/" class="article-date">
-  <time datetime="2015-11-04T17:01:51.000Z" itemprop="datePublished">2015-11-05</time>
-</a>
-    
-  </div>
-  <div class="article-inner">
-    
-    
-      <header class="article-header">
-        
-  
-    <h1 itemprop="name">
-      <a class="article-title" href="/2015/11/05/Understand-Viper/">浅入浅出VIPER设计架构(1)</a>
-    </h1>
-  
-
-      </header>
-    
-    <div class="article-entry" itemprop="articleBody">
-      
-        <p>之前和豌豆荚的同学聊天，发现他们的App从MVVM切换到VIPER设计架构，于是这两天花了点时间研读了一下 相关资料，浅谈一下。</p>
-<h3 id="VIPER是什么">VIPER是什么</h3><p>VIPER是<b>View, Interactor, Presenter, Entity, Routing</b>5个词语的缩写，这5个词语也是VIPER架构的核心。</p>
-<p>View - 视图，接收传递的内容，然后进行内容展示。</p>
-<p>Presenter - 视图逻辑控制器，这个模块只用来执行和UI相关的逻辑。什么叫和UI相关的逻辑呢？比如：接收用户交互、将展示的内容分发给不同的UI界面进行展示。</p>
-<p>Interactor - <b>纯业务逻辑控制器</b>，这个模块完全脱离于UI，只用来做业务相关的逻辑控制。举例来说，比如下载逻辑、计算逻辑等等可以划分为单一Use Case的逻辑。</p>
-<p>Entity - 基础的数据模型，比方说大家经常定义的XXXModel之类的，但是，这里的XXXModel可以认为基本就是<b>纯数据结构了</b>，不包含轻量级业务处理逻辑</p>
-<p>Routing - 路由器，视图切换的逻辑。比如包含如何从一个界面切换到另一个界面，切换的顺序是如何等等。</p>
-<p>除了五大核心之外，我们还经常使用了<strong>Data Store</strong>这个模块。因为我们之前提过，我们的Entity基本就是纯数据结构，不包含轻量级的业务逻辑，因此，Entity进行持久化这个职责是要单独划分出来，而这个职能就落到了Data Store身上。</p>
-<p>下面是网上一张比较经典的架构设计图：</p>
-<p><img src="https://www.objc.io/images/issue-13/2014-06-07-viper-wireframe-76305b6d.png"></p>
-<h3 id="为什么要用VIPER">为什么要用VIPER</h3><p><strong>在软件工程领域，有一个很重要的观点，就是测试、测试、测试。（重要的话说三遍！）</strong></p>
-<p>之前在BMW Group实习的时候从事Java开发，每一个函数都要经过JUnit的测试，也就是我们所谓的Test-Driven Development。但是iOS开发由于其逻辑和视图的强耦合关系，常常导致业务逻辑不能完全独立于界面，进行单元测试十分困难。比如，臭名昭著的”Massive View Controller” 就是因为将大量的业务逻辑和视图逻辑耦合进了Controller，导致Controller非常臃肿，也不容易剥离进行测试。</p>
-<p>而VIPER架构引入了Interactor和Presentator两个概念，将业务逻辑和视图逻辑独立开来，从而可以单独测试业务逻辑的代码。</p>
-<h3 id="例子分析">例子分析</h3><p>说了好多虚的概念，有些人一定已经被弄晕了，还是赶紧看两个典型的例子看深入了解下吧.</p>
-<h4 id="1-_Counter">1. Counter</h4><p>第一个例子来源于<a href="https://github.com/mutualmobile/Counter" target="_blank" rel="external">Counter</a>，是一个非常简单了计数应用。麻雀虽小，却五脏俱全。</p>
-<p>打开项目，我们可以快速的过一下项目结构：</p>
-<pre><code>-<span class="ruby">- <span class="constant">CNTAppDelegate</span>.h/.m
-</span>-<span class="ruby">- <span class="constant">CNTCountInteractorIO</span>.h
-</span>-<span class="ruby">- <span class="constant">CNTCountInteractor</span>.h/.m
-</span>-<span class="ruby">- <span class="constant">CNTCountPresenter</span>.h/.m
-</span>-<span class="ruby">- <span class="constant">CNTCountView</span>.h
-</span>-<span class="ruby">- <span class="constant">CNTCountViewController</span>.h/.m/.xib</span>
-</code></pre><p>首先我们来看一下最简单的模块：CNTCountView</p>
-<pre><code><span class="comment">// CNTCountView.h</span>
-<span class="class"><span class="keyword">@protocol</span> <span class="title">CNTCountView</span> &lt;<span class="title">NSObject</span>&gt;</span>
-- (<span class="keyword">void</span>)setCountText:(<span class="built_in">NSString</span>*)countText;
-- (<span class="keyword">void</span>)setDecrementEnabled:(<span class="built_in">BOOL</span>)enabled;
-<span class="keyword">@end</span>
-</code></pre><p>咦？为什么这个View只包含一个Protocol呢？说好的View用来接收传递的内容然后进行内容展示呢？</p>
-<p>原因是这样：在iOS应用中，一个无法避免的模块就是ViewController（<strong>无论如何每个应用都必须存在一个RootViewController</strong>）。每个ViewController包含一个根View用来进行视图展示。因此，在将VIPER架构应用到iOS领域的过程中，实际上起到View作用的是ViewController！(<b>当然，ViewController不仅仅起到了视图展示的作用</b>)</p>
-<p><em>题外话：我个人认为这个例子的取名不太好，让人迷惑，如果换个名字，如CNTCountViewOperation就没有这个问题了</em></p>
-<p>既然如此，让我们赶快去看看相关的ViewController：CNTCountViewController中的实现。</p>
-<pre><code><span class="comment">// CNTCountViewController.h</span>
-<span class="class"><span class="keyword">@interface</span> <span class="title">CNTCountViewController</span> : <span class="title">UIViewController</span> &lt;<span class="title">CNTCountView</span>&gt;</span>
-<span class="keyword">@property</span> (<span class="keyword">nonatomic</span>, <span class="keyword">weak</span>) <span class="keyword">IBOutlet</span>    <span class="built_in">UILabel</span>*    countLabel;
-<span class="keyword">@property</span> (<span class="keyword">nonatomic</span>, <span class="keyword">weak</span>) <span class="keyword">IBOutlet</span>    <span class="built_in">UIButton</span>*   decrementButton;
-<span class="keyword">@property</span> (<span class="keyword">nonatomic</span>, <span class="keyword">weak</span>) <span class="keyword">IBOutlet</span>    <span class="built_in">UIButton</span>*   incrementButton;
-
-<span class="keyword">@property</span> (<span class="keyword">nonatomic</span>, <span class="keyword">strong</span>)   CNTCountPresenter*  presenter;
-<span class="keyword">@end</span>
-</code></pre><p>在上述CNTCountViewController的头文件中，我们可以看到该类遵从了CNTCountView协议。其次，他包含了真正的View：两个UIButton和一个UILabel。说明这和我们之前说的ViewController起到了真正的视图展示作用是吻合的。</p>
-<p>同时，我们还看到了一个非常显眼的类：<strong>CNTCountPresenter</strong>。如果这个类的命名没错，那这个类就是所谓的Presenter了，用来进行界面逻辑控制的类。那么是不是这样呢？我们<em>Command + 左击</em>这个类一探究竟！</p>
-<pre><code><span class="comment">// CNTCountPresenter.h</span>
-<span class="class"><span class="keyword">@interface</span> <span class="title">CNTCountPresenter</span> : <span class="title">NSObject</span> &lt;<span class="title">CNTCountInteractorOutput</span>&gt;</span>
-<span class="keyword">@property</span> (<span class="keyword">nonatomic</span>, <span class="keyword">weak</span>)     <span class="keyword">id</span>&lt;CNTCountView&gt;            view;
-<span class="keyword">@property</span> (<span class="keyword">nonatomic</span>, <span class="keyword">strong</span>)   <span class="keyword">id</span>&lt;CNTCountInteractorInput&gt; interactor;
-
-- (<span class="keyword">void</span>)updateView;
-- (<span class="keyword">void</span>)increment;
-- (<span class="keyword">void</span>)decrement;
-<span class="keyword">@end</span>
-</code></pre><p>从CNTCountPresenter的头文件中，我们能看出很多逻辑关系。Presenter包含了一个View和一个Interactor。这和文首我们对于VIPER的介绍相吻合：Presenter从Interactor获取数据，经过界面逻辑处理后，将数据发送给View进行展示。</p>
-<p>从Interactor请求获取数据的部分代码如下：</p>
-<pre><code><span class="comment">// CNTCountPresenter.m</span>
-<span class="tag">-</span> (void)<span class="tag">updateView</span>
-{
-    <span class="attr_selector">[self.interactor requestCount]</span>;
-}
-
-<span class="tag">-</span> (void)<span class="tag">increment</span>
-{
-    <span class="attr_selector">[self.interactor increment]</span>;
-}
-
-<span class="tag">-</span> (void)<span class="tag">decrement</span>
-{
-    <span class="attr_selector">[self.interactor decrement]</span>;
-}
-</code></pre><p>由于Presenter从Interactor获取数据，那么势必Presenter是Interactor的一个输出，而Interactor是Presenter的一个输入。</p>
-<pre><code><span class="comment">// CNTCountInteractorIO.h</span>
-<span class="class"><span class="keyword">@protocol</span> <span class="title">CNTCountInteractorInput</span> &lt;<span class="title">NSObject</span>&gt;</span>
-- (<span class="keyword">void</span>)requestCount;
-- (<span class="keyword">void</span>)increment;
-- (<span class="keyword">void</span>)decrement;
-<span class="keyword">@end</span>
-
-<span class="class"><span class="keyword">@protocol</span> <span class="title">CNTCountInteractorOutput</span> &lt;<span class="title">NSObject</span>&gt;</span>
-- (<span class="keyword">void</span>)updateCount:(<span class="built_in">NSUInteger</span>)count;
-<span class="keyword">@end</span>
-</code></pre><p><em><b>这里各位可以先不关注Protocol协议的设计本身，只要理解逻辑关系即可。</b></em></p>
-<p>通过这样的职责划分，落入到Interactor类中的职责就是最基本的业务逻辑：计数的增加和减少。</p>
-<pre><code><span class="comment">// CNTCountInteractor.h</span>
-- (<span class="keyword">void</span>)requestCount
-{
-    [<span class="keyword">self</span> sendCount];
-}
-
-- (<span class="keyword">void</span>)increment
-{
-    ++<span class="keyword">self</span><span class="variable">.count</span>;
-    [<span class="keyword">self</span> sendCount];
-}
-
-- (<span class="keyword">void</span>)decrement
-{
-    <span class="keyword">if</span> ([<span class="keyword">self</span> canDecrement])
-    {
-        --<span class="keyword">self</span><span class="variable">.count</span>;
-        [<span class="keyword">self</span> sendCount];
-    }
-}
-</code></pre><p>至此，我们可以将Counter的项目架构进行如下表示：</p>
-<p>Interactor &lt;——–&gt; Presenter</p>
-<ul>
-<li><strong>Interactor</strong> 是 <strong>Presenter</strong>  的 <b>输入</b></li>
-<li><strong>Presenter</strong>  是 <strong>Interactor</strong> 的 <b>输出</b></li>
-<li><strong>Presenter</strong> 通过某些事件触发，去向其输入<strong>Interactor</strong>请求数据</li>
-</ul>
-<p>Presenter &lt;——–&gt; View(ViewController)</p>
-<ul>
-<li><strong>View</strong>       是 <strong>Presenter</strong>  的 <b>输出</b></li>
-<li><strong>ViewController</strong> 触发了 <strong>Presenter</strong> 去<strong>Interactor</strong>中请求新的业务结果，从而更新<strong>View</strong></li>
-</ul>
-<p>Presenter更新View的代码如下：</p>
-<pre><code><span class="comment">// CNTCountPresenter.m</span>
-<span class="tag">-</span> (void)<span class="tag">updateCount</span>:(NSUInteger)<span class="tag">count</span>
-{
-    <span class="attr_selector">[self.view setCountText:[self formattedCount:count]</span>];
-    <span class="attr_selector">[self.view setDecrementEnabled:[self canDecrementCount:count]</span>];
-}
-</code></pre><p>到这里，Counter这个例子的解读基本就完成了。细心的读者一定会发现，<strong>Entity</strong>和<strong>Route</strong>到哪里去了？</p>
-<p>是的，这个例子由于过于简单，压根不需要Entity。并且由于它是单视图应用，压根不涉及到页面切换，因此也无须Route功能。不过我们在后续的浅入浅出VIPER架构（2）中解读一个更细致更负责的例子，敬请期待！</p>
-
-      
-    </div>
-    <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/11/05/Understand-Viper/" data-id="cimuszn4y000i4bi1vrtx130v" class="article-share-link">Share</a>
-      
-      
-  <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
 
     </footer>
   </div>
@@ -1857,7 +1953,7 @@ modalVC<span class="class">.modalPresentationStyle</span> = <span class="class">
   <div class="widget-wrap">
     <h3 class="widget-title">Tags</h3>
     <div class="widget">
-      <ul class="tag-list"><li class="tag-list-item"><a class="tag-list-link" href="/tags/Android/">Android</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/JavaScript/">JavaScript</a><span class="tag-list-count">2</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Math/">Math</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/R/">R</a><span class="tag-list-count">2</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Reverse-Engineering/">Reverse Engineering</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Swift/">Swift</a><span class="tag-list-count">6</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/iOS/">iOS</a><span class="tag-list-count">15</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/shell/">shell</a><span class="tag-list-count">1</span></li></ul>
+      <ul class="tag-list"><li class="tag-list-item"><a class="tag-list-link" href="/tags/Android/">Android</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/JavaScript/">JavaScript</a><span class="tag-list-count">3</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Math/">Math</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/R/">R</a><span class="tag-list-count">2</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Reverse-Engineering/">Reverse Engineering</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Swift/">Swift</a><span class="tag-list-count">6</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/iOS/">iOS</a><span class="tag-list-count">15</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/shell/">shell</a><span class="tag-list-count">1</span></li></ul>
     </div>
   </div>
 
@@ -1866,7 +1962,7 @@ modalVC<span class="class">.modalPresentationStyle</span> = <span class="class">
   <div class="widget-wrap">
     <h3 class="widget-title">Tag Cloud</h3>
     <div class="widget tagcloud">
-      <a href="/tags/Android/" style="font-size: 10px;">Android</a> <a href="/tags/JavaScript/" style="font-size: 13.33px;">JavaScript</a> <a href="/tags/Math/" style="font-size: 10px;">Math</a> <a href="/tags/R/" style="font-size: 13.33px;">R</a> <a href="/tags/Reverse-Engineering/" style="font-size: 10px;">Reverse Engineering</a> <a href="/tags/Swift/" style="font-size: 16.67px;">Swift</a> <a href="/tags/iOS/" style="font-size: 20px;">iOS</a> <a href="/tags/shell/" style="font-size: 10px;">shell</a>
+      <a href="/tags/Android/" style="font-size: 10px;">Android</a> <a href="/tags/JavaScript/" style="font-size: 15px;">JavaScript</a> <a href="/tags/Math/" style="font-size: 10px;">Math</a> <a href="/tags/R/" style="font-size: 12.5px;">R</a> <a href="/tags/Reverse-Engineering/" style="font-size: 10px;">Reverse Engineering</a> <a href="/tags/Swift/" style="font-size: 17.5px;">Swift</a> <a href="/tags/iOS/" style="font-size: 20px;">iOS</a> <a href="/tags/shell/" style="font-size: 10px;">shell</a>
     </div>
   </div>
 
@@ -1875,7 +1971,7 @@ modalVC<span class="class">.modalPresentationStyle</span> = <span class="class">
   <div class="widget-wrap">
     <h3 class="widget-title">Archives</h3>
     <div class="widget">
-      <ul class="archive-list"><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/04/">April 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/03/">March 2016</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/02/">February 2016</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/12/">December 2015</a><span class="archive-list-count">6</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/11/">November 2015</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/10/">October 2015</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/09/">September 2015</a><span class="archive-list-count">4</span></li></ul>
+      <ul class="archive-list"><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/04/">April 2016</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/03/">March 2016</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/02/">February 2016</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/12/">December 2015</a><span class="archive-list-count">6</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/11/">November 2015</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/10/">October 2015</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/09/">September 2015</a><span class="archive-list-count">4</span></li></ul>
     </div>
   </div>
 
@@ -1885,6 +1981,10 @@ modalVC<span class="class">.modalPresentationStyle</span> = <span class="class">
     <h3 class="widget-title">Recents</h3>
     <div class="widget">
       <ul>
+        
+          <li>
+            <a href="/2016/04/26/blank-space-in-html/">HTML中的“空白符”，你真的懂了吗？</a>
+          </li>
         
           <li>
             <a href="/2016/04/11/dispatch-once/">滥用单例之dispatch_once死锁</a>
@@ -1900,10 +2000,6 @@ modalVC<span class="class">.modalPresentationStyle</span> = <span class="class">
         
           <li>
             <a href="/2016/03/14/SizeUp/">逆向工程SizeUp</a>
-          </li>
-        
-          <li>
-            <a href="/2016/03/14/DXXcodeConsoleUnicodePlugin/">DXXcodeConsoleUnicodePlugin源码解析</a>
           </li>
         
       </ul>
