@@ -4,7 +4,7 @@
   
   <link href="/atom.xml" rel="self"/>
   <link href="http://satanwoo.github.io/"/>
-  <updated>2016-04-26T16:03:25.000Z</updated>
+  <updated>2016-05-02T08:36:47.000Z</updated>
   <id>http://satanwoo.github.io/</id>
   
   <author>
@@ -13,6 +13,90 @@
   </author>
   
   <generator uri="http://hexo.io/">Hexo</generator>
+  
+  <entry>
+    <title><![CDATA[为什么Spotify的付费用户转化率惊人的高？]]></title>
+    <link href="http://satanwoo.github.io/2016/05/02/Spotify/"/>
+    <id>http://satanwoo.github.io/2016/05/02/Spotify/</id>
+    <published>2016-05-02T08:34:03.000Z</published>
+    <updated>2016-05-02T08:36:47.000Z</updated>
+    <content type="html"><![CDATA[<blockquote>
+<p>本文由本人独自翻译，同步发表在稀土上</p>
+</blockquote>
+<p>在 2015 年的时候，The Fader <a href="http://www.thefader.com/2015/06/10/new-spotify-statistics" target="_blank" rel="external">报道</a>了一则关于 Spotify 的重磅新闻：在其 7500 万月活跃用户中，有 2000 万左右是付费用户。</p>
+<p>26.6% 的转化率对于免费增值产品来说是令人难以置信的。正如 Jason Chen <a href="http://blog.asmartbear.com/freemium.html" target="_blank" rel="external">所说</a></p>
+<blockquote>
+<p>“如果说免费用户到收费用户的转化率可以达到 4%，那就已经可以说是很不错了，比如 DropBox。但是通常来说，转化率一般都处于 1% 上下浮动，这还是用户十分活跃的情况下才会达到。”</p>
+</blockquote>
+<p>如果说 1% 是普遍的水准，然后 <a href="https://www.process.st/dropbox-vs-google-drive/" target="_blank" rel="external">DropBox</a> 4% 的转化率是非常不错的话，那26.6%绝对可以称的上是令人匪夷所思了。</p>
+<p><img src="http://7lrzqz.com1.z0.glb.clouddn.com/1.jpg" alt=""></p>
+<p>至于用户留存率，<a href="http://expandedramblings.com/index.php/spotify-statistics/" target="_blank" rel="external">80%</a>的用户（包括免费用户和付费用户）每周都会多次使用 Spotify。</p>
+<p>我写这篇文章的原因在于我在使用 Spotify 仅仅 11 天后，就成为了它的付费用户（似乎我当时还经历了一个 7 天 A/B 测试的试用阶段）。所以，我想从产品、<a href="https://medium.com/@benjbrandall/astonishment-expectations-and-reality-in-user-experience-decb6cc18e28" target="_blank" rel="external">用户体验</a>和市场运营的视角来真正探究一下其中深层次的原因，究竟是什么导致了 Spotify 有如此大的魔力让用户乐意为其付费。</p>
+<p>所以，出于这次研究的目的，我又重新注册了一个账号。</p>
+<p>我用了一个新账号并且从一个新用户的视角来使用 Spotify，一个个去剖析那些容易激发用户付费的诱因，并调查这些诱因是如何保证如此高的转化率以及用户留存率。</p>
+<p><em>在我们开始前，我们需要留意一点:</em> <a href="https://www.process.st/slack-review/" target="_blank" rel="external">Slack</a> 也因为它那令人咋舌的用户转化率而出名，<a href="http://www.nirandfar.com/2014/11/slack.html" target="_blank" rel="external">最新的数据</a>显示它们的转化率达到了 30% 左右。但要注意的是，Slack 是一个 B2B 软件，它的用户群体相对来说是付费能力和意愿比较强的高端用户。但是Spotify 有超过 <a href="http://www.statista.com/statistics/475821/spotify-users-age-usa/" target="_blank" rel="external">20%</a>的用户是处于 13 到 18 岁年龄段。与企业精英不惜代价寻找一种合适的解决方案相比，这个年龄段的用户一般能成为付费用户的可能性很低的…所以，Spotify 真的很令人难以置信。</p>
+<h2 id="步骤_1：减少使用障碍，通过_Facebook_注册来形成病毒式营销">步骤 1：减少使用障碍，通过 Facebook 注册来形成病毒式营销</h2><p>Spotfiy 通过 Facebook 获取信息的注册方法是令人称道的。对于那些已经在手机上登录 Facebook 的用户来说，这种注册方式可以直接从 Facebook 获取你的用户数据，意味着你就不用再笨拙地输入你的邮件地址和密码。这无疑会减少用户注册账号的抵触心理。</p>
+<p><img src="http://7lrzqz.com1.z0.glb.clouddn.com/2.png" alt=""></p>
+<p>只要仅仅一次点击，允许数据导入，你就注册成功了。</p>
+<p>除了作为一种注册方式以外，导入 Facebook 的数据还完成了其余两件事：</p>
+<ul>
+<li>将用户的喜好展示给他们的朋友</li>
+<li>可以让你的朋友了解 Spotify，并吸引他们也来注册使用 Spotify</li>
+</ul>
+<p>正如 Helpshift <a href="https://www.helpshift.com/blog/app-retention-20000-mau/" target="_blank" rel="external">所说</a></p>
+<blockquote>
+<p>80% 的手机用户拥有 Facebook 账户。所以，当一个应用的注册只需要轻轻点击蓝色按钮的时候，用户的转化率瞬间就能有 20% 的提升。</p>
+</blockquote>
+<p>所以使用 Facebook 进行注册，对于 Spotify 的营销来说是起了一个非常关键的作用。正如报道中所说的那样，<strong><a href="https://www.digitalmusicnews.com/2015/06/16/for-every-paying-subscriber-spotify-adds-5-free-accounts/" target="_blank" rel="external">每一个付费用户都带来了3个免费用户</a></strong></p>
+<h2 id="步骤_2：精挑细选的播放列表可以满足特定的需求">步骤 2：精挑细选的播放列表可以满足特定的需求</h2><p>Spotify 的目的就是帮助用户发现音乐。它在你初次使用的时候会鼓励你使用它“精心调配”的播放列表。</p>
+<p>通过选择一个包含你熟悉歌曲的播放列表，或者一个和你品味相契合的主题，Spotify 会循环播放这些歌，并在其中穿插播放一些你所不了解的歌。</p>
+<p>对于一首喜爱却又不了解的歌，人们通常的反应是会去寻找这首歌的歌手、所属专辑或者其他具有相似特征的播放列表。这种寻找的流程在 Spotify 的应用中被设计的极其简单，并且会被推荐到你看到的第一屏当中。</p>
+<p><img src="http://7lrzqz.com1.z0.glb.clouddn.com/3.png" alt=""></p>
+<p>但这里有个需要注意的点：<strong>如果你是一个免费用户，那么你就无法在任意时刻切换到你想听的歌。</strong>即使你已经制作了你自己的播放列表，歌曲也会是随机出现的。</p>
+<p>所以对于我来说，我成为付费用户的一个主要原因就在于：在 Spotify 那不可思议却又十分“对味”的推荐算法指引下，我就很自然而然的养成了一种新的并在不断改进的听歌风格。在这个过程中，许许多多的歌曲都会被加入到你的听歌列表中。但一旦加入，随机播放列表就再也不会将其剔除。因此，其中有部分可能是你不怎么想要再听到的歌曲。比如我就不再想听到任何 Brain Food 里的歌。我想要的是可以自由自在的挑选歌曲、对它们进行排序，并对我自己的歌曲列表有绝对的控制权。如果我不是付费用户的话，即使我特别想听 Stars Wars Headspace 专辑中的几首歌，但是我所能做的仅仅是不断地随机跳过我不喜欢的歌曲，直到从 Spotify 听到我想听的歌。</p>
+<p>人们会尝试去“挑战”这个系统来听到他们想要听的歌，但是 Spotify 让这种想法近乎不可能。一般来说，在一个随机播放的列表中，你可能需要跳过8首歌才能听到你想要的歌。</p>
+<p><img src="http://7lrzqz.com1.z0.glb.clouddn.com/4.png" alt=""></p>
+<h2 id="步骤3：Spotify_会强调歌曲和你息息相关的">步骤3：Spotify 会强调歌曲和你息息相关的</h2><p>首页下面是根据心情情况和流派推荐的播放列表。作为一名有音乐文化背景的研究生，我了解到人们听音乐的根本原因在于音乐能够加强情感共鸣。最好的音乐作曲家，如 <a href="https://en.wikipedia.org/wiki/Lester_Bangs" target="_blank" rel="external">Lester Bangs</a>，就曾写到这样的乐评:音乐就像一剂猛药，伴随并强化着你的听音乐体验。</p>
+<p>Spotify 通过一些描述性的分类，并在其中播放与描述非常贴切的音乐来引发共鸣，让听众产生一种“音乐就是我人生不可分割的轨迹”、或“这就是我现在的感受”的心境。</p>
+<p>比如在 Chill 心情分类中可以找到一些让你冷静下来的歌曲，每首歌曲又会与地点、’亚情绪’及个人听歌品味相契合。</p>
+<p><img src="http://7lrzqz.com1.z0.glb.clouddn.com/5.png" alt=""></p>
+<p>歌曲列表包含艺术、排版以及<a href="http://blog.tryadhawk.com/content-marketing/headline-checklist/" target="_blank" rel="external">文案</a>。这些东西对于拥有不同审美的用户来说充满诱惑力。因此对用户来说，很容易就会忽略掉那些不重要的。然后立刻识别出那些诉诸于你的音乐。</p>
+<p>通过鼓励你多使用播放列表，并将其和你平时的生活习惯紧紧联系到一起，Spotify 就会变得越来越智能：成为一个能够生成适应任何场景的音乐播放器。<strong>构建一个能融入用户日常生活习惯的产品是一个非常有效<a href="https://www.process.st/customer-retention-strategies/" target="_blank" rel="external">提升用户留存率</a>的方法。</strong>而 Spotify 又采用了非常人性化的手段来达成这个目的：通过理解你听音乐时候的场景和心情。比如你聚会时听得音乐；抑或是跑步、学习时听的音乐。一旦你因为这些目的使用过一次播放列表，当失去它的时候你就会非常想念它。</p>
+<h2 id="步骤4：你把应用“培养”得迎合你的喜好，就相当于做了一笔投资。">步骤4：你把应用“培养”得迎合你的喜好，就相当于做了一笔投资。</h2><p>我之前看过一篇关于<a href="http://usabilitygeek.com/first-time-use-how-to-reduce-initial-friction-of-app-usage/" target="_blank" rel="external"> Flipboard 的入职流程</a>的分析，让用户将应用“培养”<br>成迎合他们自身的喜好是一个久经考验能够提升用户留存率的办法。因为在这个过程中，用户相当于在应用内做了一笔“投资”：如果他们不升级成付费用户，就意味着他们之前所耗费的精力和时间都白白浪费了。</p>
+<p>Spotify 也采用了这个策略。他们的做法是允许用户将音乐存储到自己的账户中、建立自己的音乐合集、通过 Facebook 以及Spotify 自己的社交网络和朋友进行分享。</p>
+<p><strong>当然，这种投资并是金钱投资，因此你不会感到是被强制消费了。（事实上，现在如果还采用收费合同来绑定用户的行为是不能被容忍的）。但是这种投资对于个人来说，却显得更为重要，因为这是一种跟时间相关的投资，每个人都很珍惜时间，不是吗?</strong></p>
+<p>将 Spotify 和 Facebook 打通又是另外一种投资。在不同的应用之间建立依赖关系意味着你需要承担更多的责任。比如，你的朋友喜欢你的播放列表、喜欢听你喜欢的歌。这就意味着你在你的朋友圈中成为了一个传播品味的大师，可以给朋友宣传最新最酷的潮流。我想，你肯定不会因为不想成为付费用户就失去这得之不易的品味大师的头衔吧！</p>
+<p>Spotify 并不会强求你选择一个你喜欢的音乐类型，也不会给你许多听歌的建议，它所做的只是让你自行探索音乐。因为自行探索出来的音乐会让你更加感同身受，而且和别人分享这些音乐的时候，也会让你更有成就感。</p>
+<p><img src="http://7lrzqz.com1.z0.glb.clouddn.com/6.png" alt="Spotify Personalization"></p>
+<p>当你在你自己的设备上使用 Spotify 的时候，除了生成个性化的播放列表，Spotify 并不会耗费你大量的精力。事实上，它根本就不需要。Spotify 的推荐算法已经足够强大，能够理解你的需求。而且多半时候，推荐出来的东西都正是你想要的。所以，你只需要在培养属于你自己喜好的 Spotify 的时候耗费一点精力而已。<strong>_你的_Spotify其实比你自己更懂你的喜好</strong></p>
+<h2 id="这些要求你进行付费的广告并不会让人感到特别烦扰，但是却巧妙的破坏了听音乐时候的代入感">这些要求你进行付费的广告并不会让人感到特别烦扰，但是却巧妙的破坏了听音乐时候的代入感</h2><p>另一个能让 Spotify 的付费策略成功伪装成是不激进的原因的是（实际上是非常激进的）你没有意识到你究竟会被一些负面因素激怒到何种程度。</p>
+<p><img src="http://i.imgur.com/CIKcZnV.jpg" alt=""></p>
+<p>音乐一个非常关键的作用就是它给人带来的代入感。在 Spotify 上，有一些非常流行的播放列表来帮助用户专注于工作，比如学习、<a href="https://www.process.st/writing-process/" target="_blank" rel="external">写作</a>或者要求注意力非常集中的情形。</p>
+<p>_你听了15分钟的 chill Brian Eno soundscape。突然，一个刺耳的、极不匹配的流行音乐开始播放。紧跟着出现了一个广告，一个人告诉了你一个你现在毫不关心的东西。然后又过了 30 秒，这些乱七八糟的东西终于结束了，你终于可以听你想要的音乐了。如果是你，你是什么感受？。</p>
+<p>对我来说，摆脱广告的烦扰并不是一个足够有说服力可以让我进行付费的理由。我并不把它们当成是对听音乐有着巨大负面影响的因素。因为只要等广告结束了，我就能继续听我想听的音乐。</p>
+<p>而且和 <strong>Spotify 会让你跳过 8 首歌才能听过你想要的歌曲</strong>相比，广告是微不足道的，更何况它出现的频率也很低，低到很容易被忽略。但尽管如此，广告对于转化率也有着很大的作用。</p>
+<h2 id="允许用户在30天的试用期下载离线音乐是极其明智的">允许用户在30天的试用期下载离线音乐是极其明智的</h2><p>没有什么可以比把你曾经拥有的东西强行夺走更会让你抓狂。</p>
+<p>通过允许用户下载歌曲离线使用，又在一段时间后限制他们只能听在线音乐，<strong>这 30 天试用期带来的自由绝对你产生巨大的落差感</strong>。</p>
+<p>一个月的试用期对于用户来说完全足够在这段时间内建立起一个音乐合集。更何况 Spotify 大大减少了探索音乐需要耗费的时间：它每天给用户推荐 20 张专辑，而且还会根据你当前的品味和习惯变化。所以 Spotify 通过试用期，给用户画了很大的一个“饼”：如果你们升级成付费用户的话，你们就能享受到多么棒听歌的特权啊。</p>
+<p>一旦获得了离线听歌的特权，用户就会囤积尽可能多的歌曲。用他们的话来说，这是<em>属于你的音乐</em>。但囤积的越多，就会让你陷得越深，你再也不会愿意变回免费用户了。</p>
+<h2 id="无论用户如何使用_Spotify,_最后都会被引导向升级付费">无论用户如何使用 Spotify, 最后都会被引导向升级付费</h2><p>在用户的使用过程中，有时候 Spotify 会明确的要求用户升级为会员，或者提示这个功能仅仅开放给付费用户。</p>
+<p>其中，明确的要求你升级（或者说强迫式的推荐）出现在<strong>一些看似可用的功能实质上仅仅开放给付费用户</strong></p>
+<p><img src="http://7lrzqz.com1.z0.glb.clouddn.com/8.jpg" alt=""></p>
+<p>而在如下几种情况当中，Spotify 会采用暗示的方式提示你如果升级到付费用户，使用体验会更好：</p>
+<p><img src="http://7lrzqz.com1.z0.glb.clouddn.com/9.jpg" alt=""></p>
+<p>所以即使 Spofity 有着巨大基数的免费用户，也很容易就能说明为什么它的付费转化率如此之高。</p>
+<p><strong>只要你是音乐的发烧友、渴望发现那些令你狂热的音乐、存储音乐并想要打造出专属你品味的 Spotify。那么，是时候升级成付费用户了。（当然，你也可以选择不升级）</strong></p>
+]]></content>
+    <summary type="html">
+    <![CDATA[<blockquote>
+<p>本文由本人独自翻译，同步发表在稀土上</p>
+</blockquote>
+<p>在 2015 年的时候，The Fader <a href="http://www.thefader.com/2015/06/10/new-spotify-statis]]>
+    </summary>
+    
+      <category term="Growth" scheme="http://satanwoo.github.io/tags/Growth/"/>
+    
+  </entry>
   
   <entry>
     <title><![CDATA[HTML中的“空白符”，你真的懂了吗？]]></title>
@@ -2667,190 +2751,6 @@ replicationLayer.instanceDelay = <span class="number">0.3</span>
     <summary type="html">
     <![CDATA[<p>今天我们来学习一下一个在iOS常常被忽视的类 - CAReplicationLayer。我们要使用这个类来完成两个开起来很炫酷的加载效果。</p>
 <p>老样子，先上具体的效果一看<br><img src="http://7lrzqz.com1.z0.glb.clouddn]]>
-    </summary>
-    
-      <category term="Swift" scheme="http://satanwoo.github.io/tags/Swift/"/>
-    
-  </entry>
-  
-  <entry>
-    <title><![CDATA[Swift每日一练：自定义转场在iOS8中的那些坑]]></title>
-    <link href="http://satanwoo.github.io/2015/11/12/Swift-UITransition-iOS8/"/>
-    <id>http://satanwoo.github.io/2015/11/12/Swift-UITransition-iOS8/</id>
-    <published>2015-11-11T18:33:50.000Z</published>
-    <updated>2015-11-11T19:55:32.000Z</updated>
-    <content type="html"><![CDATA[<p>之前因为面试的缘故发现了自己在自定义转场这块有点欠缺，今天拿Swift练下手，实现一个自定义转场的效果。<em>没耐心的话请直接翻到最后吧，我前面都是铺垫呢。</em></p>
-<p>首先让我们先来看看最后实现的效果：<br><img src="http://7lrzqz.com1.z0.glb.clouddn.com/WZCustomTransition.gif"></p>
-<p>下面就让我们一步步来看看是如何实现这个效果的。</p>
-<h3 id="自定义转场">自定义转场</h3><p>要实现自定义转场动画，比较重要的就是三个部分。</p>
-<ul>
-<li><p>UIViewControllerContextTransition</p>
-<p>这个接口主要用来提供切换上下文给开发者使用，包含了从哪个VC到哪个VC等各类信息，一般不需要开发者自己实现。</p>
-<p>本文关注的包含了如下一些内容：</p>
-<pre><code><span class="number">1.</span> - (<span class="built_in">UIView</span> *)containerView; 
-<span class="comment">// VC切换所发生的view容器    </span>
-
-<span class="number">2.</span> - (<span class="built_in">UIViewController</span> *)viewControllerForKey:(<span class="built_in">NSString</span> *)key;
-<span class="comment">// 根据UITransitionContextFromViewControllerKey和UITransitionContextToViewControllerKey两种，分别返回将要切出和切入的ViewController。</span>
-
-<span class="number">3.</span> - (<span class="keyword">void</span>)completeTransition:(<span class="built_in">BOOL</span>)didComplete; 
-<span class="comment">// 报告切换已经完成。</span>
-</code></pre></li>
-<li><p>UIViewControllerAnimatedTransition</p>
-<p>这个接口主要用来定义如何完成转场动画，同时定义转场动画的持续时间。（在本文中我们不考虑交互式的转场）</p>
-<pre><code><span class="number">1.</span> - (<span class="built_in">NSTimeInterval</span>)transitionDuration:(<span class="keyword">id</span> &lt; <span class="built_in">UIViewControllerContextTransitioning</span> &gt;)transitionContext; 
-<span class="comment">// 返回转场动画持续的时间</span>
-
-<span class="number">2.</span> - (<span class="keyword">void</span>)animateTransition:(<span class="keyword">id</span> &lt; <span class="built_in">UIViewControllerContextTransitioning</span> &gt;)transitionContext; 
-<span class="comment">// 我们自定义的转场要在这里完成</span>
-</code></pre></li>
-<li><p>UIViewControllerTransitionDelegate    </p>
-<p>这个接口主要用于指定，我们希望采用哪种转场效果（比如你可以根据不同的状态，切换不同的自定义专场效果）</p>
-<pre><code><span class="number">1.</span> - (<span class="keyword">id</span>&lt; <span class="built_in">UIViewControllerAnimatedTransitioning</span> &gt;)animationControllerForPresentedController:(<span class="built_in">UIViewController</span> *)presented presentingController:(<span class="built_in">UIViewController</span> *)presenting sourceController:(<span class="built_in">UIViewController</span> *)source;
-<span class="comment">// 当弹出模态窗口的时候，使用什么转场效果</span>
-
-<span class="number">2.</span> - (<span class="keyword">id</span>&lt; <span class="built_in">UIViewControllerAnimatedTransitioning</span> &gt;)animationControllerForDismissedController:(<span class="built_in">UIViewController</span> *)dismissed;
-<span class="comment">// 当关闭模态窗口的时候，使用什么转场效果</span>
-</code></pre></li>
-</ul>
-<h3 id="实现">实现</h3><p>知道了转场动画需要的必要条件，我们可以很轻松分别实现三个部分。</p>
-<p>第一部分UIViewControllerContextTransition在本文中并没有特殊定制化的地方，直接完成。</p>
-<p>第二部分关于UIViewControllerAnimatedTransition的代码如下：</p>
-<pre><code>class SwipeAnimator: <span class="built_in">NSObject</span>, <span class="built_in">UIViewControllerAnimatedTransitioning</span> {
-    <span class="keyword">enum</span> SwipeTo {
-        <span class="keyword">case</span> Main
-        <span class="keyword">case</span> Modal
-    };
-
-    var transitonTo:SwipeTo = <span class="variable">.Main</span>
-
-    <span class="comment">// 0. 返回动画时间</span>
-    func transitionDuration(transitionContext: <span class="built_in">UIViewControllerContextTransitioning</span>) -&gt; <span class="built_in">NSTimeInterval</span> {
-        <span class="keyword">return</span> <span class="number">1.0</span>
-    }
-
-    func animateTransition(transitionContext: <span class="built_in">UIViewControllerContextTransitioning</span>) {
-        <span class="comment">// 1. 获取相关资源</span>
-        let fromVC = transitionContext<span class="variable">.viewControllerForKey</span>(<span class="built_in">UITransitionContextFromViewControllerKey</span>)!
-
-        let toView = transitionContext<span class="variable">.viewForKey</span>(<span class="built_in">UITransitionContextToViewKey</span>)
-
-        <span class="comment">// 2. 弹出模态</span>
-        <span class="keyword">if</span> (<span class="keyword">self</span><span class="variable">.transitonTo</span> == <span class="variable">.Modal</span>) {
-            <span class="keyword">if</span> toView != <span class="literal">nil</span> {
-                transitionContext<span class="variable">.containerView</span>()<span class="variable">.addSubview</span>(toView!)
-
-                toView!<span class="variable">.alpha</span> = <span class="number">0.0</span>
-
-                <span class="comment">// 2.1 以左上角为锚点旋转</span>
-                fromVC<span class="variable">.view</span><span class="variable">.layer</span><span class="variable">.anchorPoint</span> = <span class="built_in">CGPoint</span>(x: <span class="number">0</span>, y: <span class="number">0</span>)
-                fromVC<span class="variable">.view</span><span class="variable">.layer</span><span class="variable">.position</span> = <span class="built_in">CGPointMake</span>(<span class="number">0</span>, <span class="number">0</span>)
-
-                <span class="built_in">UIView</span><span class="variable">.animateWithDuration</span>(<span class="number">1.0</span>, animations: { () -&gt; Void <span class="keyword">in</span>
-                    fromVC<span class="variable">.view</span><span class="variable">.transform</span> = <span class="built_in">CGAffineTransformMakeRotation</span>(<span class="built_in">CGFloat</span>(-M_PI/<span class="number">2</span>))
-                    toView!<span class="variable">.alpha</span> = <span class="number">1.0</span>
-                }, completion: { (completion:Bool) -&gt; Void <span class="keyword">in</span>
-                    <span class="comment">// 2.2 报告转场动画完成</span>
-                    transitionContext<span class="variable">.completeTransition</span>(!transitionContext<span class="variable">.transitionWasCancelled</span>())
-                })
-            }
-        } <span class="keyword">else</span> {
-            <span class="comment">// 3. 关闭模态</span>
-            <span class="keyword">if</span> fromView != <span class="literal">nil</span> {
-                fromView!<span class="variable">.alpha</span> = <span class="number">1.0</span>
-                <span class="built_in">UIView</span><span class="variable">.animateWithDuration</span>(<span class="number">1.0</span>, animations: { () -&gt; Void <span class="keyword">in</span>
-                    toVC<span class="variable">.view</span><span class="variable">.transform</span> = <span class="built_in">CGAffineTransformMakeRotation</span>(<span class="number">0</span>)
-                    fromView!<span class="variable">.alpha</span> = <span class="number">0.0</span>
-                }, completion: { (completion:Bool) -&gt; Void <span class="keyword">in</span>
-                    transitionContext<span class="variable">.completeTransition</span>(!transitionContext<span class="variable">.transitionWasCancelled</span>())
-                })
-            }
-        }
-    }
-}
-</code></pre><p>实现非常简单，我们来一步步看下。</p>
-<ul>
-<li><ol>
-<li>根据UIViewControllerAnimatedTransition协议返回动画时间</li>
-</ol>
-</li>
-<li><ol>
-<li>根据UIViewControllerContextTransition获取我们需要操作的即将切出的ViewController(fromVC)以及即将切入的页面(toView)，<strong>为什么要用这种获取方式，稍微在重点分析会指出</strong></li>
-</ol>
-</li>
-<li><ol>
-<li>当遇到是弹出模态窗口转场的时候，我们首先将toView加入到转场过程提供的一个containView中，然后改变fromVC的锚点，进行旋转，同时我们对toView进行了一个淡入淡出。当转场动画完成以后，<strong>在回调的closure中报告转场动画已经完成</strong>。</li>
-</ol>
-</li>
-<li><ol>
-<li>当关闭模态转场的时候，这个时候转场的出和入就正好和弹出的时候截然相反。原先的fromVC成了现在的toVC，因此我们在这里将toVC旋转回原来的位置。当然别忘了我们的淡入淡出啦，原理是一样的，只要改变fromView的alpha即可。动画完成后，依然要报告我们的转场完成了。</li>
-</ol>
-</li>
-</ul>
-<p>第三部分，UIViewControllerTransitionDelegate的实现依然非常简单，我们仅仅需要告知转场发生时，我们具体要采用哪种转场效果就好了。</p>
-<pre><code><span class="func"><span class="keyword">func</span> <span class="title">animationControllerForPresentedController</span><span class="params">(presented: UIViewController, presentingController presenting: UIViewController, sourceController source: UIViewController)</span></span> -&gt; <span class="type">UIViewControllerAnimatedTransitioning</span>? {
-    <span class="keyword">self</span>.animator.transitonTo = .<span class="type">Modal</span>
-    <span class="keyword">return</span> <span class="keyword">self</span>.animator
-}
-
-<span class="func"><span class="keyword">func</span> <span class="title">animationControllerForDismissedController</span><span class="params">(dismissed: UIViewController)</span></span> -&gt; <span class="type">UIViewControllerAnimatedTransitioning</span>? {
-    <span class="keyword">self</span>.animator.transitonTo = .<span class="type">Main</span>
-    <span class="keyword">return</span> <span class="keyword">self</span>.animator
-}
-</code></pre><p>在这里，我们复用了同一个转场效果，通过不同的transitionTo参数进行控制。你当然也可以给两个转场分别生成对应不同的转场效果。</p>
-<h3 id="iOS8的坑">iOS8的坑</h3><p>嘿嘿，重头戏来了，千万别错过。</p>
-<p>一开始实现这个转场效果的时候，压根没想到这么复杂，但是，突然发现了一个很大的问题：</p>
-<p><strong>当弹出模态窗口的时候，转场效果正常，最后成功显示模态界面。但是当关闭模态窗口的时候，转场效果依然正确，但是转场结束后，整个屏幕都黑了。</strong></p>
-<p><em>What the F*ck!!!</em></p>
-<p>我以为是我自己实现有问题，但是我去Github上找了几个著名的转场效果跑了下，都存在这个问题，那我就百思不得其解了呀！！！</p>
-<h4 id="误打误撞">误打误撞</h4><p>从网上搜寻了很久之后，我还是没有头绪，于是我首先尝试将如下代码中</p>
-<pre><code><span class="tag">var</span> modalVC = <span class="function"><span class="title">UIStoryboard</span><span class="params">(name: <span class="string">"Main"</span>, bundle: nil)</span></span>.<span class="function"><span class="title">instantiateViewControllerWithIdentifier</span><span class="params">(<span class="string">"ModalViewController"</span>)</span></span> as! UIViewController
-modalVC<span class="class">.transitioningDelegate</span> = self
-modalVC<span class="class">.modalPresentationStyle</span> = <span class="class">.Custom</span>
-<span class="function"><span class="title">presentViewController</span><span class="params">(modalVC, animated: true, completion: nil)</span></span>
-</code></pre><p><strong>modalVC.modalPresentationStyle = .Custom</strong>中的.Custom改成了.FullScreen。<br>这一下子就给我整好了！</p>
-<p>所以，给大家提个醒，如果遇到相似的问题，解决方法很简单，就是.FullScreen即可。</p>
-<h4 id="深层原因">深层原因</h4><p>作为一个站在红旗下的三好学生，弄懂问题的深层原因才是最主要的，通过不过的debug，我终于弄懂了。</p>
-<p><strong>首先，我们要强调一个基本知识。一个UIView的superview最多只能由一个。当一个本身处于别的UIView下的subView被添加到另一个UIView上的时候，它就自动被从前一个UIView的Hierarchy中移除了。</strong></p>
-<p>还记得我们之前一个很奇怪的写法吗？<br>根据UIViewControllerContextTransition获取我们需要操作的即将切出的ViewController(fromVC)以及即将切入的页面(toView)</p>
-<p>我们这么写的原因就是因为我们刚刚强调的基本知识，别急，让我们一步步来解析。</p>
-<p>在iOS8中，苹果提供了一个新的API：</p>
-<pre><code><span class="constant">@availability</span>(iOS, introduced=<span class="number">8.0</span>)
-<span class="function"><span class="keyword">func</span> <span class="title">viewForKey</span><span class="params">(key: String)</span> -&gt; <span class="title">UIView</span>?</span>
-</code></pre><p>并且在文档中明确强调了一点：</p>
-<pre><code><span class="comment">// Currently only two keys are defined by the</span>
-<span class="comment">// system - UITransitionContextToViewControllerKey, and</span>
-<span class="comment">// UITransitionContextFromViewControllerKey. </span>
-<span class="comment">// Animators should not directly manipulate a view controller's views and should</span>
-<span class="comment">// use viewForKey: to get views instead.</span>
-<span class="func"><span class="keyword">func</span> <span class="title">viewControllerForKey</span><span class="params">(key: String)</span></span> -&gt; <span class="type">UIViewController</span>?
-</code></pre><p>什么意思呢？<br>之前在iOS7中，开发者需要通过<strong>viewControllerForKey</strong>这个方法获取切入切出的ViewController，并直接操作ViewController对应的View来编写转场动画。而在iOS8以后，苹果规定必须使用<strong>viewForKey</strong>来获取fromView和toView来进行转场动画的操作。</p>
-<p>那这个API的更改和黑屏有什么关联呢？</p>
-<ul>
-<li>在整个转场过程中，我们都依赖于转场上下文transitonContext提供的containerView容器进行view动画的操作。这是因为在转场完成前，即将<strong>切入</strong>的viewcontroller都不存在于当前的可视界面的视图层级内(View Hierarchy)。因此，苹果提供了一个过渡的容器给我们使用（如果大家debug下的话，就会发现在转场过程之中，UIWindow上多了一个UITransitionView，就是切换上下文的containerView）。</li>
-<li>在iOS7的实现中，我们需要将fromVC.view和toVC.view都通过addSubView的方式添加到容器View上进行动画展示。<strong>由于是直接操作了ViewController的view，因此，fromVC的view会被从当前的视图层级中移除</strong></li>
-<li><strong>但是，iOS7中，会在转场动画完成后，自动将fromVC的view添加回原先fromVC从属的父视图中</strong></li>
-<li>iOS8中不会</li>
-<li>在本文的初版实现中，在转场过程中当判断transitionTo == .Main的时候，将此时toViewController.view (也就是原先的主窗口) 添加到了containerView上。因此，当转场结束的时候，containerView从window可见视图层级中移除了，因此就变得不可见，从而变成黑屏了。</li>
-</ul>
-<p>那么为什么模态窗口在转场过程后可见呢？</p>
-<ul>
-<li>因为这个特性依然正确。</li>
-</ul>
-<p>containerView到底是啥?</p>
-<ul>
-<li>就是一个过渡的UITransitionView，一个转场效果对应生成一个（会复用）。</li>
-<li>在转场结束后自动从视图层级中移除，因此不需要大家手动进行removeFromSuperView。</li>
-</ul>
-<p>那么viewForKey和viewControlelrForKey直接操纵view的区别呢？</p>
-<ul>
-<li>viewForKey很可能返回的是一个完全克隆VC的view的对象。</li>
-</ul>
-<p>到这，相信大家都弄懂了吧，我真是太佩服我自己了。</p>
-]]></content>
-    <summary type="html">
-    <![CDATA[<p>之前因为面试的缘故发现了自己在自定义转场这块有点欠缺，今天拿Swift练下手，实现一个自定义转场的效果。<em>没耐心的话请直接翻到最后吧，我前面都是铺垫呢。</em></p>
-<p>首先让我们先来看看最后实现的效果：<br><img src="http://7lrzqz.]]>
     </summary>
     
       <category term="Swift" scheme="http://satanwoo.github.io/tags/Swift/"/>
