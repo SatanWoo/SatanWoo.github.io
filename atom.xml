@@ -4,7 +4,7 @@
   
   <link href="/atom.xml" rel="self"/>
   <link href="http://satanwoo.github.io/"/>
-  <updated>2016-07-10T09:06:37.000Z</updated>
+  <updated>2016-07-10T09:08:26.000Z</updated>
   <id>http://satanwoo.github.io/</id>
   
   <author>
@@ -19,7 +19,7 @@
     <link href="http://satanwoo.github.io/2016/07/10/immutable-thread/"/>
     <id>http://satanwoo.github.io/2016/07/10/immutable-thread/</id>
     <published>2016-07-10T09:03:47.000Z</published>
-    <updated>2016-07-10T09:06:37.000Z</updated>
+    <updated>2016-07-10T09:08:26.000Z</updated>
     <content type="html"><![CDATA[<p>毫不夸张的说，80%的程序员对于多线程的理解都是浅陋和错误的。就拿我从事的iOS行业来说，虽然很多程序员可以对异步、GCD等等与线程相关的概念说的天花乱坠。但是实质上深挖本质的话，大多数人并不能很好的区分Race Condition，Atomic，Immutable对象在线程安全中真正起到的作用。</p>
 <p>所以今天就以这篇文章来谈谈我所理解的线程安全。</p>
 <p>首先就允许我从Immutable来开始整篇话题吧。</p>
@@ -28,7 +28,7 @@
 <li>避免了引用类型在被作为参数传递后被他人持有后修改，从而引发比较难以排查的问题。</li>
 <li>在某些程度上提供了一定的线程安全（因为多线程本身的问题很大程序上出在<strong>写修改</strong>的不确定性）。而Immutable 数据的好处在于一旦创建结束就无法修改，因此相当于任一一个线程在使用它的过程中仅仅是使用了读的功能。</li>
 </ol>
-<p>看到这，很多人开始欢呼了（嘲讽下WWDC那些“托”一般的粉丝，哈哈），觉得线程安全的问题迎刃而解了。（<strong>这里我可不是胡编乱造，众看官可以自己去看看，最近几年由于Immutable的活跃，您身边的同事或朋友是不是在谈及线程安全的时候张口闭口就会提及Immutable</strong>）。</p>
+<p>看到这，很多人开始欢呼了（嘲讽下WWDC那些“托”一般的粉丝，哈哈），觉得线程安全的问题迎刃而解了。</p>
 <p>但事实上，我想说的是<strong>使用Immutable不直接等同于线程安全</strong>，不然在使用NSArray，NSDictionary等等Immutable对象之后，为啥还会有那么多奇怪的bug出现？</p>
 <h3 id="指针与对象">指针与对象</h3><p>有些朋友会问，Immutable都将一个对象变为不可变的“固态”了，为什么还是不安全呢，在各个线程间传递的只是一份只读文件啊。</p>
 <p>是的，对于一个Immutable的对象来说，它自身是不可变了。但是在我们的程序里，我们总是需要有“东西”去指向我们的对象的吧，那这个“东西”是什么？<strong>指向对象的指针</strong>。</p>
@@ -125,7 +125,7 @@ OSSpinUnlock(&amp;_lock)<span class="comment">;</span>
     <![CDATA[<p>毫不夸张的说，80%的程序员对于多线程的理解都是浅陋和错误的。就拿我从事的iOS行业来说，虽然很多程序员可以对异步、GCD等等与线程相关的概念说的天花乱坠。但是实质上深挖本质的话，大多数人并不能很好的区分Race Condition，Atomic，Immutable对象在线]]>
     </summary>
     
-      <category term="iOS 基础知识" scheme="http://satanwoo.github.io/tags/iOS-%E5%9F%BA%E7%A1%80%E7%9F%A5%E8%AF%86/"/>
+      <category term="iOS" scheme="http://satanwoo.github.io/tags/iOS/"/>
     
   </entry>
   
