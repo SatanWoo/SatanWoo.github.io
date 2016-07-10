@@ -4,7 +4,7 @@
   
   <link href="/atom.xml" rel="self"/>
   <link href="http://satanwoo.github.io/"/>
-  <updated>2016-05-02T08:38:04.000Z</updated>
+  <updated>2016-07-10T09:06:37.000Z</updated>
   <id>http://satanwoo.github.io/</id>
   
   <author>
@@ -13,6 +13,121 @@
   </author>
   
   <generator uri="http://hexo.io/">Hexo</generator>
+  
+  <entry>
+    <title><![CDATA[从Immutable来谈谈对于线程安全的理解误区]]></title>
+    <link href="http://satanwoo.github.io/2016/07/10/immutable-thread/"/>
+    <id>http://satanwoo.github.io/2016/07/10/immutable-thread/</id>
+    <published>2016-07-10T09:03:47.000Z</published>
+    <updated>2016-07-10T09:06:37.000Z</updated>
+    <content type="html"><![CDATA[<p>毫不夸张的说，80%的程序员对于多线程的理解都是浅陋和错误的。就拿我从事的iOS行业来说，虽然很多程序员可以对异步、GCD等等与线程相关的概念说的天花乱坠。但是实质上深挖本质的话，大多数人并不能很好的区分Race Condition，Atomic，Immutable对象在线程安全中真正起到的作用。</p>
+<p>所以今天就以这篇文章来谈谈我所理解的线程安全。</p>
+<p>首先就允许我从Immutable来开始整篇话题吧。</p>
+<h3 id="Swift中的Immutable">Swift中的Immutable</h3><p>用过Swift的人都知道，Swift相较于Objective-C有一个比较明显的改动就是将结构体（Struct）和类型（Class）进行了分离。从某种方面来说，Swift将值类型和引用类型进行了明显的区分。为什么要这么做？</p>
+<ol>
+<li>避免了引用类型在被作为参数传递后被他人持有后修改，从而引发比较难以排查的问题。</li>
+<li>在某些程度上提供了一定的线程安全（因为多线程本身的问题很大程序上出在<strong>写修改</strong>的不确定性）。而Immutable 数据的好处在于一旦创建结束就无法修改，因此相当于任一一个线程在使用它的过程中仅仅是使用了读的功能。</li>
+</ol>
+<p>看到这，很多人开始欢呼了（嘲讽下WWDC那些“托”一般的粉丝，哈哈），觉得线程安全的问题迎刃而解了。（<strong>这里我可不是胡编乱造，众看官可以自己去看看，最近几年由于Immutable的活跃，您身边的同事或朋友是不是在谈及线程安全的时候张口闭口就会提及Immutable</strong>）。</p>
+<p>但事实上，我想说的是<strong>使用Immutable不直接等同于线程安全</strong>，不然在使用NSArray，NSDictionary等等Immutable对象之后，为啥还会有那么多奇怪的bug出现？</p>
+<h3 id="指针与对象">指针与对象</h3><p>有些朋友会问，Immutable都将一个对象变为不可变的“固态”了，为什么还是不安全呢，在各个线程间传递的只是一份只读文件啊。</p>
+<p>是的，对于一个Immutable的对象来说，它自身是不可变了。但是在我们的程序里，我们总是需要有“东西”去指向我们的对象的吧，那这个“东西”是什么？<strong>指向对象的指针</strong>。</p>
+<p>指针想必大家都不会陌生。对于指针来说，其实它本质也是一种对象，我们更改指针的指向的时候，实质上就是对于指针的一种赋值。所以想象这样一种场景，当你用一个指针指向一个Immutable对象的时候，在多线程更改的时候，你觉得你的指针修改是线程安全的吗？这也就是为什么有些人碰到一些跟<strong>NSArray</strong>这种Immutable对象的在多线程出现奇怪bug的时候会显得一脸懵逼。</p>
+<p>举例：  </p>
+<pre><code><span class="comment">// Thread A 其中immutableArrayA count 7</span>
+<span class="built_in">self</span><span class="built_in">.</span>xxx = <span class="built_in">self</span><span class="built_in">.</span>immutableArrayA;
+
+<span class="comment">// Thread B 其中immutableArrayB count 4</span>
+<span class="built_in">self</span><span class="built_in">.</span>xxx = <span class="built_in">self</span><span class="built_in">.</span>immutableArrayB 
+
+<span class="comment">// main Thread</span>
+<span class="preprocessor">[</span><span class="built_in">self</span><span class="built_in">.</span>xxx objectAtIndex:<span class="number">5</span><span class="preprocessor">]</span><span class="markup"></span>
+</code></pre><p>上述这个代码片段，绝对是存在线程的安全的隐患的。</p>
+<h3 id="锁">锁</h3><p>既然想到了多线程对于指针（或者对象）的修改，我们很理所当然的就会想到用锁。在现如今iOS博客泛滥的年代，大家都知道NSLock, OSSpinLock之类的可以用于短暂的Critical Section竞态的锁保护。</p>
+<p>所以对于一些多线程中需要使用共享数据源并支持修改操作的时候，比如NSMutableArray添加一些object的时候，我们可以写出如下代码：</p>
+<pre><code>OSSpinLock(&amp;_lock)<span class="comment">;</span>
+[self.array addObject:@"hahah"]<span class="comment">;</span>
+OSSpinUnlock(&amp;_lock)<span class="comment">;</span>
+</code></pre><p>乍一看，这个没问题了，这个就是最基本的写保护锁。如果有多个代码同时尝试添加进入<code>self.array</code>，是会通过锁抢占的方式一个一个的方式的添加。</p>
+<p>但是，这个东西有啥卵用吗？原子锁只能解决Race Condition的问题，但是它并不能解决任何你代码中需要有时序保证的逻辑。</p>
+<p>比如如下这段代码：</p>
+<pre><code>if (<span class="literal">self</span>.xxx) {
+    [<span class="literal">self</span>.dict <span class="built_in">set</span>Object:@<span class="string">"ah"</span> <span class="keyword">for</span>Key:<span class="literal">self</span>.xxx];
+}
+</code></pre><p>大家第一眼看到这样的代码，是不是会认为是正确的？因为在设置key的时候已经提前进行了<code>self.xxx</code>为<strong>非nil</strong>的判断，只有非nil得情况下才会执行后续的指令。<strong>但是，如上代码只有在单线程的前提下才是正确的。</strong></p>
+<p>假设我们将上述代码目前执行的线程为<code>Thread A</code>，当我们执行完<code>if (self.xxx)</code>的语句之后，此时CPU将执行权切换给了<code>Thread B</code>，而这个时候Thread B中调用了一句<strong><em><code>self.xxx = nil</code></em></strong>。<div style="color:red"><b>嘿嘿，后果如何，想必我不用多说了吧。</b></div></p>
+<p>那对于这种问题，我们有没有比较好的解决方案呢？答案是存在的，就是使用<strong>局部变量</strong>。<br>针对上述代码，我们进行如下修改：</p>
+<pre><code>__strong id <span class="function"><span class="keyword">val</span> =</span> self.xxx;
+<span class="keyword">if</span> (<span class="function"><span class="keyword">val</span>) {</span>
+    [self.dict setObject:@<span class="string">"ah"</span> forKey:<span class="function"><span class="keyword">val</span>];</span>
+}
+</code></pre><p>这样，无论多少线程尝试对<code>self.xxx</code>进行修改，本质上的<code>val</code>都会保持现有的状态，符合非nil的判断。</p>
+<h3 id="Objective-C的Property_Setter多线程并发bug">Objective-C的Property Setter多线程并发bug</h3><p>最后我们回到经常使用的Objective-C来谈谈现实生活中经常出现的问题。相信各位对于Property的Setter概念都不陌生，<code>self.xxx = @&quot;kks&quot;</code>其实就是调用了<code>xxx</code>的setter方法。而Setter方法本质上就是如下这样一段代码逻辑：</p>
+<pre><code>- (void)setXxx:(NSString *)newXXX {
+      if (newXXX != _xxx) {
+          [newXXX retain]<span class="comment">;</span>
+          [_xxx release]<span class="comment">;</span>
+          _userName = newXXX<span class="comment">;</span>
+      }
+}
+</code></pre><p>比如<strong>Thread A 和 B</strong>同时对<code>self.xxx</code>进行了赋值，当两者都越过了<code>if (newXXX != _xxx)</code>的判断的时候，就会产生<code>[_xxx release]</code>执行了两次，造成过度释放的crash危险。</p>
+<p>有人说，呵呵，你这是MRC时代的写法，我用了ARC，没问题了吧。</p>
+<p>ok，那让我们来看看ARC时代是怎么处理的，对于ARC中不复写Setter的属性（我相信是绝大多数情况），Objective-C的<a href="https://github.com/opensource-apple/objc4/blob/master/runtime/objc-accessors.mm" target="_blank" rel="external">底层源码</a>是这么处理的。</p>
+<pre><code><span class="keyword">static</span> <span class="keyword">inline</span> <span class="keyword">void</span> reallySetProperty(<span class="keyword">id</span> <span class="keyword">self</span>, SEL _cmd, <span class="keyword">id</span> newValue, 
+  ptrdiff_t offset, <span class="keyword">bool</span> atomic, <span class="keyword">bool</span> <span class="keyword">copy</span>, <span class="keyword">bool</span> mutableCopy) 
+{
+    <span class="keyword">id</span> oldValue;
+    <span class="comment">// 计算结构体中的偏移量</span>
+    <span class="keyword">id</span> *slot = (<span class="keyword">id</span>*) ((<span class="keyword">char</span>*)<span class="keyword">self</span> + offset);
+
+    <span class="keyword">if</span> (<span class="keyword">copy</span>) {
+        newValue = [newValue copyWithZone:<span class="literal">NULL</span>];
+    } <span class="keyword">else</span> <span class="keyword">if</span> (mutableCopy) {
+        newValue = [newValue mutableCopyWithZone:<span class="literal">NULL</span>];
+    } <span class="keyword">else</span> {
+        <span class="comment">// 某些程度的优化</span>
+        <span class="keyword">if</span> (*slot == newValue) <span class="keyword">return</span>;
+        newValue = objc_retain(newValue);
+    }
+
+    <span class="comment">// 危险区</span>
+    <span class="keyword">if</span> (!atomic) {
+         <span class="comment">// 第一步</span>
+        oldValue = *slot;
+
+        <span class="comment">// 第二步</span>
+        *slot = newValue;
+    } <span class="keyword">else</span> {
+        spin_lock_t *slotlock = &amp;PropertyLocks[GOODHASH(slot)];
+        _spin_lock(slotlock);
+        oldValue = *slot;
+        *slot = newValue;        
+        _spin_unlock(slotlock);
+    }
+
+    objc_release(oldValue);
+}
+</code></pre><p>由于我们一般声明的对象都是<strong>nonatomic</strong>，所以逻辑会走到上述注释<strong>危险区</strong>处。还是设想一下多线程对一个属性同时设置的情况，我们首先在线程A处获取到了执行第一步代码后的<strong>oldValue</strong>，然后此时线程切换到了B，B也获得了第一步后的oldValue，所以此时就有两处持有oldValue。然后无论是线程A或者线程B执行到最后都会执行<strong>objc_release(oldValue);</strong>。</p>
+<div style="color:red"><b>于是，重复释放的场景就出现了，crash在向你招手哦！</b></div>
+
+<p>如果不相信的话，可以尝试如下这个小例子：</p>
+<pre><code><span class="keyword">for</span> (<span class="keyword">int</span> i = <span class="number">0</span>; i &lt; <span class="number">10000</span>; i++) {
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, <span class="number">0</span>), ^{
+        self.data = [[NSMutableData alloc] init];
+    });
+}
+</code></pre><p>相信你很容易就能看到如下错误log：<strong>error for object: pointer being freed was not allocated</strong>。</p>
+<h3 id="结语">结语</h3><p>说了这么多，本质上线程安全是个一直存在并且相对来说是个比较困难的问题，没有绝对的银弹。用了Immutable不代表可以完全抛弃锁，用了锁也不代表高枕无忧了。希望这篇文章能够帮助大家更深入的思考下相关的问题，不要见到线程安全相关的问题就直接回答加锁、使用Immutable数据之类的。</p>
+<p><strong>当然，其实Stick To GCD (dispatch_barrier)是最好的解决方案。</strong></p>
+<p>本文写于头昏脑涨之中，写错之处请大神多多指出。</p>
+]]></content>
+    <summary type="html">
+    <![CDATA[<p>毫不夸张的说，80%的程序员对于多线程的理解都是浅陋和错误的。就拿我从事的iOS行业来说，虽然很多程序员可以对异步、GCD等等与线程相关的概念说的天花乱坠。但是实质上深挖本质的话，大多数人并不能很好的区分Race Condition，Atomic，Immutable对象在线]]>
+    </summary>
+    
+      <category term="iOS 基础知识" scheme="http://satanwoo.github.io/tags/iOS-%E5%9F%BA%E7%A1%80%E7%9F%A5%E8%AF%86/"/>
+    
+  </entry>
   
   <entry>
     <title><![CDATA[为什么Spotify的付费用户转化率惊人的高？]]></title>
@@ -2662,94 +2777,6 @@ BOOL success = class_addMethod(<span class="keyword">class</span>, originalSelec
     </summary>
     
       <category term="iOS" scheme="http://satanwoo.github.io/tags/iOS/"/>
-    
-  </entry>
-  
-  <entry>
-    <title><![CDATA[Swift每日一练：妙用CAReplicationLayer]]></title>
-    <link href="http://satanwoo.github.io/2015/11/17/Fun-of-CAReplicationLayer/"/>
-    <id>http://satanwoo.github.io/2015/11/17/Fun-of-CAReplicationLayer/</id>
-    <published>2015-11-16T17:54:05.000Z</published>
-    <updated>2015-11-16T19:04:45.000Z</updated>
-    <content type="html"><![CDATA[<p>今天我们来学习一下一个在iOS常常被忽视的类 - CAReplicationLayer。我们要使用这个类来完成两个开起来很炫酷的加载效果。</p>
-<p>老样子，先上具体的效果一看<br><img src="http://7lrzqz.com1.z0.glb.clouddn.com/LearnCAReplicationLayer.gif"></p>
-<p>怎么样，效果还不错吧。一个是看起来有渐变效果的圆形加载，另外一个则是模仿Apple Music的柱状图加载。</p>
-<p>接下来，就让我们一起揭开实现的面纱吧！</p>
-<h3 id="CAReplicationLayer">CAReplicationLayer</h3><p>CAReplicationLayer是CALayer的子类，它与传统的CALayer系列不同，它基本不直接承担诸多效果，而是更多的承担一种“容器”的职责。</p>
-<p>怎么理解呢？大家可以把CAReplicationLayer看成一个工厂，你提供给他一个产品的模型，它就可以为了源源不断的复制出纺织品。回到iOS中来说就是，你提供一个CALayer给CAReplicationLayer，并告诉它你希望它复制几份，就打造出多个具有效果样式的Layer。<strong>不仅如此，动画效果也会被一同复制</strong></p>
-<p>因此，对于CAReplicationLayer，我们有几个特别需要关注的参数。</p>
-<ul>
-<li>instanceCount： 代表你希望将你提供它的Layer复制几份</li>
-<li>instanceDelay： 这个参数在编写动画的前提下特别有用，它表明对每一个复制(或者原生)出来的Layer，启动动画之间的时间差在多少。</li>
-<li>instanceTransform： 这个参数表示对于每一个Layer，它们之间的<strong>形变</strong>差距是多少。比如，每个Layer需要有相同的间隔。</li>
-</ul>
-<h3 id="渐变效果的圆形加载">渐变效果的圆形加载</h3><p>了解完CAReplicationLayer的基本知识以后，我们首先来看看圆形加载效果怎么实现。</p>
-<p>第一步，毫无疑问的，需要构建一个CAReplicationLayer。</p>
-<pre><code>let replicationLayer2 = <span class="function"><span class="title">CAReplicatorLayer</span><span class="params">()</span></span>
-</code></pre><p>第二部，需要一个样品，让我们的CAReplicationLayer复制生产</p>
-<pre><code>let circle = <span class="function"><span class="title">CAShapeLayer</span><span class="params">()</span></span>
-circle<span class="class">.path</span> = <span class="function"><span class="title">UIBezierPath</span><span class="params">(ovalInRect: CGRect(x: <span class="number">0</span>, y: <span class="number">0</span>, width: <span class="number">10</span>, height: <span class="number">10</span>)</span></span>)<span class="class">.CGPath</span>
-circle<span class="class">.lineWidth</span> = <span class="number">1</span>
-circle<span class="class">.fillColor</span> = UIColor.<span class="function"><span class="title">whiteColor</span><span class="params">()</span></span><span class="class">.CGColor</span>
-circle<span class="class">.transform</span> = <span class="function"><span class="title">CATransform3DMakeScale</span><span class="params">(<span class="number">0.1</span>, <span class="number">0.1</span>, <span class="number">0.1</span>)</span></span>
-</code></pre><p>在这里，我们构建了一个白色小球，把初始大小设置为了0.1。</p>
-<p>接下去，我们需要然CAReplicationLayer开始复制了，</p>
-<pre><code>replicationLayer2<span class="class">.instanceCount</span> = <span class="number">12</span>
-replicationLayer2<span class="class">.instanceTransform</span> = <span class="function"><span class="title">CATransform3DMakeRotation</span><span class="params">(CGFloat(<span class="number">2</span> * M_PI/<span class="number">12.0</span>)</span></span>, <span class="number">0.0</span>, <span class="number">0.0</span>, <span class="number">1.0</span>)
-</code></pre><p>从上述代码我们可以看出，我们首先构建了<strong>12</strong>个复制体，然后将这12个小球通过instanceTransform绕<strong>Z</strong>轴均匀的分度在圆周上。</p>
-<p>现在赶快run一下你的app，看看效果是不是正如我所说的！</p>
-<p>现在万事具备，只欠动画了！</p>
-<p>首先我们来定义如例子中的放缩动画</p>
-<pre><code><span class="component">func scaleAnimation() -&gt; CABasicAnimation {
-    let animation = CABasicAnimation(keyPath: "transform<span class="string">.scale")</span>
-    animation<span class="string">.duration</span> = 1.5
-    animation<span class="string">.fromValue</span> = 1.0
-    animation<span class="string">.toValue</span> = 0.1
-    animation<span class="string">.repeatCount</span> = Float<span class="string">.infinity</span>
-
-    return animation
-}</span>
-</code></pre><p>我们定义了一个针对scale属性、时常1.5s的动画，然后我们将这个动画添加到小球上。</p>
-<pre><code>circle.<span class="function"><span class="title">addAnimation</span><span class="params">(scaleAnimation()</span></span>, forKey: <span class="string">"scale"</span>)
-</code></pre><p>现在如果你跑一下代码的话，你会发现，所有的小球都同时启动了动画，和例子的效果不一致，怎么回事呢？</p>
-<p>嘿嘿，还记得我们之前提及的属性<strong>instanceDelay</strong>吗？没错，我们需要借助它的力量。</p>
-<pre><code>replicationLayer2.instanceDelay = <span class="number">1.5</span>/<span class="number">12</span>
-</code></pre><p>现在再看看？哈哈，效果拔群！</p>
-<h3 id="Apple_Music加载效果">Apple Music加载效果</h3><p>下面的代码，很清晰易懂，我就不逐条解析啦，有问题欢迎大家在下方评论！</p>
-<pre><code><span class="comment">// 1. 创建容器ReplicationLayer</span>
-let replicationLayer = CAReplicatorLayer()
-
-<span class="comment">// 2. 创建柱状图</span>
-let bar = CALayer()
-bar.frame = CGRect(<span class="string">x:</span> <span class="number">0</span>, <span class="string">y:</span> <span class="number">0</span>, <span class="string">width:</span> <span class="number">8</span>, <span class="string">height:</span> <span class="number">40</span>)
-bar.position = CGPoint(<span class="string">x:</span> <span class="number">10</span>, <span class="string">y:</span> <span class="number">75</span>)
-bar.backgroundColor = UIColor.purpleColor().CGColor
-
-<span class="comment">// 3. 复制生产3个，并添加水平间隔</span>
-replicationLayer.addSublayer(bar)
-replicationLayer.instanceCount = <span class="number">3</span>
-replicationLayer.instanceTransform = CATransform3DMakeTranslation(<span class="number">20</span>, <span class="number">0</span>, <span class="number">0</span>)
-
-<span class="comment">// 4. 创建动画，构造时间差</span>
-func jumpAnimation(<span class="string">bar:</span>CALayer) -&gt; CABasicAnimation {
-    let animation = CABasicAnimation(<span class="string">keyPath:</span> <span class="string">"position.y"</span>)
-    animation.toValue = bar.position.y - <span class="number">35.0</span>
-    animation.duration = <span class="number">0.45</span>
-    animation.autoreverses = <span class="literal">true</span>
-    animation.repeatCount = Float.infinity
-
-    <span class="keyword">return</span> animation
-}
-
-bar.addAnimation(jumpAnimation(bar), <span class="string">forKey:</span> <span class="string">"jump"</span>)
-replicationLayer.instanceDelay = <span class="number">0.3</span>
-</code></pre>]]></content>
-    <summary type="html">
-    <![CDATA[<p>今天我们来学习一下一个在iOS常常被忽视的类 - CAReplicationLayer。我们要使用这个类来完成两个开起来很炫酷的加载效果。</p>
-<p>老样子，先上具体的效果一看<br><img src="http://7lrzqz.com1.z0.glb.clouddn]]>
-    </summary>
-    
-      <category term="Swift" scheme="http://satanwoo.github.io/tags/Swift/"/>
     
   </entry>
   

@@ -62,6 +62,144 @@
       <div class="outer">
         <section id="main">
   
+    <article id="post-immutable-thread" class="article article-type-post" itemscope itemprop="blogPost">
+  <div class="article-meta">
+    <a href="/2016/07/10/immutable-thread/" class="article-date">
+  <time datetime="2016-07-10T09:03:47.000Z" itemprop="datePublished">2016-07-10</time>
+</a>
+    
+  </div>
+  <div class="article-inner">
+    
+    
+      <header class="article-header">
+        
+  
+    <h1 itemprop="name">
+      <a class="article-title" href="/2016/07/10/immutable-thread/">从Immutable来谈谈对于线程安全的理解误区</a>
+    </h1>
+  
+
+      </header>
+    
+    <div class="article-entry" itemprop="articleBody">
+      
+        <p>毫不夸张的说，80%的程序员对于多线程的理解都是浅陋和错误的。就拿我从事的iOS行业来说，虽然很多程序员可以对异步、GCD等等与线程相关的概念说的天花乱坠。但是实质上深挖本质的话，大多数人并不能很好的区分Race Condition，Atomic，Immutable对象在线程安全中真正起到的作用。</p>
+<p>所以今天就以这篇文章来谈谈我所理解的线程安全。</p>
+<p>首先就允许我从Immutable来开始整篇话题吧。</p>
+<h3 id="Swift中的Immutable">Swift中的Immutable</h3><p>用过Swift的人都知道，Swift相较于Objective-C有一个比较明显的改动就是将结构体（Struct）和类型（Class）进行了分离。从某种方面来说，Swift将值类型和引用类型进行了明显的区分。为什么要这么做？</p>
+<ol>
+<li>避免了引用类型在被作为参数传递后被他人持有后修改，从而引发比较难以排查的问题。</li>
+<li>在某些程度上提供了一定的线程安全（因为多线程本身的问题很大程序上出在<strong>写修改</strong>的不确定性）。而Immutable 数据的好处在于一旦创建结束就无法修改，因此相当于任一一个线程在使用它的过程中仅仅是使用了读的功能。</li>
+</ol>
+<p>看到这，很多人开始欢呼了（嘲讽下WWDC那些“托”一般的粉丝，哈哈），觉得线程安全的问题迎刃而解了。（<strong>这里我可不是胡编乱造，众看官可以自己去看看，最近几年由于Immutable的活跃，您身边的同事或朋友是不是在谈及线程安全的时候张口闭口就会提及Immutable</strong>）。</p>
+<p>但事实上，我想说的是<strong>使用Immutable不直接等同于线程安全</strong>，不然在使用NSArray，NSDictionary等等Immutable对象之后，为啥还会有那么多奇怪的bug出现？</p>
+<h3 id="指针与对象">指针与对象</h3><p>有些朋友会问，Immutable都将一个对象变为不可变的“固态”了，为什么还是不安全呢，在各个线程间传递的只是一份只读文件啊。</p>
+<p>是的，对于一个Immutable的对象来说，它自身是不可变了。但是在我们的程序里，我们总是需要有“东西”去指向我们的对象的吧，那这个“东西”是什么？<strong>指向对象的指针</strong>。</p>
+<p>指针想必大家都不会陌生。对于指针来说，其实它本质也是一种对象，我们更改指针的指向的时候，实质上就是对于指针的一种赋值。所以想象这样一种场景，当你用一个指针指向一个Immutable对象的时候，在多线程更改的时候，你觉得你的指针修改是线程安全的吗？这也就是为什么有些人碰到一些跟<strong>NSArray</strong>这种Immutable对象的在多线程出现奇怪bug的时候会显得一脸懵逼。</p>
+<p>举例：  </p>
+<pre><code><span class="comment">// Thread A 其中immutableArrayA count 7</span>
+<span class="built_in">self</span><span class="built_in">.</span>xxx = <span class="built_in">self</span><span class="built_in">.</span>immutableArrayA;
+
+<span class="comment">// Thread B 其中immutableArrayB count 4</span>
+<span class="built_in">self</span><span class="built_in">.</span>xxx = <span class="built_in">self</span><span class="built_in">.</span>immutableArrayB 
+
+<span class="comment">// main Thread</span>
+<span class="preprocessor">[</span><span class="built_in">self</span><span class="built_in">.</span>xxx objectAtIndex:<span class="number">5</span><span class="preprocessor">]</span><span class="markup"></span>
+</code></pre><p>上述这个代码片段，绝对是存在线程的安全的隐患的。</p>
+<h3 id="锁">锁</h3><p>既然想到了多线程对于指针（或者对象）的修改，我们很理所当然的就会想到用锁。在现如今iOS博客泛滥的年代，大家都知道NSLock, OSSpinLock之类的可以用于短暂的Critical Section竞态的锁保护。</p>
+<p>所以对于一些多线程中需要使用共享数据源并支持修改操作的时候，比如NSMutableArray添加一些object的时候，我们可以写出如下代码：</p>
+<pre><code>OSSpinLock(&amp;_lock)<span class="comment">;</span>
+[self.array addObject:@"hahah"]<span class="comment">;</span>
+OSSpinUnlock(&amp;_lock)<span class="comment">;</span>
+</code></pre><p>乍一看，这个没问题了，这个就是最基本的写保护锁。如果有多个代码同时尝试添加进入<code>self.array</code>，是会通过锁抢占的方式一个一个的方式的添加。</p>
+<p>但是，这个东西有啥卵用吗？原子锁只能解决Race Condition的问题，但是它并不能解决任何你代码中需要有时序保证的逻辑。</p>
+<p>比如如下这段代码：</p>
+<pre><code>if (<span class="literal">self</span>.xxx) {
+    [<span class="literal">self</span>.dict <span class="built_in">set</span>Object:@<span class="string">"ah"</span> <span class="keyword">for</span>Key:<span class="literal">self</span>.xxx];
+}
+</code></pre><p>大家第一眼看到这样的代码，是不是会认为是正确的？因为在设置key的时候已经提前进行了<code>self.xxx</code>为<strong>非nil</strong>的判断，只有非nil得情况下才会执行后续的指令。<strong>但是，如上代码只有在单线程的前提下才是正确的。</strong></p>
+<p>假设我们将上述代码目前执行的线程为<code>Thread A</code>，当我们执行完<code>if (self.xxx)</code>的语句之后，此时CPU将执行权切换给了<code>Thread B</code>，而这个时候Thread B中调用了一句<strong><em><code>self.xxx = nil</code></em></strong>。<div style="color:red"><b>嘿嘿，后果如何，想必我不用多说了吧。</b></div></p>
+<p>那对于这种问题，我们有没有比较好的解决方案呢？答案是存在的，就是使用<strong>局部变量</strong>。<br>针对上述代码，我们进行如下修改：</p>
+<pre><code>__strong id <span class="function"><span class="keyword">val</span> =</span> self.xxx;
+<span class="keyword">if</span> (<span class="function"><span class="keyword">val</span>) {</span>
+    [self.dict setObject:@<span class="string">"ah"</span> forKey:<span class="function"><span class="keyword">val</span>];</span>
+}
+</code></pre><p>这样，无论多少线程尝试对<code>self.xxx</code>进行修改，本质上的<code>val</code>都会保持现有的状态，符合非nil的判断。</p>
+<h3 id="Objective-C的Property_Setter多线程并发bug">Objective-C的Property Setter多线程并发bug</h3><p>最后我们回到经常使用的Objective-C来谈谈现实生活中经常出现的问题。相信各位对于Property的Setter概念都不陌生，<code>self.xxx = @&quot;kks&quot;</code>其实就是调用了<code>xxx</code>的setter方法。而Setter方法本质上就是如下这样一段代码逻辑：</p>
+<pre><code>- (void)setXxx:(NSString *)newXXX {
+      if (newXXX != _xxx) {
+          [newXXX retain]<span class="comment">;</span>
+          [_xxx release]<span class="comment">;</span>
+          _userName = newXXX<span class="comment">;</span>
+      }
+}
+</code></pre><p>比如<strong>Thread A 和 B</strong>同时对<code>self.xxx</code>进行了赋值，当两者都越过了<code>if (newXXX != _xxx)</code>的判断的时候，就会产生<code>[_xxx release]</code>执行了两次，造成过度释放的crash危险。</p>
+<p>有人说，呵呵，你这是MRC时代的写法，我用了ARC，没问题了吧。</p>
+<p>ok，那让我们来看看ARC时代是怎么处理的，对于ARC中不复写Setter的属性（我相信是绝大多数情况），Objective-C的<a href="https://github.com/opensource-apple/objc4/blob/master/runtime/objc-accessors.mm" target="_blank" rel="external">底层源码</a>是这么处理的。</p>
+<pre><code><span class="keyword">static</span> <span class="keyword">inline</span> <span class="keyword">void</span> reallySetProperty(<span class="keyword">id</span> <span class="keyword">self</span>, SEL _cmd, <span class="keyword">id</span> newValue, 
+  ptrdiff_t offset, <span class="keyword">bool</span> atomic, <span class="keyword">bool</span> <span class="keyword">copy</span>, <span class="keyword">bool</span> mutableCopy) 
+{
+    <span class="keyword">id</span> oldValue;
+    <span class="comment">// 计算结构体中的偏移量</span>
+    <span class="keyword">id</span> *slot = (<span class="keyword">id</span>*) ((<span class="keyword">char</span>*)<span class="keyword">self</span> + offset);
+
+    <span class="keyword">if</span> (<span class="keyword">copy</span>) {
+        newValue = [newValue copyWithZone:<span class="literal">NULL</span>];
+    } <span class="keyword">else</span> <span class="keyword">if</span> (mutableCopy) {
+        newValue = [newValue mutableCopyWithZone:<span class="literal">NULL</span>];
+    } <span class="keyword">else</span> {
+        <span class="comment">// 某些程度的优化</span>
+        <span class="keyword">if</span> (*slot == newValue) <span class="keyword">return</span>;
+        newValue = objc_retain(newValue);
+    }
+
+    <span class="comment">// 危险区</span>
+    <span class="keyword">if</span> (!atomic) {
+         <span class="comment">// 第一步</span>
+        oldValue = *slot;
+
+        <span class="comment">// 第二步</span>
+        *slot = newValue;
+    } <span class="keyword">else</span> {
+        spin_lock_t *slotlock = &amp;PropertyLocks[GOODHASH(slot)];
+        _spin_lock(slotlock);
+        oldValue = *slot;
+        *slot = newValue;        
+        _spin_unlock(slotlock);
+    }
+
+    objc_release(oldValue);
+}
+</code></pre><p>由于我们一般声明的对象都是<strong>nonatomic</strong>，所以逻辑会走到上述注释<strong>危险区</strong>处。还是设想一下多线程对一个属性同时设置的情况，我们首先在线程A处获取到了执行第一步代码后的<strong>oldValue</strong>，然后此时线程切换到了B，B也获得了第一步后的oldValue，所以此时就有两处持有oldValue。然后无论是线程A或者线程B执行到最后都会执行<strong>objc_release(oldValue);</strong>。</p>
+<div style="color:red"><b>于是，重复释放的场景就出现了，crash在向你招手哦！</b></div>
+
+<p>如果不相信的话，可以尝试如下这个小例子：</p>
+<pre><code><span class="keyword">for</span> (<span class="keyword">int</span> i = <span class="number">0</span>; i &lt; <span class="number">10000</span>; i++) {
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, <span class="number">0</span>), ^{
+        self.data = [[NSMutableData alloc] init];
+    });
+}
+</code></pre><p>相信你很容易就能看到如下错误log：<strong>error for object: pointer being freed was not allocated</strong>。</p>
+<h3 id="结语">结语</h3><p>说了这么多，本质上线程安全是个一直存在并且相对来说是个比较困难的问题，没有绝对的银弹。用了Immutable不代表可以完全抛弃锁，用了锁也不代表高枕无忧了。希望这篇文章能够帮助大家更深入的思考下相关的问题，不要见到线程安全相关的问题就直接回答加锁、使用Immutable数据之类的。</p>
+<p><strong>当然，其实Stick To GCD (dispatch_barrier)是最好的解决方案。</strong></p>
+<p>本文写于头昏脑涨之中，写错之处请大神多多指出。</p>
+
+      
+    </div>
+    <footer class="article-footer">
+      <a data-url="http://satanwoo.github.io/2016/07/10/immutable-thread/" data-id="ciqgdluzb0005pzi1vajuknow" class="article-share-link">Share</a>
+      
+      
+  <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS-基础知识/">iOS 基础知识</a></li></ul>
+
+    </footer>
+  </div>
+  
+</article>
+
+
+  
     <article id="post-Spotify" class="article article-type-post" itemscope itemprop="blogPost">
   <div class="article-meta">
     <a href="/2016/05/02/Spotify/" class="article-date">
@@ -152,7 +290,7 @@
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/05/02/Spotify/" data-id="cinpr796z000uami12sn57k2a" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/05/02/Spotify/" data-id="ciqgdlv0c000xpzi1o2kkqs4b" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Growth/">Growth</a></li></ul>
@@ -258,7 +396,7 @@
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/04/26/blank-space-in-html/" data-id="cinpr796h000iami1e33qwktn" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/04/26/blank-space-in-html/" data-id="ciqgdluzr000lpzi1b43taev3" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/JavaScript/">JavaScript</a></li></ul>
@@ -494,7 +632,7 @@ Elapsed application CPU <span class="keyword">time</span> (seconds): <span class
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/04/11/dispatch-once/" data-id="cinpr79660008ami146yugvcv" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/04/11/dispatch-once/" data-id="ciqgdluzh000bpzi1wk6h89c1" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
@@ -689,7 +827,7 @@ a4.<span class="function"><span class="title">staticInfo</span><span class="para
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/03/22/dispatch-in-swift/" data-id="cinpr7968000aami1xs3a9fje" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/03/22/dispatch-in-swift/" data-id="ciqgdluzj000dpzi1g6t036r5" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Swift/">Swift</a></li></ul>
@@ -781,7 +919,7 @@ a4.<span class="function"><span class="title">staticInfo</span><span class="para
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/03/14/RxSwift/" data-id="cinpr79760010ami1f23tvqk9" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/03/14/RxSwift/" data-id="ciqgdlv0i0013pzi1zur0zzue" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Swift/">Swift</a></li></ul>
@@ -869,7 +1007,7 @@ val = edx(<span class="literal">true</span>)
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/03/14/SizeUp/" data-id="cinpr7972000xami16n6ljoay" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/03/14/SizeUp/" data-id="ciqgdlv0g0010pzi1hfjxjq40" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Reverse-Engineering/">Reverse Engineering</a></li></ul>
@@ -1009,7 +1147,7 @@ val = edx(<span class="literal">true</span>)
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/03/14/DXXcodeConsoleUnicodePlugin/" data-id="cinpr798j001vami1a5fp0wxo" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/03/14/DXXcodeConsoleUnicodePlugin/" data-id="ciqgdlv1m001ypzi17itni9w6" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
@@ -1086,7 +1224,7 @@ fi
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/02/27/check-manifest/" data-id="cinpr796d000fami12ajulbst" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/02/27/check-manifest/" data-id="ciqgdluzp000ipzi1b0eiqao6" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/shell/">shell</a></li></ul>
@@ -1196,263 +1334,7 @@ fi
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/02/27/pod-install-plugin/" data-id="cinpr795r0003ami1xfi4634n" class="article-share-link">Share</a>
-      
-      
-  <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
-
-    </footer>
-  </div>
-  
-</article>
-
-
-  
-    <article id="post-FBKVOController" class="article article-type-post" itemscope itemprop="blogPost">
-  <div class="article-meta">
-    <a href="/2016/02/27/FBKVOController/" class="article-date">
-  <time datetime="2016-02-27T10:21:55.000Z" itemprop="datePublished">2016-02-27</time>
-</a>
-    
-  </div>
-  <div class="article-inner">
-    
-    
-      <header class="article-header">
-        
-  
-    <h1 itemprop="name">
-      <a class="article-title" href="/2016/02/27/FBKVOController/">FBKVOController 源码解析</a>
-    </h1>
-  
-
-      </header>
-    
-    <div class="article-entry" itemprop="articleBody">
-      
-        <p>开发过iOS的app已经不计其数了，在不同的项目中采用的架构也各不相同，有传统的<strong>MVC</strong>，简化的<strong>VIPER</strong>，以及一些简单的<strong>MVVM</strong>。</p>
-<p>这其中，我最不推荐的就是<strong>VIPER</strong>，谁写谁知道，，绝对是增加了项目的复杂性。<strong>MVVM</strong>由于自己总是受限于传统的<code>Object-Oriented</code>的思路，总是想不出真正的Functional Programming的代码，因此，绝大多数情况，写着写着都回归到了<strong>MVC</strong>。</p>
-<p>其实，相较于网上大家总喜欢提到的<strong>Massive View Controller</strong>问题，我更想说的是这种传统架构中对于信息流的不友好。</p>
-<p>在一个典型的iOS的问题中，我们的代码执行流程，通常都是从View Controller的<strong>生命周期</strong>开始，如果是一个完全基于顺序执行的应用，那整个app的信息流是<strong>单向可跟踪的</strong>。但是往往事情并不会那么简单，我们会包含至少如下这些潜在打乱信息流的<em>坏蛋</em></p>
-<ul>
-<li>Delegate回调</li>
-<li>NSNotification</li>
-<li>UIView控件的Target-Action</li>
-<li>KVO</li>
-</ul>
-<p>在这里，你可能会以为我想谈谈<strong>ReactiveCocoa</strong>和<strong>RxSwift</strong>，那你错啦，那个开源项目我暂时还没有能力去深究，所以我想从KVO事件入手，读一读Facebook出品的<strong>FBKVOController</strong>。</p>
-<h4 id="FBKVOController">FBKVOController</h4><p>简单来说，FBKVOController是对KVO机制的一层封装，同时提供了线程安全的特性和并对如下这个<strong>臭名昭著</strong>的函数进行了封装，提供了干净的block的回调，避免了处理这个函数的逻辑散落的到处都是。</p>
-<pre><code>- (<span class="typename">void</span>)<span class="string">observeValueForKeyPath:</span>(NSString *)keyPath <span class="string">ofObject:</span>(id)object <span class="string">change:</span>(NSDictionary *)change <span class="string">context:</span>(<span class="typename">void</span> *)context
-</code></pre><h4 id="源码分析">源码分析</h4><p>整个项目的结构非常简单，包含如下四个文件：</p>
-<ul>
-<li>FBKVOController.h/.m</li>
-<li>NSObject+FBKVOController.h/.m</li>
-</ul>
-<p>其中，<code>NSObject+FBKVOController</code>只是通过<code>AssociateObject</code>给NSObject提供了一个<code>retain</code>及一个<code>非retain</code>型的KVOController。</p>
-<p>这两种不同类型的KVOController有啥区别，我们稍后再提，我们将重点投向<code>FBKVOController</code>这个文件。</p>
-<p>打开这个<code>FBKVOController.m</code>文件，哎呀，600多行文件，有点蛋疼。没事，配合头文件粗略扫一眼以后，可以发现其中很多方法都是<code>convenience method</code>。</p>
-<p>简单剥离一下数据结构以后，我们可以发现，主要的数据结构有如下三个。</p>
-<ul>
-<li>FBKVOInfo</li>
-<li>FBKVOSharedController</li>
-<li>FBKVOController</li>
-</ul>
-<h4 id="FBKVOController-1">FBKVOController</h4><p>既然我们前面通过<code>NSObject+FBKVOController</code>知道了每个对象都会有其对应的<code>FBKVOController</code>，那我们就先来看看这个类吧。</p>
-<pre><code><span class="comment">//1.</span>
-<span class="class"><span class="keyword">@implementation</span> <span class="title">FBKVOController</span></span>
-{
-  <span class="built_in">NSMapTable</span> *_objectInfosMap;
-  OSSpinLock _lock;
-}
-
-<span class="comment">//2.</span>
-- (instancetype)initWithObserver:(<span class="keyword">id</span>)observer retainObserved:(<span class="built_in">BOOL</span>)retainObserved
-{
-  <span class="keyword">self</span> = [<span class="keyword">super</span> init];
-  <span class="keyword">if</span> (<span class="literal">nil</span> != <span class="keyword">self</span>) {
-    <span class="comment">// 2.</span>
-    _observer = observer;
-
-    <span class="comment">// 3.</span>
-    <span class="built_in">NSPointerFunctionsOptions</span> keyOptions = retainObserved ? <span class="built_in">NSPointerFunctionsStrongMemory</span>|<span class="built_in">NSPointerFunctionsObjectPointerPersonality</span> : <span class="built_in">NSPointerFunctionsWeakMemory</span>|<span class="built_in">NSPointerFunctionsObjectPointerPersonality</span>;
-    _objectInfosMap = [[<span class="built_in">NSMapTable</span> alloc] initWithKeyOptions:keyOptions valueOptions:<span class="built_in">NSPointerFunctionsStrongMemory</span>|<span class="built_in">NSPointerFunctionsObjectPersonality</span> capacity:<span class="number">0</span>];
-
-    <span class="comment">// 4.</span>
-    _lock = OS_SPINLOCK_INIT;
-  }
-  <span class="keyword">return</span> <span class="keyword">self</span>;
-}
-</code></pre><ol>
-<li><p>首先我们看到，这个对象持有一个<code>OSSpinLock</code>及一个<code>NSMapTable</code>。其中<code>OSSpinLock</code>即为自旋锁，当多个线程竞争相同的<strong>critical section</strong>时，起到保护作用。<code>NSMapTable</code>可能大家接触不是很多，我们在后文会详细介绍，这里大家可以先理解为一个高级的NSDictionary。</p>
-</li>
-<li><p>在构造函数中，首先将传入的observer进行<code>weak</code>持有，这主要为了避免<strong>Retain Cycle</strong>。</p>
-</li>
-<li><p>这一段的内容可能大家不太熟悉，<code>NSPointerFunctionsOptions</code>简单来说就是定义<code>NSMapTable</code>中的key和value采用何种内存管理策略，包括<code>strong</code>强引用，<code>weak</code>弱引用以及<code>copy</code>（要支持NSCopying协议）</p>
-</li>
-<li><p>初始化自旋锁  </p>
-</li>
-</ol>
-<p>接下来，使我们通过<code>FBKVOController</code>来对一个对象的某个或者某些keypath进行观察。</p>
-<pre><code>- (<span class="typename">void</span>)<span class="string">observe:</span>(id)object <span class="string">keyPath:</span>(NSString *)keyPath <span class="string">options:</span>(NSKeyValueObservingOptions)options <span class="string">block:</span>(FBKVONotificationBlock)block
-{
-  NSAssert(<span class="number">0</span> != keyPath.length &amp;&amp; NULL != block, @<span class="string">"missing required parameters observe:%@ keyPath:%@ block:%p"</span>, object, keyPath, block);
-  <span class="keyword">if</span> (nil == object || <span class="number">0</span> == keyPath.length || NULL == block) {
-    <span class="keyword">return</span>;
-  }
-
-  <span class="comment">// 1. create info</span>
-  _FBKVOInfo *info = [[_FBKVOInfo alloc] <span class="string">initWithController:</span>self <span class="string">keyPath:</span>keyPath <span class="string">options:</span>options <span class="string">block:</span>block];
-
-  <span class="comment">// 2. observe object with info</span>
-  [self <span class="string">_observe:</span>object <span class="string">info:</span>info];
-}
-</code></pre><ol>
-<li>对于传入的参数，构建一个内部的FBKVOInfo数据结构</li>
-<li>调用<code>[self _observe:object info:info];</code></li>
-</ol>
-<p>接下来，我们来跟踪一下<code>[self _observe:object info:info];</code>，内容如下：</p>
-<pre><code>- (<span class="typename">void</span>)<span class="string">_observe:</span>(id)object <span class="string">info:</span>(_FBKVOInfo *)info
-{
-  <span class="comment">// lock</span>
-  OSSpinLockLock(&amp;_lock);
-
-  <span class="comment">// 1.</span>
-  NSMutableSet *infos = [_objectInfosMap <span class="string">objectForKey:</span>object];
-
-  <span class="comment">// 2. </span>
-  _FBKVOInfo *existingInfo = [infos <span class="string">member:</span>info];
-  <span class="keyword">if</span> (nil != existingInfo) {
-    NSLog(@<span class="string">"observation info already exists %@"</span>, existingInfo);
-
-    <span class="comment">// unlock and return</span>
-    OSSpinLockUnlock(&amp;_lock);
-    <span class="keyword">return</span>;
-  }
-
-  <span class="comment">// lazilly create set of infos</span>
-  <span class="keyword">if</span> (nil == infos) {
-    infos = [NSMutableSet set];
-    [_objectInfosMap <span class="string">setObject:</span>infos <span class="string">forKey:</span>object];
-  }
-
-  <span class="comment">// add info and oberve</span>
-  [infos <span class="string">addObject:</span>info];
-
-  <span class="comment">// unlock prior to callout</span>
-  OSSpinLockUnlock(&amp;_lock);
-
-  <span class="comment">// 3.</span>
-  [[_FBKVOSharedController sharedController] <span class="string">observe:</span>object <span class="string">info:</span>info];
-}
-</code></pre><p>抛开Facebook自身标记的注释，有三处比较值得我们注意：</p>
-<ol>
-<li><p>根据被观察的object获取其对应的<strong>infos set</strong>。这个主要作用在于避免多次对同一个keyPath添加多次观察，避免crash。<strong>因为每调用一次<code>addObserverForKeyPath</code>就要有一个对应的<code>removeObserverForKey</code>。</strong></p>
-</li>
-<li><p>从<strong>infos set</strong>判断是不是已经有了与此次info相同的观察。</p>
-</li>
-<li><p>如果以上都顺利通过，将观察的信息及关系注册到<code>_FBKVOSharedController</code>中。</p>
-</li>
-</ol>
-<p>至此，FBKVOController的任务基本都结束，<code>unObserve</code>相关的任务逻辑大同小异，不再赘述。</p>
-<h4 id="FBKVOSharedController">FBKVOSharedController</h4><p>初次看到这个类的时候，我的脑海中浮现了两个问题，FBKVOSharedController是干嘛的?为什么FBKVOController还需要将观察的信息转交呢？</p>
-<p><strong>其实我个人觉得这一层不是必要的</strong>，但是按照Facebook的理念来说就是将所有的观察信息统一交由一个<code>FBKVOSharedController</code>的<strong>单例</strong>进行维护。如果大家读过Facebook出品的<strong>Flux</strong>架构，也会发现，Facebook经常喜欢维护一个类似于中间件的注册表，在这里，<code>FBKVOSharedController</code>承担的也是类似的职责。</p>
-<p>于是，通过如下方法，我们像使用注册表一样将对KVOInfo注册。</p>
-<pre><code>- (<span class="typename">void</span>)<span class="string">observe:</span>(id)object <span class="string">info:</span>(_FBKVOInfo *)info
-{
-  <span class="keyword">if</span> (nil == info) {
-    <span class="keyword">return</span>;
-  }
-
-  <span class="comment">// register info</span>
-  OSSpinLockLock(&amp;_lock);
-  [_infos <span class="string">addObject:</span>info];
-  OSSpinLockUnlock(&amp;_lock);
-
-  <span class="comment">// 1.</span>
-  [object <span class="string">addObserver:</span>self <span class="string">forKeyPath:</span>info-&gt;_keyPath <span class="string">options:</span>info-&gt;_options <span class="string">context:</span>(<span class="typename">void</span> *)info];
-}
-</code></pre><ol>
-<li>代表所有的观察信息都首先由<code>FBKVOSharedController</code>进行接受，随后进行转发。</li>
-</ol>
-<p>实现<code>observeValueForKeyPath:ofObject:Change:context</code><br>来接收通知。</p>
-<pre><code>- (<span class="keyword">void</span>)observeValueForKeyPath:(<span class="built_in">NSString</span> *)keyPath ofObject:(<span class="keyword">id</span>)object change:(<span class="built_in">NSDictionary</span> *)change context:(<span class="keyword">void</span> *)context
-{
-  <span class="built_in">NSAssert</span>(context, <span class="string">@"missing context keyPath:%@ object:%@ change:%@"</span>, keyPath, object, change);
-
-  _FBKVOInfo *info;
-
-  {
-    <span class="comment">// 1. </span>
-    OSSpinLockLock(&amp;_lock);
-    info = [_infos member:(__bridge <span class="keyword">id</span>)context];
-    OSSpinLockUnlock(&amp;_lock);
-  }
-
-  <span class="keyword">if</span> (<span class="literal">nil</span> != info) {
-
-    <span class="comment">// take strong reference to controller</span>
-    FBKVOController *controller = info-&gt;_controller;
-    <span class="keyword">if</span> (<span class="literal">nil</span> != controller) {
-
-      <span class="comment">// take strong reference to observer</span>
-      <span class="keyword">id</span> observer = controller<span class="variable">.observer</span>;
-      <span class="keyword">if</span> (<span class="literal">nil</span> != observer) {
-
-        <span class="comment">// dispatch custom block or action, fall back to default action</span>
-        <span class="keyword">if</span> (info-&gt;_block) {
-          info-&gt;_block(observer, object, change);
-        } <span class="keyword">else</span> <span class="keyword">if</span> (info-&gt;_action) {
-<span class="preprocessor">#pragma clang diagnostic push</span>
-<span class="preprocessor">#pragma clang diagnostic ignored <span class="title">"-Warc-performSelector-leaks"</span></span>
-          [observer performSelector:info-&gt;_action withObject:change withObject:object];
-<span class="preprocessor">#pragma clang diagnostic pop</span>
-        } <span class="keyword">else</span> {
-          [observer observeValueForKeyPath:keyPath ofObject:object change:change context:info-&gt;_context];
-        }
-      }
-    }
-  }
-}
-</code></pre><ol>
-<li>根据context上下文获取对应的KVOInfo</li>
-<li>判断当前<code>info</code>的<code>observer</code>和<code>controller</code>，是否仍然存在（因为之前我们采用的weak持有）</li>
-<li>根据    <code>info</code>的<code>block</code>或者<code>selector</code>或者<code>override</code>进行消息转发。</li>
-</ol>
-<p>到这里，<code>FBKVOController</code>整体的实现就介绍完了，怎么样，是不是局部看自己都会实现，但是一结合起完整的设计思路，就觉得，不亏是Facebook呢。</p>
-<h3 id="NSMapTable">NSMapTable</h3><p>之前我们在前文中提到了<code>NSMapTable</code>，现在我们来详细介绍他一下。<br>我们在平常的开发中都使用过<code>NSDictionary</code>或者<code>NSMutableDictionary</code>，但是这两种数据结构有其的局限性。</p>
-<p>以<code>NSDictionary</code>为例，<code>NSDictionary</code>将<code>key</code>的<code>hash</code>值作为索引，存储对应的<code>value</code>。因此，<code>key</code>的要求是不能更改。所以，<code>NSDictionary</code>为了确保安全，对于<code>key</code>采用了<strong>copy</strong>的策略。</p>
-<p>默认情况下，支持<strong>NSCopying</strong>协议的类型都可以作为key。但是考虑到copy带来的开销，一般情况下我们都使用简单的诸如数字或者字符串作为key。</p>
-<p>那么，如果要使用<code>Object</code>作为key，想构建<strong>Object to Object</strong>的关系怎么办呢？这个时候就用到<code>NSMapTable</code>。我们可以通过NSFunctionsPointer来分别定义对key和value的储存关系，简单可以分类为<code>strong</code>,<code>weak</code>以及<code>copy</code>。而当利用<code>object</code>作为key的时候，可以定义评判相等的标准，如：<strong>use shifted pointer hash and direct equality, object description或者size</strong>。</p>
-<p>具体你需要去override如下几种方法：</p>
-<pre><code><span class="comment">// pointer personality functions</span>
-<span class="keyword">@property</span> (nullable) <span class="built_in">NSUInteger</span> (*hashFunction)(<span class="keyword">const</span> <span class="keyword">void</span> *item, <span class="built_in">NSUInteger</span> (* __nullable size)(<span class="keyword">const</span> <span class="keyword">void</span> *item));
-<span class="keyword">@property</span> (nullable) <span class="built_in">BOOL</span> (*isEqualFunction)(<span class="keyword">const</span> <span class="keyword">void</span> *item1, <span class="keyword">const</span> <span class="keyword">void</span>*item2, <span class="built_in">NSUInteger</span> (* __nullable size)(<span class="keyword">const</span> <span class="keyword">void</span> *item));
-<span class="keyword">@property</span> (nullable) <span class="built_in">NSUInteger</span> (*sizeFunction)(<span class="keyword">const</span> <span class="keyword">void</span> *item);
-<span class="keyword">@property</span> (nullable) <span class="built_in">NSString</span> * __nullable (*descriptionFunction)(<span class="keyword">const</span> <span class="keyword">void</span> *item);
-</code></pre><p>在<code>FBKVOController</code>自定义的可以作为key的结构<code>FBKVOInfo</code>，就复写了</p>
-<pre><code>- (<span class="type">NSUInteger</span>)hash
-{
-  <span class="keyword">return</span> [_keyPath hash];
-}
-
-- (<span class="type">BOOL</span>)isEqual:(id)<span class="class"><span class="keyword">object</span>
-</span>{
-  <span class="keyword">if</span> (nil == <span class="class"><span class="keyword">object</span>) {</span>
-    <span class="keyword">return</span> <span class="type">NO</span>;
-  }
-  <span class="keyword">if</span> (self == <span class="class"><span class="keyword">object</span>) {</span>
-    <span class="keyword">return</span> <span class="type">YES</span>;
-  }
-  <span class="keyword">if</span> (![<span class="class"><span class="keyword">object</span> <span class="title">isKindOfClass</span>:</span>[self <span class="class"><span class="keyword">class</span>]]) {</span>
-    <span class="keyword">return</span> <span class="type">NO</span>;
-  }
-  <span class="keyword">return</span> [_keyPath isEqualToString:((_FBKVOInfo *)<span class="class"><span class="keyword">object</span>)<span class="title">-&gt;_keyPath</span>];</span>
-}
-</code></pre>
-      
-    </div>
-    <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/02/27/FBKVOController/" data-id="cinpr798c001rami130nvleys" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/02/27/pod-install-plugin/" data-id="ciqgdluyz0003pzi1w22h8a38" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
@@ -1479,7 +1361,7 @@ fi
   <div class="widget-wrap">
     <h3 class="widget-title">Tags</h3>
     <div class="widget">
-      <ul class="tag-list"><li class="tag-list-item"><a class="tag-list-link" href="/tags/Android/">Android</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Growth/">Growth</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/JavaScript/">JavaScript</a><span class="tag-list-count">3</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Math/">Math</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/R/">R</a><span class="tag-list-count">2</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Reverse-Engineering/">Reverse Engineering</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Swift/">Swift</a><span class="tag-list-count">6</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/iOS/">iOS</a><span class="tag-list-count">15</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/shell/">shell</a><span class="tag-list-count">1</span></li></ul>
+      <ul class="tag-list"><li class="tag-list-item"><a class="tag-list-link" href="/tags/Android/">Android</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Growth/">Growth</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/JavaScript/">JavaScript</a><span class="tag-list-count">3</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Math/">Math</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/R/">R</a><span class="tag-list-count">2</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Reverse-Engineering/">Reverse Engineering</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Swift/">Swift</a><span class="tag-list-count">6</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/iOS/">iOS</a><span class="tag-list-count">15</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/iOS-基础知识/">iOS 基础知识</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/shell/">shell</a><span class="tag-list-count">1</span></li></ul>
     </div>
   </div>
 
@@ -1488,7 +1370,7 @@ fi
   <div class="widget-wrap">
     <h3 class="widget-title">Tag Cloud</h3>
     <div class="widget tagcloud">
-      <a href="/tags/Android/" style="font-size: 10px;">Android</a> <a href="/tags/Growth/" style="font-size: 10px;">Growth</a> <a href="/tags/JavaScript/" style="font-size: 15px;">JavaScript</a> <a href="/tags/Math/" style="font-size: 10px;">Math</a> <a href="/tags/R/" style="font-size: 12.5px;">R</a> <a href="/tags/Reverse-Engineering/" style="font-size: 10px;">Reverse Engineering</a> <a href="/tags/Swift/" style="font-size: 17.5px;">Swift</a> <a href="/tags/iOS/" style="font-size: 20px;">iOS</a> <a href="/tags/shell/" style="font-size: 10px;">shell</a>
+      <a href="/tags/Android/" style="font-size: 10px;">Android</a> <a href="/tags/Growth/" style="font-size: 10px;">Growth</a> <a href="/tags/JavaScript/" style="font-size: 15px;">JavaScript</a> <a href="/tags/Math/" style="font-size: 10px;">Math</a> <a href="/tags/R/" style="font-size: 12.5px;">R</a> <a href="/tags/Reverse-Engineering/" style="font-size: 10px;">Reverse Engineering</a> <a href="/tags/Swift/" style="font-size: 17.5px;">Swift</a> <a href="/tags/iOS/" style="font-size: 20px;">iOS</a> <a href="/tags/iOS-基础知识/" style="font-size: 10px;">iOS 基础知识</a> <a href="/tags/shell/" style="font-size: 10px;">shell</a>
     </div>
   </div>
 
@@ -1497,7 +1379,7 @@ fi
   <div class="widget-wrap">
     <h3 class="widget-title">Archives</h3>
     <div class="widget">
-      <ul class="archive-list"><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/05/">May 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/04/">April 2016</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/03/">March 2016</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/02/">February 2016</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/12/">December 2015</a><span class="archive-list-count">6</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/11/">November 2015</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/10/">October 2015</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/09/">September 2015</a><span class="archive-list-count">4</span></li></ul>
+      <ul class="archive-list"><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/07/">July 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/05/">May 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/04/">April 2016</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/03/">March 2016</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/02/">February 2016</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/12/">December 2015</a><span class="archive-list-count">6</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/11/">November 2015</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/10/">October 2015</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/09/">September 2015</a><span class="archive-list-count">4</span></li></ul>
     </div>
   </div>
 
@@ -1507,6 +1389,10 @@ fi
     <h3 class="widget-title">Recents</h3>
     <div class="widget">
       <ul>
+        
+          <li>
+            <a href="/2016/07/10/immutable-thread/">从Immutable来谈谈对于线程安全的理解误区</a>
+          </li>
         
           <li>
             <a href="/2016/05/02/Spotify/">为什么Spotify的付费用户转化率惊人的高？</a>
@@ -1522,10 +1408,6 @@ fi
         
           <li>
             <a href="/2016/03/22/dispatch-in-swift/">Swift 中的静态Dispatch VS 动态Dispatch</a>
-          </li>
-        
-          <li>
-            <a href="/2016/03/14/RxSwift/">RxSwift的第一印象</a>
           </li>
         
       </ul>

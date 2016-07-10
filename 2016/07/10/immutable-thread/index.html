@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  
+  <title>从Immutable来谈谈对于线程安全的理解误区 | Hexo</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+  <meta name="description" content="毫不夸张的说，80%的程序员对于多线程的理解都是浅陋和错误的。就拿我从事的iOS行业来说，虽然很多程序员可以对异步、GCD等等与线程相关的概念说的天花乱坠。但是实质上深挖本质的话，大多数人并不能很好的区分Race Condition，Atomic，Immutable对象在线程安全中真正起到的作用。
+所以今天就以这篇文章来谈谈我所理解的线程安全。
+首先就允许我从Immutable来开始整篇话题吧。">
+<meta property="og:type" content="article">
+<meta property="og:title" content="从Immutable来谈谈对于线程安全的理解误区">
+<meta property="og:url" content="http://satanwoo.github.io/2016/07/10/immutable-thread/index.html">
+<meta property="og:site_name" content="Hexo">
+<meta property="og:description" content="毫不夸张的说，80%的程序员对于多线程的理解都是浅陋和错误的。就拿我从事的iOS行业来说，虽然很多程序员可以对异步、GCD等等与线程相关的概念说的天花乱坠。但是实质上深挖本质的话，大多数人并不能很好的区分Race Condition，Atomic，Immutable对象在线程安全中真正起到的作用。
+所以今天就以这篇文章来谈谈我所理解的线程安全。
+首先就允许我从Immutable来开始整篇话题吧。">
+<meta property="og:updated_time" content="2016-07-10T09:06:37.000Z">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="从Immutable来谈谈对于线程安全的理解误区">
+<meta name="twitter:description" content="毫不夸张的说，80%的程序员对于多线程的理解都是浅陋和错误的。就拿我从事的iOS行业来说，虽然很多程序员可以对异步、GCD等等与线程相关的概念说的天花乱坠。但是实质上深挖本质的话，大多数人并不能很好的区分Race Condition，Atomic，Immutable对象在线程安全中真正起到的作用。
+所以今天就以这篇文章来谈谈我所理解的线程安全。
+首先就允许我从Immutable来开始整篇话题吧。">
+  
+    <link rel="alternative" href="/atom.xml" title="Hexo" type="application/atom+xml">
+  
+  
+    <link rel="icon" href="/favicon.png">
+  
+  <link rel="stylesheet" href="/css/style.css" type="text/css">
+  
+
+</head>
+<body>
+  <div id="container">
+    <div id="wrap">
+      <header id="header">
+  <div id="banner"></div>
+  <div id="header-outer" class="outer">
+    <div id="header-title" class="inner">
+      <h1 id="logo-wrap">
+        <a href="/" id="logo">Hexo</a>
+      </h1>
+      
+    </div>
+    <div id="header-inner" class="inner">
+      <nav id="main-nav">
+        <a id="main-nav-toggle" class="nav-icon"></a>
+        
+          <a class="main-nav-link" href="/">Home</a>
+        
+          <a class="main-nav-link" href="/archives">Archives</a>
+        
+          <a class="main-nav-link" href="/sitemap.xml">map</a>
+        
+      </nav>
+      <nav id="sub-nav">
+        
+          <a id="nav-rss-link" class="nav-icon" href="/atom.xml" title="RSS Feed"></a>
+        
+        <a id="nav-search-btn" class="nav-icon" title="Search"></a>
+      </nav>
+      <div id="search-form-wrap">
+        <form action="//google.com/search" method="get" accept-charset="UTF-8" class="search-form"><input type="search" name="q" results="0" class="search-form-input" placeholder="Search"><button type="submit" class="search-form-submit">&#xF002;</button><input type="hidden" name="sitesearch" value="http://satanwoo.github.io"></form>
+      </div>
+    </div>
+  </div>
+</header>
+      <div class="outer">
+        <section id="main"><article id="post-immutable-thread" class="article article-type-post" itemscope itemprop="blogPost">
+  <div class="article-meta">
+    <a href="/2016/07/10/immutable-thread/" class="article-date">
+  <time datetime="2016-07-10T09:03:47.000Z" itemprop="datePublished">2016-07-10</time>
+</a>
+    
+  </div>
+  <div class="article-inner">
+    
+    
+      <header class="article-header">
+        
+  
+    <h1 class="article-title" itemprop="name">
+      从Immutable来谈谈对于线程安全的理解误区
+    </h1>
+  
+
+      </header>
+    
+    <div class="article-entry" itemprop="articleBody">
+      
+        <p>毫不夸张的说，80%的程序员对于多线程的理解都是浅陋和错误的。就拿我从事的iOS行业来说，虽然很多程序员可以对异步、GCD等等与线程相关的概念说的天花乱坠。但是实质上深挖本质的话，大多数人并不能很好的区分Race Condition，Atomic，Immutable对象在线程安全中真正起到的作用。</p>
+<p>所以今天就以这篇文章来谈谈我所理解的线程安全。</p>
+<p>首先就允许我从Immutable来开始整篇话题吧。</p>
+<h3 id="Swift中的Immutable">Swift中的Immutable</h3><p>用过Swift的人都知道，Swift相较于Objective-C有一个比较明显的改动就是将结构体（Struct）和类型（Class）进行了分离。从某种方面来说，Swift将值类型和引用类型进行了明显的区分。为什么要这么做？</p>
+<ol>
+<li>避免了引用类型在被作为参数传递后被他人持有后修改，从而引发比较难以排查的问题。</li>
+<li>在某些程度上提供了一定的线程安全（因为多线程本身的问题很大程序上出在<strong>写修改</strong>的不确定性）。而Immutable 数据的好处在于一旦创建结束就无法修改，因此相当于任一一个线程在使用它的过程中仅仅是使用了读的功能。</li>
+</ol>
+<p>看到这，很多人开始欢呼了（嘲讽下WWDC那些“托”一般的粉丝，哈哈），觉得线程安全的问题迎刃而解了。（<strong>这里我可不是胡编乱造，众看官可以自己去看看，最近几年由于Immutable的活跃，您身边的同事或朋友是不是在谈及线程安全的时候张口闭口就会提及Immutable</strong>）。</p>
+<p>但事实上，我想说的是<strong>使用Immutable不直接等同于线程安全</strong>，不然在使用NSArray，NSDictionary等等Immutable对象之后，为啥还会有那么多奇怪的bug出现？</p>
+<h3 id="指针与对象">指针与对象</h3><p>有些朋友会问，Immutable都将一个对象变为不可变的“固态”了，为什么还是不安全呢，在各个线程间传递的只是一份只读文件啊。</p>
+<p>是的，对于一个Immutable的对象来说，它自身是不可变了。但是在我们的程序里，我们总是需要有“东西”去指向我们的对象的吧，那这个“东西”是什么？<strong>指向对象的指针</strong>。</p>
+<p>指针想必大家都不会陌生。对于指针来说，其实它本质也是一种对象，我们更改指针的指向的时候，实质上就是对于指针的一种赋值。所以想象这样一种场景，当你用一个指针指向一个Immutable对象的时候，在多线程更改的时候，你觉得你的指针修改是线程安全的吗？这也就是为什么有些人碰到一些跟<strong>NSArray</strong>这种Immutable对象的在多线程出现奇怪bug的时候会显得一脸懵逼。</p>
+<p>举例：  </p>
+<pre><code><span class="comment">// Thread A 其中immutableArrayA count 7</span>
+<span class="built_in">self</span><span class="built_in">.</span>xxx = <span class="built_in">self</span><span class="built_in">.</span>immutableArrayA;
+
+<span class="comment">// Thread B 其中immutableArrayB count 4</span>
+<span class="built_in">self</span><span class="built_in">.</span>xxx = <span class="built_in">self</span><span class="built_in">.</span>immutableArrayB 
+
+<span class="comment">// main Thread</span>
+<span class="preprocessor">[</span><span class="built_in">self</span><span class="built_in">.</span>xxx objectAtIndex:<span class="number">5</span><span class="preprocessor">]</span><span class="markup"></span>
+</code></pre><p>上述这个代码片段，绝对是存在线程的安全的隐患的。</p>
+<h3 id="锁">锁</h3><p>既然想到了多线程对于指针（或者对象）的修改，我们很理所当然的就会想到用锁。在现如今iOS博客泛滥的年代，大家都知道NSLock, OSSpinLock之类的可以用于短暂的Critical Section竞态的锁保护。</p>
+<p>所以对于一些多线程中需要使用共享数据源并支持修改操作的时候，比如NSMutableArray添加一些object的时候，我们可以写出如下代码：</p>
+<pre><code>OSSpinLock(&amp;_lock)<span class="comment">;</span>
+[self.array addObject:@"hahah"]<span class="comment">;</span>
+OSSpinUnlock(&amp;_lock)<span class="comment">;</span>
+</code></pre><p>乍一看，这个没问题了，这个就是最基本的写保护锁。如果有多个代码同时尝试添加进入<code>self.array</code>，是会通过锁抢占的方式一个一个的方式的添加。</p>
+<p>但是，这个东西有啥卵用吗？原子锁只能解决Race Condition的问题，但是它并不能解决任何你代码中需要有时序保证的逻辑。</p>
+<p>比如如下这段代码：</p>
+<pre><code>if (<span class="literal">self</span>.xxx) {
+    [<span class="literal">self</span>.dict <span class="built_in">set</span>Object:@<span class="string">"ah"</span> <span class="keyword">for</span>Key:<span class="literal">self</span>.xxx];
+}
+</code></pre><p>大家第一眼看到这样的代码，是不是会认为是正确的？因为在设置key的时候已经提前进行了<code>self.xxx</code>为<strong>非nil</strong>的判断，只有非nil得情况下才会执行后续的指令。<strong>但是，如上代码只有在单线程的前提下才是正确的。</strong></p>
+<p>假设我们将上述代码目前执行的线程为<code>Thread A</code>，当我们执行完<code>if (self.xxx)</code>的语句之后，此时CPU将执行权切换给了<code>Thread B</code>，而这个时候Thread B中调用了一句<strong><em><code>self.xxx = nil</code></em></strong>。<div style="color:red"><b>嘿嘿，后果如何，想必我不用多说了吧。</b></div></p>
+<p>那对于这种问题，我们有没有比较好的解决方案呢？答案是存在的，就是使用<strong>局部变量</strong>。<br>针对上述代码，我们进行如下修改：</p>
+<pre><code>__strong id <span class="function"><span class="keyword">val</span> =</span> self.xxx;
+<span class="keyword">if</span> (<span class="function"><span class="keyword">val</span>) {</span>
+    [self.dict setObject:@<span class="string">"ah"</span> forKey:<span class="function"><span class="keyword">val</span>];</span>
+}
+</code></pre><p>这样，无论多少线程尝试对<code>self.xxx</code>进行修改，本质上的<code>val</code>都会保持现有的状态，符合非nil的判断。</p>
+<h3 id="Objective-C的Property_Setter多线程并发bug">Objective-C的Property Setter多线程并发bug</h3><p>最后我们回到经常使用的Objective-C来谈谈现实生活中经常出现的问题。相信各位对于Property的Setter概念都不陌生，<code>self.xxx = @&quot;kks&quot;</code>其实就是调用了<code>xxx</code>的setter方法。而Setter方法本质上就是如下这样一段代码逻辑：</p>
+<pre><code>- (void)setXxx:(NSString *)newXXX {
+      if (newXXX != _xxx) {
+          [newXXX retain]<span class="comment">;</span>
+          [_xxx release]<span class="comment">;</span>
+          _userName = newXXX<span class="comment">;</span>
+      }
+}
+</code></pre><p>比如<strong>Thread A 和 B</strong>同时对<code>self.xxx</code>进行了赋值，当两者都越过了<code>if (newXXX != _xxx)</code>的判断的时候，就会产生<code>[_xxx release]</code>执行了两次，造成过度释放的crash危险。</p>
+<p>有人说，呵呵，你这是MRC时代的写法，我用了ARC，没问题了吧。</p>
+<p>ok，那让我们来看看ARC时代是怎么处理的，对于ARC中不复写Setter的属性（我相信是绝大多数情况），Objective-C的<a href="https://github.com/opensource-apple/objc4/blob/master/runtime/objc-accessors.mm" target="_blank" rel="external">底层源码</a>是这么处理的。</p>
+<pre><code><span class="keyword">static</span> <span class="keyword">inline</span> <span class="keyword">void</span> reallySetProperty(<span class="keyword">id</span> <span class="keyword">self</span>, SEL _cmd, <span class="keyword">id</span> newValue, 
+  ptrdiff_t offset, <span class="keyword">bool</span> atomic, <span class="keyword">bool</span> <span class="keyword">copy</span>, <span class="keyword">bool</span> mutableCopy) 
+{
+    <span class="keyword">id</span> oldValue;
+    <span class="comment">// 计算结构体中的偏移量</span>
+    <span class="keyword">id</span> *slot = (<span class="keyword">id</span>*) ((<span class="keyword">char</span>*)<span class="keyword">self</span> + offset);
+
+    <span class="keyword">if</span> (<span class="keyword">copy</span>) {
+        newValue = [newValue copyWithZone:<span class="literal">NULL</span>];
+    } <span class="keyword">else</span> <span class="keyword">if</span> (mutableCopy) {
+        newValue = [newValue mutableCopyWithZone:<span class="literal">NULL</span>];
+    } <span class="keyword">else</span> {
+        <span class="comment">// 某些程度的优化</span>
+        <span class="keyword">if</span> (*slot == newValue) <span class="keyword">return</span>;
+        newValue = objc_retain(newValue);
+    }
+
+    <span class="comment">// 危险区</span>
+    <span class="keyword">if</span> (!atomic) {
+         <span class="comment">// 第一步</span>
+        oldValue = *slot;
+
+        <span class="comment">// 第二步</span>
+        *slot = newValue;
+    } <span class="keyword">else</span> {
+        spin_lock_t *slotlock = &amp;PropertyLocks[GOODHASH(slot)];
+        _spin_lock(slotlock);
+        oldValue = *slot;
+        *slot = newValue;        
+        _spin_unlock(slotlock);
+    }
+
+    objc_release(oldValue);
+}
+</code></pre><p>由于我们一般声明的对象都是<strong>nonatomic</strong>，所以逻辑会走到上述注释<strong>危险区</strong>处。还是设想一下多线程对一个属性同时设置的情况，我们首先在线程A处获取到了执行第一步代码后的<strong>oldValue</strong>，然后此时线程切换到了B，B也获得了第一步后的oldValue，所以此时就有两处持有oldValue。然后无论是线程A或者线程B执行到最后都会执行<strong>objc_release(oldValue);</strong>。</p>
+<div style="color:red"><b>于是，重复释放的场景就出现了，crash在向你招手哦！</b></div>
+
+<p>如果不相信的话，可以尝试如下这个小例子：</p>
+<pre><code><span class="keyword">for</span> (<span class="keyword">int</span> i = <span class="number">0</span>; i &lt; <span class="number">10000</span>; i++) {
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, <span class="number">0</span>), ^{
+        self.data = [[NSMutableData alloc] init];
+    });
+}
+</code></pre><p>相信你很容易就能看到如下错误log：<strong>error for object: pointer being freed was not allocated</strong>。</p>
+<h3 id="结语">结语</h3><p>说了这么多，本质上线程安全是个一直存在并且相对来说是个比较困难的问题，没有绝对的银弹。用了Immutable不代表可以完全抛弃锁，用了锁也不代表高枕无忧了。希望这篇文章能够帮助大家更深入的思考下相关的问题，不要见到线程安全相关的问题就直接回答加锁、使用Immutable数据之类的。</p>
+<p><strong>当然，其实Stick To GCD (dispatch_barrier)是最好的解决方案。</strong></p>
+<p>本文写于头昏脑涨之中，写错之处请大神多多指出。</p>
+
+      
+    </div>
+    <footer class="article-footer">
+      <a data-url="http://satanwoo.github.io/2016/07/10/immutable-thread/" data-id="ciqgdluzb0005pzi1vajuknow" class="article-share-link">Share</a>
+      
+      
+  <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS-基础知识/">iOS 基础知识</a></li></ul>
+
+    </footer>
+  </div>
+  
+    
+<nav id="article-nav">
+  
+  
+    <a href="/2016/05/02/Spotify/" id="article-nav-older" class="article-nav-link-wrap">
+      <strong class="article-nav-caption">Older</strong>
+      <div class="article-nav-title">为什么Spotify的付费用户转化率惊人的高？</div>
+    </a>
+  
+</nav>
+
+  
+</article>
+
+
+<section id="comments">
+  <!-- 多说评论框 start -->
+  <div class="ds-thread" data-thread-key="post-immutable-thread" data-title="从Immutable来谈谈对于线程安全的理解误区" data-url="http://satanwoo.github.io/2016/07/10/immutable-thread/"></div>
+  <!-- 多说评论框 end -->
+  <!-- 多说公共JS代码 start (一个网页只需插入一次) -->
+  <script type="text/javascript">
+  var duoshuoQuery = {short_name:'satanwoo'};
+    (function() {
+      var ds = document.createElement('script');
+      ds.type = 'text/javascript';ds.async = true;
+      ds.src = (document.location.protocol == 'https:' ? 'https:' : 'http:') + '//static.duoshuo.com/embed.js';
+      ds.charset = 'UTF-8';
+      (document.getElementsByTagName('head')[0] 
+       || document.getElementsByTagName('body')[0]).appendChild(ds);
+    })();
+    </script>
+  <!-- 多说公共JS代码 end -->
+</section>
+</section>
+        
+          <aside id="sidebar">
+  
+    
+  
+    
+  <div class="widget-wrap">
+    <h3 class="widget-title">Tags</h3>
+    <div class="widget">
+      <ul class="tag-list"><li class="tag-list-item"><a class="tag-list-link" href="/tags/Android/">Android</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Growth/">Growth</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/JavaScript/">JavaScript</a><span class="tag-list-count">3</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Math/">Math</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/R/">R</a><span class="tag-list-count">2</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Reverse-Engineering/">Reverse Engineering</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Swift/">Swift</a><span class="tag-list-count">6</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/iOS/">iOS</a><span class="tag-list-count">15</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/iOS-基础知识/">iOS 基础知识</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/shell/">shell</a><span class="tag-list-count">1</span></li></ul>
+    </div>
+  </div>
+
+  
+    
+  <div class="widget-wrap">
+    <h3 class="widget-title">Tag Cloud</h3>
+    <div class="widget tagcloud">
+      <a href="/tags/Android/" style="font-size: 10px;">Android</a> <a href="/tags/Growth/" style="font-size: 10px;">Growth</a> <a href="/tags/JavaScript/" style="font-size: 15px;">JavaScript</a> <a href="/tags/Math/" style="font-size: 10px;">Math</a> <a href="/tags/R/" style="font-size: 12.5px;">R</a> <a href="/tags/Reverse-Engineering/" style="font-size: 10px;">Reverse Engineering</a> <a href="/tags/Swift/" style="font-size: 17.5px;">Swift</a> <a href="/tags/iOS/" style="font-size: 20px;">iOS</a> <a href="/tags/iOS-基础知识/" style="font-size: 10px;">iOS 基础知识</a> <a href="/tags/shell/" style="font-size: 10px;">shell</a>
+    </div>
+  </div>
+
+  
+    
+  <div class="widget-wrap">
+    <h3 class="widget-title">Archives</h3>
+    <div class="widget">
+      <ul class="archive-list"><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/07/">July 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/05/">May 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/04/">April 2016</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/03/">March 2016</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/02/">February 2016</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/12/">December 2015</a><span class="archive-list-count">6</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/11/">November 2015</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/10/">October 2015</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/09/">September 2015</a><span class="archive-list-count">4</span></li></ul>
+    </div>
+  </div>
+
+  
+    
+  <div class="widget-wrap">
+    <h3 class="widget-title">Recents</h3>
+    <div class="widget">
+      <ul>
+        
+          <li>
+            <a href="/2016/07/10/immutable-thread/">从Immutable来谈谈对于线程安全的理解误区</a>
+          </li>
+        
+          <li>
+            <a href="/2016/05/02/Spotify/">为什么Spotify的付费用户转化率惊人的高？</a>
+          </li>
+        
+          <li>
+            <a href="/2016/04/26/blank-space-in-html/">HTML中的“空白符”，你真的懂了吗？</a>
+          </li>
+        
+          <li>
+            <a href="/2016/04/11/dispatch-once/">滥用单例之dispatch_once死锁</a>
+          </li>
+        
+          <li>
+            <a href="/2016/03/22/dispatch-in-swift/">Swift 中的静态Dispatch VS 动态Dispatch</a>
+          </li>
+        
+      </ul>
+    </div>
+  </div>
+
+  
+</aside>
+        
+      </div>
+      <footer id="footer">
+  
+  <div class="outer">
+    <div id="footer-info" class="inner">
+      &copy; 2016 John Doe<br>
+      Powered by <a href="http://hexo.io/" target="_blank">Hexo</a>
+    </div>
+  </div>
+</footer>
+    </div>
+    <nav id="mobile-nav">
+  
+    <a href="/" class="mobile-nav-link">Home</a>
+  
+    <a href="/archives" class="mobile-nav-link">Archives</a>
+  
+    <a href="/sitemap.xml" class="mobile-nav-link">map</a>
+  
+</nav>
+    
+
+
+  <link rel="stylesheet" href="/fancybox/jquery.fancybox.css" type="text/css">
+  <script src="/fancybox/jquery.fancybox.pack.js" type="text/javascript"></script>
+
+
+<script src="/js/script.js" type="text/javascript"></script>
+
+  </div>
+</body>
+</html>
