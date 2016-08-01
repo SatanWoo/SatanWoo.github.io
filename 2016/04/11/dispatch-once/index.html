@@ -19,7 +19,7 @@ Application Specific Information:
 com.xxx.yyy failed to scene-create in time
 
 Elapsed total CPU t">
-<meta property="og:updated_time" content="2016-04-10T16:47:18.000Z">
+<meta property="og:updated_time" content="2016-08-01T15:10:52.000Z">
 <meta name="twitter:card" content="summary">
 <meta name="twitter:title" content="滥用单例之dispatch_once死锁">
 <meta name="twitter:description" content="现象上周排查了一个bug，现象很简单，就是个Crash问题。但是读了一下crash Log以后，却发现堆栈报的错误信息却是第一次见到（吹牛的说，我在国内的iOS也能算第十二人了），包含以下还未符号化信息：
@@ -277,7 +277,7 @@ Elapsed application CPU <span class="keyword">time</span> (seconds): <span class
 <ol>
 <li><code>dispatch_once</code>并不是简单的只执行一次那么简单</li>
 <li><code>dispatch_once</code>本质上可以接受多次请求，会对此维护一个请求链表</li>
-<li>如果在block执行期间，多次进入调用同类的<code>dispatch_once</code>函数（即单例函数），会导致整体链表无限增长，造成永久性死锁。</li>
+<li>如果在block执行期间，多次进入调用同类的<code>dispatch_once</code>函数（即单例函数），会导致整体链表无限增长，造成永久性死锁。(<strong>其实只要进入两次就完蛋，其原因在于<code>block_invoke</code>的完成依赖于第二次进入的请求的完成，而第二次请求的完成又必须依赖之前信号量的出发。可是第一次block不结束，信号量压根不会触发</strong>)</li>
 </ol>
 <h3 id="备注">备注</h3><ol>
 <li>根据以上分析，相对应地写了一个简易的死锁Demo，就是在两个单例的初始化调用中直接相互调用。A&lt;-&gt;B。也许这个Demo过于简单，大家轻易不会犯。但是如果是A-&gt;B-&gt;C-&gt;A，甚至是更多个模块的相互引用，那又该如何轻易避免呢？</li>
@@ -297,7 +297,7 @@ Elapsed application CPU <span class="keyword">time</span> (seconds): <span class
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/04/11/dispatch-once/" data-id="ciqgdwokg000ay5i1oynbw17y" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/04/11/dispatch-once/" data-id="circ6b3po000alpi1ig1uam4w" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
