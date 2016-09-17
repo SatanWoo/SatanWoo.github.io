@@ -4,7 +4,7 @@
   
   <link href="/atom.xml" rel="self"/>
   <link href="http://satanwoo.github.io/"/>
-  <updated>2016-07-10T09:08:26.000Z</updated>
+  <updated>2016-09-17T14:53:57.000Z</updated>
   <id>http://satanwoo.github.io/</id>
   
   <author>
@@ -13,6 +13,117 @@
   </author>
   
   <generator uri="http://hexo.io/">Hexo</generator>
+  
+  <entry>
+    <title><![CDATA[浅谈iOS的多Window处理]]></title>
+    <link href="http://satanwoo.github.io/2016/09/17/uiwindow-iOS/"/>
+    <id>http://satanwoo.github.io/2016/09/17/uiwindow-iOS/</id>
+    <published>2016-09-17T14:51:46.000Z</published>
+    <updated>2016-09-17T14:53:57.000Z</updated>
+    <content type="html"><![CDATA[<h3 id="概述">概述</h3><p>想必做iOS的人都知道，我们的App是通过UIWindow这个载体呈现出来的。默认情况下，iOS App对于开发者来说只有一个<code>UIWindow</code>，也就是AppDelegate在<code>applicationDidFinishLaunching</code>里面创建出来的。</p>
+<p>但是即使我们什么都不做，在我们的APP里面也会有其他的<code>UIWindow</code>:</p>
+<ol>
+<li>键盘对应的UITextEffectWindow</li>
+<li>状态栏对应的UIStatusBarWindow</li>
+</ol>
+<p>只不过上述两种<code>UIWindow</code>我们一般不太容易去操作罢了，因此很多问题都无形被掩盖住了。所以接下来我们就说说如果在多个UIWindow状态下存在的一些问题吧。</p>
+<p>那么在什么情况下会导致我们想要创建多<code>UIWindow</code>的状态呢？我总结了一下，包括但不限于：</p>
+<ol>
+<li>全局性的自定义HUD，Alert效果（SCAlert）等等。</li>
+<li>需要展示的界面需要盖住UIStatusBar。</li>
+</ol>
+<p>其中，第一种方案其实不一定需要创建一个新的<code>UIWindow</code>实例，我们也可以将这些自定义的全局性界面添加到AppDelegate的window上。但是这样就会产生一个问题，由于在<strong>iOS8之前</strong>，UIWindow的bounds是不会随着旋转而改变的，拿到的永远是处于<strong>Portrait</strong>模式下的坐标系坐标。因此，<b>对于直接添加在UIWindow上的视图，我们需要自己根据  <code>UIApplicationDidChangeStatusBarOrientationNotification</code>来进行转换处理。</b></p>
+<p>苹果这篇<a href="https://developer.apple.com/library/content/qa/qa1688/_index.html" target="_blank" rel="external">Q&amp;A</a>讲述了比较具体的原因：<b style="color:red">UIWindow并不会处理rotation事件，而是UIWindow的rootViewController去处理。</b></p>
+<p>而对于第二种问题，添加一个盖在UIStatusBar上的界面，就必须依赖我们自己创建一个新的UIWindow，究其原因在于UIStatusBar本身并不属于我们App内可控的一个控件，而是一个系统级创建出来的产物。<br>因此，<strong>我们必须创建一个WindowLevel大于UIWindowStatusBar的新Window盖在上面才行。</strong></p>
+<p>有人会问：咦，奇怪了，为什么你在自己App内添加一个WindowLevel大于statusbar的就可以了呢？你只是在你自身应用内添加了一个UIView（UIWindow的子类），竟然能影响系统级的控件？</p>
+<p><b style="color:red">是的，不知道大家有没有了解过<code>CALayer</code>这层有个属性叫zIndex。通过操纵这个属性，我们可以调整视图渲染的前后关系。即使有的UIView在构建<span style="color:black">层级树</span>的时候被后加的UIView所遮盖，但是在构建<span style="color:black">渲染树</span>的时候，zIndex越高的视图就会越处于视觉前方进行渲染。 而渲染树构建完成之后，并不是在我们的App内部进行渲染，而是通过IPC通信，统一交由一个第三方进程<span style="color:black">Render Server</span>进行渲染。而在我们这里处理盖住StatusBar的多Window的情形也是基于这个原理进行。</b></p>
+<h3 id="横屏及旋转">横屏及旋转</h3><p>现在绝大多数的iPhone应用都是竖屏应用，即只支持<strong>Portrait</strong>模式。但是随着视频、直播的风口到来，在新闻、购物等等APP内都会插入视频播放这一特性，而视频播放需要的全屏播放特性势必要用到横屏，也就意味着会牵扯到旋转。</p>
+<p>横屏旋转分为两种，一种是强制性的，一种是随着设备进行旋转的。什么意思呢？<br>大家还记得手机上有旋转锁这一个开关吧，你将旋转锁开启的时候，手机就保持在锁定对应的模式下，无法自动根据你旋转设备而旋转。在这种模式下，如果你需要更改APP界面对应的UIInterfaceOrientation，就必须要么在对应的<strong>viewcontroller</strong>里面提供实现如下的方法：</p>
+<pre><code>- (<span class="built_in">NSUInteger</span>)supportedInterfaceOrientations
+{
+    <span class="keyword">return</span> <span class="built_in">UIInterfaceOrientationMaskLandscapeRight</span>; <span class="comment">// 表示支持水平右方向</span>
+}
+
+- (<span class="built_in">BOOL</span>)shouldAutorotate
+{
+    <span class="keyword">return</span> <span class="literal">YES</span>;
+}
+</code></pre><p>这样，当你展现到这个页面的时候，就会触发系统检查一下当前页面应该所处的Orientation，从而达到正确的显示效果。</p>
+<p><strong>但需要注意的是，如果你的界面是处于一个UINavigationController或者UITabbarController内的话，你就需要从父容器开始，写对应的<code>supportedInterfaceOrientations</code>实现，否则就无法得到正确的效果。</strong></p>
+<p>PS: <strong><i>其实这个道理和<code>hideBottomBarWhenPushed</code>是一个道理。很多人用了这个属性，发现隐藏Tabbar的时机经常错乱了</i></strong>，这个就在于没有仔细阅读文档，需要在整个导航栈里面的topmostViewController提供正确的属性设置才行。</p>
+<blockquote>
+<p>The value of this property on the topmost view controller determines whether the toolbar is visible. If the value of this property is true, the toolbar is hidden. If the value of this property is false, the bar is visible</p>
+</blockquote>
+<p>或者你可以将你需要横屏的ViewController通过present的形势展现出来（有人觉得会狠突兀，那你自己实现专场动画过渡就可以了）。<strong>不过呢，这种实现方式会有一个超级大坑，待会我们细细说。</strong></p>
+<p>上面这种就是强制性的。</p>
+<p>而自动旋转的就是打开旋转锁，让界面随着<strong>设备的旋转而进行旋转</strong>，这种旋转是物理特性的，非强制性的。</p>
+<p>Q: 那么这两种旋转的区别在哪？<br>A: <strong>UIInterfaceOrientation（UIStatusBar的所处方向）和UIDeviceOrientation</strong>是否一致。</p>
+<p>Q: 那么有什么问题呢？<br>A: 在iOS8之后，UIScreen的bounds是随着物理设备的旋转而更改的。如果你需要获取iOS8之前的bounds效果，需要使用<strong>nativeBounds</strong>。但是要记得，nativeBounds是像素级别的，你需要换算到对应的point单位来，所以关系是：</p>
+<pre><code>bounds<span class="list">( <span class="keyword">&lt;</span> iOS8.<span class="number">0</span>)</span> = nativeBounds / nativeScale<span class="comment">;</span>
+</code></pre><p>大家可以参考苹果的<a href="https://developer.apple.com/reference/uikit/uiscreen/1617838-bounds" target="_blank" rel="external">文档</a>来更确切的掌握一下。</p>
+<h3 id="坑">坑</h3><p>上面的内容我们曾经提及在采用多<code>UIWindow</code>时候的几个大坑，如果你现在有自定义的界面，想要添加到除了<code>delegate window</code>之外的window，可能会遇到如下几个问题。</p>
+<h4 id="直接将自定义的视图作为Subview添加到UIWindow上">直接将自定义的视图作为Subview添加到UIWindow上</h4><p>从理论上来说UIWindow继承于UIView，这种直接用法在认知上没有任何的问题。但是如果涉及的应用牵扯到横屏模式而且又要支持iOS7的话（我相信现在没有哪个产品还需要支持iOS6）吧，那么针对iOS7需要单独处理横屏的坐标系转换。我们摘录一段著名的开源库<strong>MBProgressHUD</strong>的代码作为示例：</p>
+<pre><code><span class="preprocessor">#if __IPHONE_OS_VERSION_MIN_REQUIRED <span class="title">&lt; 80000
+    // Only needed pre iOS 8 when added to a window
+    BOOL iOS8OrLater = kCFCoreFoundationVersionNumber &gt;</span>= kCFCoreFoundationVersionNumber_iOS_8_0;</span>
+    <span class="keyword">if</span> (iOS8OrLater || ![<span class="keyword">self</span><span class="variable">.superview</span> isKindOfClass:[<span class="built_in">UIWindow</span> class]]) <span class="keyword">return</span>;
+
+    <span class="comment">// Make extension friendly. Will not get called on extensions (iOS 8+) due to the above check.</span>
+    <span class="comment">// This just ensures we don't get a warning about extension-unsafe API.</span>
+    Class <span class="built_in">UIApplicationClass</span> = <span class="built_in">NSClassFromString</span>(<span class="string">@"UIApplication"</span>);
+    <span class="keyword">if</span> (!<span class="built_in">UIApplicationClass</span> || ![<span class="built_in">UIApplicationClass</span> respondsToSelector:<span class="keyword">@selector</span>(sharedApplication)]) <span class="keyword">return</span>;
+
+    <span class="built_in">UIApplication</span> *application = [<span class="built_in">UIApplication</span> performSelector:<span class="keyword">@selector</span>(sharedApplication)];
+    <span class="built_in">UIInterfaceOrientation</span> orientation = application<span class="variable">.statusBarOrientation</span>;
+    <span class="built_in">CGFloat</span> radians = <span class="number">0</span>;
+
+    <span class="keyword">if</span> (<span class="built_in">UIInterfaceOrientationIsLandscape</span>(orientation)) {
+        radians = orientation == <span class="built_in">UIInterfaceOrientationLandscapeLeft</span> ? -(<span class="built_in">CGFloat</span>)M_PI_2 : (<span class="built_in">CGFloat</span>)M_PI_2;
+        <span class="comment">// Window coordinates differ!</span>
+        <span class="keyword">self</span><span class="variable">.bounds</span> = <span class="built_in">CGRectMake</span>(<span class="number">0</span>, <span class="number">0</span>, <span class="keyword">self</span><span class="variable">.bounds</span><span class="variable">.size</span><span class="variable">.height</span>, <span class="keyword">self</span><span class="variable">.bounds</span><span class="variable">.size</span><span class="variable">.width</span>);
+    } <span class="keyword">else</span> {
+        radians = orientation == <span class="built_in">UIInterfaceOrientationPortraitUpsideDown</span> ? (<span class="built_in">CGFloat</span>)M_PI : <span class="number">0.</span>f;
+    }
+
+        <span class="keyword">self</span><span class="variable">.transform</span> = <span class="built_in">CGAffineTransformMakeRotation</span>(radians);
+<span class="preprocessor">#endif</span>
+</code></pre><h4 id="通过rootViewController的view添加子视图">通过rootViewController的view添加子视图</h4><p>这种方式就是通过将<code>window.rootViewController = vc</code>，然后我们所有的子视图都添加到<code>vc.view</code>。</p>
+<p>这种使用的好处是我们无需去考虑版本兼容的问题，通过vc.view拿到的坐标系对于我们来说都是和<strong>UIInterfaceOrientation</strong>正确转换过的。</p>
+<p>在iOS7之前，坐标系的转换是系统通过设置<code>vc.transform</code>更改；而在iOS8之后，vc和window的旋转会根据<strong>UIDeviceOrientation</strong>和viewcontroller自身<code>supportedInterfaceOrientations</code>进行<strong>交集</strong>的操作。</p>
+<p>总之，<strong>需要支持横屏的自定义界面，全部放在viewcontroller.view上来做，是准没错的。</strong></p>
+<p>而且，在iOS9以后，苹果推荐每个<code>UIWindow</code>都必须有一个rootViewController。否则<span style="color:red">在启动过程使用了不包含rootViewController的UIWindow中会导致必现的crash</span>。</p>
+<h4 id="presentViewController的大坑">presentViewController的大坑</h4><p>我们前面提过，如果想要让viewcontroller单独横屏有两种方式。</p>
+<blockquote>
+<ol>
+<li><p>如果你的界面是处于一个UINavigationController或者UITabbarController内的话，你就需要从父容器开始，写对应的<code>supportedInterfaceOrientations</code>实现，否则就无法得到正确的效果。</p>
+</li>
+<li><p>或者你可以将你需要横屏的ViewController通过present的形势展现出来</p>
+</li>
+</ol>
+</blockquote>
+<p>第二种方案在实现过程中，会产生一个非常隐晦的大坑，容我慢慢道来。<br>首先我们需要了解下整体响应旋转变化的事件流程，简单来说如下：</p>
+<pre><code><span class="constant">UIScreen </span>-&gt; <span class="constant">UIWindow </span>-&gt; <span class="constant">UIViewController </span>-&gt; <span class="constant">ChildViewControllers </span>-&gt; <span class="constant">View </span>-&gt; <span class="constant">Subviews</span>
+</code></pre><p>其中，UIWindow对应的处理方法是：<code>supportedInterfaceOrientationsForWindow</code>；而UIViewController对应的处理方法是<code>supportedInterfaceOrientations</code>。</p>
+<p>也就是说，当系统通过这个流程向我们请求界面的UIInterfaceOrientation的时候，我们必须确保我们能够提供正确的返回参数。</p>
+<p>而这个流程在使用<code>presentViewController</code>弹出<strong>modalViewController</strong>会产生一些问题：即当你想从<strong>modalViewController</strong> 返回（dismiss）原先的界面的时候，你会发现虽然原先界面强制设置了portrait模式，但是如果<strong>设备锁关闭且设备仍然处于水平状态</strong>，那么此时的UIInterfaceOrientation，仍然是不准确的。</p>
+<p>其原因在于：当你想要dismiss的时候，系统的确发起了一次新的请求流程。但是此时，modalViewController正处于dismissing的状态中，请求到的<code>supportedInterfaceOrientations</code>还是针对modalViewController的。所以，如果你的modalViewController是横屏模式，那么返回后的效果就是横屏模式，除非你人为的旋转一下设备，让其回到竖直方向。</p>
+<p>Q: 那么这种问题有没有解决办法呢？<br>A: 你可以在<code>supportedInterfaceOrientations</code>里面判断下当前的viewcontroller是不是处于<strong>isBeingDismissed</strong>，如果是的话，取其<strong>presentingViewController</strong>的<code>supportedInterfaceOrientations</code>作为返回值。</p>
+<p>Q: 有些同学会问，我们怎么从来没遇到过这个问题？<br>A: 那是因为你们使用的<code>UIWindow</code> 99%的可能都是默认的<code>delegate window</code>，对于这个window，所有的旋转事件都自动帮你校准了，因此无需担忧。</p>
+<h3 id="参考资料">参考资料</h3><ol>
+<li><a href="https://jkyin.me/uiwindow/" target="_blank" rel="external">UIWindow in iOS</a></li>
+<li><a href="http://stackoverflow.com/questions/8598315/after-rotation-uiview-coordinates-are-swapped-but-uiwindows-are-not" target="_blank" rel="external">After rotation UIView coordinates are swapped but UIWindow’s are not?</a></li>
+<li><a href="http://chun.tips/blog/2014/10/23/xiang-jie-uicoordinatespacehe-uiscreenzai-ios-8shang-de-zuo-biao-wen-ti/" target="_blank" rel="external">详解UICoordinateSpace和UIScreen在iOS 8上的坐标问题</a></li>
+<li><a href="http://stackoverflow.com/questions/25391564/ios-7-dismiss-modal-view-controller-and-force-portrait-orientation" target="_blank" rel="external">iOS 7+ Dismiss Modal View Controller and Force Portrait Orientation</a></li>
+<li><a href="http://swiftiostutorials.com/ios-orientations-landscape-orientation-one-view-controller/" target="_blank" rel="external">iOS Orientations: Landscape orientation for only one View Controller</a></li>
+</ol>
+]]></content>
+    <summary type="html">
+    <![CDATA[<h3 id="概述">概述</h3><p>想必做iOS的人都知道，我们的App是通过UIWindow这个载体呈现出来的。默认情况下，iOS App对于开发者来说只有一个<code>UIWindow</code>，也就是AppDelegate在<code>applicationD]]>
+    </summary>
+    
+      <category term="iOS" scheme="http://satanwoo.github.io/tags/iOS/"/>
+    
+  </entry>
   
   <entry>
     <title><![CDATA[从Immutable来谈谈对于线程安全的理解误区]]></title>
@@ -298,7 +409,7 @@ OSSpinUnlock(&amp;_lock)<span class="comment">;</span>
     <link href="http://satanwoo.github.io/2016/04/11/dispatch-once/"/>
     <id>http://satanwoo.github.io/2016/04/11/dispatch-once/</id>
     <published>2016-04-10T16:41:09.000Z</published>
-    <updated>2016-08-01T15:10:52.000Z</updated>
+    <updated>2016-08-01T15:11:45.000Z</updated>
     <content type="html"><![CDATA[<h3 id="现象">现象</h3><p>上周排查了一个bug，现象很简单，就是个Crash问题。但是读了一下crash Log以后，却发现堆栈报的错误信息却是第一次见到（<strong>吹牛的说，我在国内的iOS也能算第十二人了</strong>），包含以下还未符号化信息：</p>
 <pre><code>Application Specific Information:
 com.xxx.yyy failed to scene-<span class="operator"><span class="keyword">create</span> <span class="keyword">in</span> <span class="keyword">time</span>
@@ -2570,210 +2681,6 @@ TBBoundingBox TBBoundingBoxMake(<span class="built_in">double</span> x0, <span c
     <summary type="html">
     <![CDATA[<p>毕设这两天飞一般的加速，终于可以写写源码解析了，嘿嘿，这周读两个跟性能相关的源码，首先是一个跟地图相关的，今天来看看一个数据结构在iOS开发中的妙用。</p>
 <h3 id="TBAnnotationClustering">TBAnnotationClustering</h]]>
-    </summary>
-    
-      <category term="iOS" scheme="http://satanwoo.github.io/tags/iOS/"/>
-    
-  </entry>
-  
-  <entry>
-    <title><![CDATA[FDFullScreenPopGesture源码解析]]></title>
-    <link href="http://satanwoo.github.io/2015/11/26/FDFullScreenPopGesture-Source-Code/"/>
-    <id>http://satanwoo.github.io/2015/11/26/FDFullScreenPopGesture-Source-Code/</id>
-    <published>2015-11-26T03:38:42.000Z</published>
-    <updated>2015-11-26T18:24:34.000Z</updated>
-    <content type="html"><![CDATA[<p><em>嘿嘿，花了三天时间把自己的代码从700行缩减成了200行，终于有时间可以拜读新源码了，好开心。</em></p>
-<p>好了，废话不多话，今天我们要读了百度出品的一个开源项目FDFullScreenPopGesture。</p>
-<h2 id="项目介绍">项目介绍</h2><p><a href="https://github.com/forkingdog/FDFullscreenPopGesture" target="_blank" rel="external">FDFullScreenPopGesture</a>是一款无需改动即可整合进入现有项目的全局手势操作，使用这个即可以在左侧边缘拖拽的时候返回上一级的效果。</p>
-<p>看到这，有人会问，我们这个直接用UIPanGestureRecognizer不也能达到吗？<br>没错，仅仅是返回上一级这个需求确实很简单。但是iOS7上返回上一级时候，UINavigationBar的切换效果你能实现吗？</p>
-<p>而且，我要说的重点是<strong>FDFullscreenPopGesture</strong>实现思路很赞！！！</p>
-<h2 id="源码分析">源码分析</h2><h3 id="结构分析">结构分析</h3><p>整个FDFullscreenPopGesture其实可以主要拆分成三块：</p>
-<pre><code>-<span class="ruby">- _FDFullscreenPopGestureRecognizerDelegate
-</span>-<span class="ruby">- <span class="constant">UIViewController</span> (<span class="constant">FDFullscreenPopGesturePrivate</span>)
-</span>-<span class="ruby">- <span class="constant">UINavigationController</span> (<span class="constant">FDFullscreenPopGesture</span>)</span>
-</code></pre><ul>
-<li><p>_FDFullscreenPopGestureRecognizerDelegate虽然名字看起来像一个Protocol，但是它实质上是一个<strong>NSObject</strong>子类，同时实现了<strong>UIGestureRecognizerDelegate</strong>。这么做的好处是什么呢？不知道大家有没有经历过ViewController重构，以前很多时候，比如我们写UIScrollView，UITableView，他们的Delegate，DataSource都耦合进了ViewController，常常导致MassViewController灾难的发生。<strong>单独构建一个专门负责的Delgeate“处理器”是非常有效的手段</strong></p>
-</li>
-<li><p>UIViewController (FDFullscreenPopGesturePrivate)是一个Category，我们在这个分类里面主要进行<strong>viewWillAppear</strong>的Hook，具体做什么，后面章节我们细细道来。</p>
-</li>
-<li><p>UINavigationController (FDFullscreenPopGesture)也是一个分类，是进行<strong>pushViewController:animated:</strong>方法的hook，实现部分我们后续再看。</p>
-</li>
-</ul>
-<h3 id="源码分析-1">源码分析</h3><h4 id="_FDFullscreenPopGestureRecognizerDelegate">_FDFullscreenPopGestureRecognizerDelegate</h4><pre><code>- (<span class="built_in">BOOL</span>)gestureRecognizerShouldBegin:(<span class="built_in">UIPanGestureRecognizer</span> *)gestureRecognizer
-{
-    <span class="comment">// 1.</span>
-    <span class="keyword">if</span> (<span class="keyword">self</span><span class="variable">.navigationController</span><span class="variable">.viewControllers</span><span class="variable">.count</span> &lt;= <span class="number">1</span>) {
-        <span class="keyword">return</span> <span class="literal">NO</span>;
-    }
-
-    <span class="comment">// 2.</span>
-    <span class="built_in">UIViewController</span> *topViewController = <span class="keyword">self</span><span class="variable">.navigationController</span><span class="variable">.viewControllers</span><span class="variable">.lastObject</span>;
-    <span class="keyword">if</span> (topViewController<span class="variable">.fd_interactivePopDisabled</span>) {
-        <span class="keyword">return</span> <span class="literal">NO</span>;
-    }
-
-    <span class="comment">// 3. </span>
-    <span class="built_in">CGPoint</span> beginningLocation = [gestureRecognizer locationInView:gestureRecognizer<span class="variable">.view</span>];
-    <span class="built_in">CGFloat</span> maxAllowedInitialDistance = topViewController<span class="variable">.fd_interactivePopMaxAllowedInitialDistanceToLeftEdge</span>;
-    <span class="keyword">if</span> (maxAllowedInitialDistance &gt; <span class="number">0</span> &amp;&amp; beginningLocation<span class="variable">.x</span> &gt; maxAllowedInitialDistance) {
-        <span class="keyword">return</span> <span class="literal">NO</span>;
-    }
-
-    <span class="comment">// 4.</span>
-    <span class="keyword">if</span> ([[<span class="keyword">self</span><span class="variable">.navigationController</span> valueForKey:<span class="string">@"_isTransitioning"</span>] boolValue]) {
-        <span class="keyword">return</span> <span class="literal">NO</span>;
-    }
-
-    <span class="comment">// 5.</span>
-    <span class="built_in">CGPoint</span> translation = [gestureRecognizer translationInView:gestureRecognizer<span class="variable">.view</span>];
-    <span class="keyword">if</span> (translation<span class="variable">.x</span> &lt;= <span class="number">0</span>) {
-        <span class="keyword">return</span> <span class="literal">NO</span>;
-    }
-
-    <span class="keyword">return</span> <span class="literal">YES</span>;
-}
-</code></pre><p>整个类特别精简，它的职责就是维护一个UINavigationController然后根据一系列的状态判断该手势是否生效。这些状态包括</p>
-<ol>
-<li>当前UINavigationController的栈是否只剩最后一个ViewController了</li>
-<li>当前即将出栈的topViewController是否禁用了<strong>fd_interactivePopDisabled</strong>，该变量我们稍后会说</li>
-<li>当前手势的启动点是不是离左侧边缘太远了，毕竟我们是要模拟iOS原生的手势操作，原生的不支持全屏，我们为啥要支持！</li>
-<li>当前是否已经处在转场过程中。在这里，可以看到它使用了valueForKey这一<strong>Key-Value-Coding</strong>技术，它可以访问私有变量<strong>_isTransitioning</strong>哦！</li>
-<li>方向相反的滑动滚粗。</li>
-</ol>
-<h4 id="UIViewController_(FDFullscreenPopGesturePrivate)">UIViewController (FDFullscreenPopGesturePrivate)</h4><p>整个这个类也非常简单，就是通过 <strong>fd_viewWillAppear</strong> hook了 <strong>viewWillAppear</strong> 这个方法，然后插入了自己一段回调的block。</p>
-<pre><code>- (<span class="keyword">void</span>)fd_viewWillAppear:(<span class="built_in">BOOL</span>)animated
-{
-    <span class="comment">// Forward to primary implementation.</span>
-    [<span class="keyword">self</span> fd_viewWillAppear:animated];
-
-    <span class="keyword">if</span> (<span class="keyword">self</span><span class="variable">.fd_willAppearInjectBlock</span>) {
-        <span class="keyword">self</span><span class="variable">.fd_willAppearInjectBlock</span>(<span class="keyword">self</span>, animated);
-    }
-}
-</code></pre><h4 id="UINavigationController_(FDFullscreenPopGesture)">UINavigationController (FDFullscreenPopGesture)</h4><p>这个分类是整个项目的逻辑控制核心。它干了这么几件事：</p>
-<ul>
-<li>用 <strong>fd_pushViewController:animated:</strong> hook <strong>pushViewController:animated:</strong></li>
-<li><strong>禁用</strong>UINavgationController的<strong>interactivePopGestureRecognizer</strong></li>
-<li>构建了属于自己UIPanGestureRecognizer替换interactivePopGestureRecognizer，同时把手势的delegate赋值给了_FDFullscreenPopGestureRecognizerDelegate</li>
-</ul>
-<p>它的主要核心代码如下：</p>
-<pre><code>- (<span class="keyword">void</span>)fd_pushViewController:(<span class="built_in">UIViewController</span> *)viewController animated:(<span class="built_in">BOOL</span>)animated
-{
-    <span class="keyword">if</span> (![<span class="keyword">self</span><span class="variable">.interactivePopGestureRecognizer</span><span class="variable">.view</span><span class="variable">.gestureRecognizers</span> containsObject:<span class="keyword">self</span><span class="variable">.fd_fullscreenPopGestureRecognizer</span>]) {
-
-        <span class="comment">// 1.</span>
-        [<span class="keyword">self</span><span class="variable">.interactivePopGestureRecognizer</span><span class="variable">.view</span> addGestureRecognizer:<span class="keyword">self</span><span class="variable">.fd_fullscreenPopGestureRecognizer</span>];
-
-        <span class="comment">// 2.</span>
-        <span class="built_in">NSArray</span> *internalTargets = [<span class="keyword">self</span><span class="variable">.interactivePopGestureRecognizer</span> valueForKey:<span class="string">@"targets"</span>];
-        <span class="keyword">id</span> internalTarget = [internalTargets<span class="variable">.firstObject</span> valueForKey:<span class="string">@"target"</span>];
-        SEL internalAction = <span class="built_in">NSSelectorFromString</span>(<span class="string">@"handleNavigationTransition:"</span>);
-        <span class="keyword">self</span><span class="variable">.fd_fullscreenPopGestureRecognizer</span><span class="variable">.delegate</span> = <span class="keyword">self</span><span class="variable">.fd_popGestureRecognizerDelegate</span>;
-        [<span class="keyword">self</span><span class="variable">.fd_fullscreenPopGestureRecognizer</span> addTarget:internalTarget action:internalAction];
-
-        <span class="comment">// 3.</span>
-        <span class="keyword">self</span><span class="variable">.interactivePopGestureRecognizer</span><span class="variable">.enabled</span> = <span class="literal">NO</span>;
-    }
-
-    <span class="comment">// 4.</span>
-    [<span class="keyword">self</span> fd_setupViewControllerBasedNavigationBarAppearanceIfNeeded:viewController];
-
-    <span class="comment">// Forward to primary implementation.</span>
-    <span class="keyword">if</span> (![<span class="keyword">self</span><span class="variable">.viewControllers</span> containsObject:viewController]) {
-        [<span class="keyword">self</span> fd_pushViewController:viewController animated:animated];
-    }
-}
-</code></pre><p>整体来看这段源码，无非做了如下这些事：</p>
-<ol>
-<li>将UIPanGestureRecognizer添加到本来interactivePopGestureRecognizer所在的view上</li>
-<li><div style="color:red"><strong>这段是重点的重点</strong>，一定要往下看！！！</div><br>将PanGesture的target设置为<strong>internalTarget</strong>，action设置为<br><strong>handleNavigationTransition</strong>.</li>
-<li>禁用interactivePopGestureRecognizer</li>
-<li><p>根据是否需要隐藏UINavigationBar来调用fd_setupViewControllerBasedNavigationBarAppearanceIfNeeded:viewController进行之前提到过的<strong>fdwillAppearInjectBlock</strong>设置，代码如下：</p>
-<pre><code>- (void)fd_setupViewControllerBasedNavigationBarAppearanceIfNeeded:(UIViewController *)appearingViewController
-{
-    <span class="preprocessor">if</span> (!<span class="keyword">self.fd_viewControllerBasedNavigationBarAppearanceEnabled) </span>{
-        return<span class="comment">;</span>
-    }
-
-    __weak typeof(<span class="keyword">self) </span>weakSelf = <span class="keyword">self;
-</span>    _FDViewControllerWillAppearInjectBlock <span class="keyword">block </span>= ^(UIViewController *viewController, <span class="keyword">BOOL </span>animated) {
-        __strong typeof(weakSelf) <span class="keyword">strongSelf </span>= weakSelf<span class="comment">;</span>
-        <span class="preprocessor">if</span> (<span class="keyword">strongSelf) </span>{
-            [<span class="keyword">strongSelf </span>setNavigationBarHidden:viewController.fd_prefersNavigationBarHidden animated:animated]<span class="comment">;</span>
-        }
-    }<span class="comment">;</span>
-
-    // Setup will appear inject <span class="keyword">block </span>to appearing view controller.
-    // Setup disappearing view controller as well, <span class="keyword">because </span>not every view controller is <span class="keyword">added </span>into
-    // stack <span class="keyword">by </span><span class="keyword">pushing, </span>maybe <span class="keyword">by </span><span class="string">"-setViewControllers:"</span>.
-    appearingViewController.fd_willAppearInjectBlock = <span class="keyword">block;
-</span>    UIViewController *disappearingViewController = <span class="keyword">self.viewControllers.lastObject;
-</span>    <span class="preprocessor">if</span> (disappearingViewController &amp;&amp; !disappearingViewController.fd_willAppearInjectBlock) {
-        disappearingViewController.fd_willAppearInjectBlock = <span class="keyword">block;
-</span>    }
-}
-</code></pre></li>
-</ol>
-<p>这段代码就是将即将消失和展现的ViewController在viewWillAppear设置了一个自定义UINavigationBar的回调，用以根据进入的方式来展现NaviagtionBar，而不会出现突兀的“镂空”。</p>
-<p>到这，源码就结束了，可以回家收衣服喽！</p>
-<h3 id="重点">重点</h3><p>源码是不是很简单？有什么好分析的呢？<br>如果你读到这，哈哈，恭喜啦，重点分析来啦。</p>
-<p>首先感谢@J_雨的天才思路，大家可以阅读<a href="http://www.jianshu.com/p/d39f7d22db6c" target="_blank" rel="external">轻松学习之二——iOS利用Runtime自定义控制器POP手势动画</a>这篇文章，真的很赞</p>
-<p>之前我们在上文用红色标注了一段内容：</p>
-<div style="color:red"><br>将PanGesture的target设置为<strong>internalTarget</strong>，action设置为<br><strong>handleNavigationTransition</strong>。</div>
-
-<p>看起来很容易理解，可是大家有没有想过为什么action的名称是handleNavigationTransition呢？</p>
-<p>首先我们先打印看看NavigationController的interactivePopGestureRecognizer究竟是个什么玩意？</p>
-<pre><code>&lt;<span class="built_in">UIScreenEdgePanGestureRecognizer</span>: <span class="number">0x7fea78ec5950</span>; state = Possible; delaysTouchesBegan = <span class="literal">YES</span>; view = &lt;<span class="built_in">UILayoutContainerView</span> <span class="number">0x7fea78f77960</span>&gt;; target= &lt;(action=handleNavigationTransition:, target=&lt;_<span class="built_in">UINavigationInteractiveTransition</span> <span class="number">0x7fea78c1c640</span>&gt;)&gt;
-</code></pre><p>这是什么玩意？让我们分别来看看它答应出来的这些属性。</p>
-<ol>
-<li>state = Possible，很简单，就是一个UIGestureRecognizerState = UIGestureRecognizerStatePossible。</li>
-<li>view = UILayoutContainerView，不太懂，暂时也没觉得有需要，不管他。</li>
-<li>target =&lt;(action=handleNavigationTransition:, target=<_uinavigationinteractivetransition 0x7fea78c1c640="">)，这个看起来很有用，因为我们都知道，Gesture就是通过<strong>Target-Action</strong>的方式进行动作触发的。</_uinavigationinteractivetransition></li>
-</ol>
-<p>所以我们赶紧看看这个<strong>target</strong>是个啥玩意，使用如下命令：</p>
-<pre><code><span class="collection">[self.navigationController.interactivePopGestureRecognizer valueForKey:@<span class="string">"target"</span>]</span><span class="comment">;</span>
-</code></pre><p>卧槽，一运行，Crash了，报找不到这个Key。咋回事，难道我记错了KVC的用户，赶紧换成valueForKey:@”View”试试。</p>
-<p>哎！没错啊！成功得到了如下输出：</p>
-<pre><code>-<span class="string">[UILayoutContainerView objectAtIndexedSubscript:]</span>
-</code></pre><p>那咋回事，看来必须祭出屠龙刀Runtime了，嘿嘿，Objective-C面前，一切私有变量都是纸老虎。</p>
-<pre><code><span class="keyword">unsigned</span> <span class="keyword">int</span> count = <span class="number">0</span>;
-Ivar *var = class_copyIvarList([UIGestureRecognizer <span class="keyword">class</span>], &amp;count);
-<span class="keyword">for</span> (<span class="keyword">unsigned</span> <span class="keyword">int</span> i = <span class="number">0</span>; i &lt; count; i++) {
-     Ivar _var = *(var + i);
-     NSLog(@<span class="string">"%s"</span>, ivar_getTypeEncoding(_var));
-     NSLog(@<span class="string">"%s"</span>, ivar_getName(_var));
-}
-</code></pre><p>输出太长了，我们找我们想看的，</p>
-<pre><code><span class="number">2015</span>-<span class="number">11</span>-<span class="number">27</span> <span class="number">02</span>:<span class="number">10</span>:<span class="number">03.873</span> SamplePhotosApp[<span class="number">85305</span>:<span class="number">2664323</span>] _targets
-<span class="number">2015</span>-<span class="number">11</span>-<span class="number">27</span> <span class="number">02</span>:<span class="number">10</span>:<span class="number">03.873</span> SamplePhotosApp[<span class="number">85305</span>:<span class="number">2664323</span>] @<span class="string">"NSMutableArray"</span>
-</code></pre><p>卧槽，这丫叫_targets，好吧，赶紧改成valueForKey:@”targets”再试试。<br>哎，等等，不是_targets吗，怎么能用targets呢？</p>
-<p><strong>咳咳，吴老师又要来讲课了！对于KVC来说，它的查找顺序是key -&gt; property -&gt; ivar，也就是说，它会先按照是否有targets这个名称的key，然后targets这个property，最后再找_targets这个ivar。</strong></p>
-<p>通过输出log，我们可以发现_targets是个数组，维护了一个个自定义结构维护的target-action配对。</p>
-<p>因此，我们现在只要找到这个自定义结构是啥，里面包含了啥就可以了是吧。</p>
-<p><strong>当头一棒</strong>，很遗憾，苹果太阴了，直接重载了这个自定义结构的debugDescription，特喵的什么都看不到。</p>
-<p>事情到了这咋办呢？其实我也没想到，还好上述的参考文章告诉了我们可以依靠断点，通过断点，我们发发现了该自定义结构叫<strong>UIGestureRecognizerTarget</strong>，我们通过KVC获取其target和action即可。</p>
-<h3 id="补充：关于Method_Swizzling">补充：关于Method Swizzling</h3><pre><code><span class="keyword">Class</span> <span class="keyword">class</span> = [<span class="keyword">self</span> <span class="keyword">class</span>];
-
-SEL originalSelector = @<span class="keyword">selector</span>(pushViewController:animated:);
-SEL swizzledSelector = @<span class="keyword">selector</span>(fd_pushViewController:animated:);
-
-<span class="function"><span class="keyword">Method</span> <span class="title">originalMethod</span> = <span class="title">class_getInstanceMethod</span><span class="params">(<span class="keyword">class</span>, originalSelector)</span>;</span>
-<span class="function"><span class="keyword">Method</span> <span class="title">swizzledMethod</span> = <span class="title">class_getInstanceMethod</span><span class="params">(<span class="keyword">class</span>, swizzledSelector)</span>;</span>
-
-BOOL success = class_addMethod(<span class="keyword">class</span>, originalSelector, method_getImplementation(swizzledMethod), method_getTypeEncoding(swizzledMethod));
-<span class="keyword">if</span> (success) <span class="comment">{
-    class_replaceMethod(class, swizzledSelector, method_getImplementation(originalMethod), method_getTypeEncoding(originalMethod));
-}</span> <span class="keyword">else</span> <span class="comment">{
-    method_exchangeImplementations(originalMethod, swizzledMethod);
-}</span>
-</code></pre><p>有很多人都了解Method Swizzling，但是不知道为什么这里需要进行<strong>BOOL success = class_addMethod</strong>判断。</p>
-<p>其主要原因就是如果直接通过method_exchangeImplementations来进行的话，可能子类里并没有originalSelector所代表的方法，你直接和父类进行了交换，这是我们不希望看到的。</p>
-<p>因此通过addMethod来判断，如果加成功了，说明原先这个函数在子类中并不存在，我们现在添加了，只要再把swizzleSelector指向旧函数即可；而如果没成功，说明这个函数在子类中存在了，我们直接替换也不会影响父类。</p>
-]]></content>
-    <summary type="html">
-    <![CDATA[<p><em>嘿嘿，花了三天时间把自己的代码从700行缩减成了200行，终于有时间可以拜读新源码了，好开心。</em></p>
-<p>好了，废话不多话，今天我们要读了百度出品的一个开源项目FDFullScreenPopGesture。</p>
-<h2 id="项目介绍">项目介绍]]>
     </summary>
     
       <category term="iOS" scheme="http://satanwoo.github.io/tags/iOS/"/>
