@@ -62,6 +62,268 @@
       <div class="outer">
         <section id="main">
   
+    <article id="post-multithread-dangling-pointer" class="article article-type-post" itemscope itemprop="blogPost">
+  <div class="article-meta">
+    <a href="/2016/10/23/multithread-dangling-pointer/" class="article-date">
+  <time datetime="2016-10-22T18:43:25.000Z" itemprop="datePublished">2016-10-23</time>
+</a>
+    
+  </div>
+  <div class="article-inner">
+    
+    
+      <header class="article-header">
+        
+  
+    <h1 itemprop="name">
+      <a class="article-title" href="/2016/10/23/multithread-dangling-pointer/">浅谈一种解决多线程野指针的新思路</a>
+    </h1>
+  
+
+      </header>
+    
+    <div class="article-entry" itemprop="articleBody">
+      
+        <p>无论是xx还是xx，对于整个App的稳定性要求都非常之高。因此，那些前辈大牛们为了解决一些常见的问题，比如空指针、数组越界等等，开发了xxxxxx这样的底层SDK，用于解决问题。</p>
+<p>但是随着业务逐渐的复杂化以及愈发严格的性能要求，xxApp绝大多数的Crash开始往野指针方面靠拢。这些野指针的问题，除了一些<strong>iOS7上delegate是assign声明导致的历史遗留问题以外，绝大多数都是多线程的赋值导致的野指针问题。</strong></p>
+<p><span style="color:red">而这些多线程的野指针问题，至今仍未有一个比较好的统一解决方案。因此，今天就想稍微聊下我自身研究的一个方案。</span></p>
+<h3 id="什么是多线程的野指针问题">什么是多线程的野指针问题</h3><p>之前在《浅谈多线程编程误区》一文中，曾经举过如下这样的<strong>多线程setter</strong>例子：</p>
+<pre><code><span class="keyword">for</span> (<span class="keyword">int</span> i = <span class="number">0</span>; i &lt; <span class="number">10000</span>; i++) {
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, <span class="number">0</span>), ^{
+        self.data = [[NSMutableData alloc] init];
+    });
+}
+</code></pre><p>如果这个<code>self.data</code>是个<code>nonatomic</code>的属性的话，就会造成在多次释放导致的野指针问题。（具体可以见《浅谈多线程编程误区》的原理解释）。</p>
+<p>从原理解释中不难发现，本质上会产生野指针的场景是由于我们没有对临界区进行保护。导致赋值替换的操作不是原子性的。</p>
+<p>有些人会说，例子中你刻意构建了一万个线程才会导致Crash。而我们平时就用用几个线程，不会有问题的。<br><strong>理论上一万个线程只不过是把两个线程中可能出现问题的概率放大了而已。在一万个线程中会出现的多线程野指针问题在两个线程中一定也会发生。</strong></p>
+<h3 id="传统业界方案：赋值加锁">传统业界方案：赋值加锁</h3><p>既然原子性是导致野指针的罪魁祸首，那么我们只要在对应可能产生冲突的临界区内加锁就好了，比如：</p>
+<pre><code>[<span class="operator"><span class="keyword">lock</span> <span class="keyword">lock</span>];</span>
+self.data = [[NSMutableData alloc] init];
+[<span class="operator"><span class="keyword">lock</span> <span class="keyword">unlock</span>]</span>
+</code></pre><p>按照这样的做法，同一时间不管有多少线程试图对<code>self.data</code>进行赋值，最终都只有一个线程能够抢到锁对其赋值。</p>
+<p>但是这样的做法从安全性角度来说是解决了原子赋值的问题。但是这样的做法却对开发要求比较严格，因为<strong>任意非基础类型的对象(Int, Bool)</strong>都有可能产生多线程赋值的野指针，所以开发需要牢记自身的属性变量究竟有哪些会在多线程场景中被使用到。</p>
+<p><b style="color:red">而且，这样的方案还有一个非常大的不确定性！</b></p>
+<p>当你开发了一个底层SDK，对外暴露了一些公共的<strong>readwrite</strong>的Property。别人对你的property赋值的时候，你怎么确定他们一定会做到线程安全？</p>
+<h3 id="我的方案：runtime追踪对象初始化的GCD_Queue">我的方案：runtime追踪对象初始化的GCD Queue</h3><p>我们都知道，在<code>Objective-C</code>中，对于一个<code>property</code>的赋值最终都会转化成对于<code>ivar</code>的setter方法。所以，如果我们能确保<code>setter</code>方法的线程安全性，就能确保多线程赋值不会产生野指针。</p>
+<p>好，按照这个思路进行操作的话，我们大致需要如下几个步骤：</p>
+<ol>
+<li>获取第一次setter调用的时机及对应的线程。</li>
+<li>将这个线程记录下来。</li>
+<li>后续调用setter的时候，判断当前setter调用的线程是不是我们之前记录的线程，如果是，直接赋值。如果不是，派发到对应的线程进行调用。</li>
+<li>获取所有的setter，重复实现上述步骤。</li>
+</ol>
+<p>看起来思路很简单，具体实现起来却有一定的难度，容我由浅入深慢慢道来：</p>
+<h4 id="1-_获取第一次赋值的线程并记录">1. 获取第一次赋值的线程并记录</h4><p>由于我们不能通过成员变量就记录每个ivar对应的setter的初始化线程(这样setter的个数就无限增长了)，因此本质上我们只有通过局部静态变量的方式来作为存储。同时由于我们只需要在初次执行时进行记录，所以很理所当然就想到了<code>dispatch_once</code>。</p>
+<p>具体代码如下：</p>
+<pre><code><span class="keyword">static</span> <span class="built_in">dispatch_queue_t</span> initQueue;
+<span class="keyword">static</span> <span class="keyword">void</span>* initQueueKey;
+<span class="keyword">static</span> <span class="keyword">void</span>* initQueueContext;
+
+<span class="keyword">static</span> <span class="built_in">dispatch_once_t</span> onceToken;
+<span class="built_in">dispatch_once</span>(&amp;onceToken, ^{
+
+    <span class="comment">// 1. 主队列</span>
+    <span class="keyword">if</span> ([<span class="built_in">UIApplication</span> isMainQueue]) {
+        initQueue = dispatch_get_main_queue();
+        initQueueKey = [<span class="built_in">UIApplication</span> mainQueueKey];
+        initQueueContext = [<span class="built_in">UIApplication</span> mainQueueContext];
+    } <span class="keyword">else</span> {
+        <span class="comment">// 2. 非主队列</span>
+        <span class="keyword">const</span> <span class="keyword">char</span> *label = [<span class="built_in">NSStringFromSelector</span>(_cmd) UTF8String];
+        initQueueKey = &amp;initQueueKey;
+        initQueueContext = &amp;initQueueContext;
+        initQueue = dispatch_queue_create(label, <span class="literal">nil</span>);
+        dispatch_queue_set_specific(initQueue, initQueueKey, initQueueContext, <span class="literal">nil</span>);
+    }
+});
+</code></pre><p>从代码中不难发现，由于主队列是全局共用的，所以如果这次setter的赋值是在主队列进行的，那么就直接复用主队列即可；而如果当前的队列我们自身都不确定的话，那么就干脆<strong>开辟一个串行的队列</strong>用语这个setter的后续赋值，并将其记录下来。</p>
+<p><strong>细心的读者可能会发现，我们标题里写的是线程，但是在代码中记录的却是GCD的队列（Queue）。而且，我们判断的是主队列而不是主线程。这是为什么呢？</strong></p>
+<p>嘿嘿，容我卖个关子，文章最后会有详细的阐述。</p>
+<h4 id="2-_判断后续赋值是否是记录的线程">2. 判断后续赋值是否是记录的线程</h4><p>由于我们之前记录的是队列，所以我们是无法直接使用诸如如下代码的方式进行是否是同一个线程的判断  </p>
+<pre><code><span class="string">[NSThread currentThread]</span> == xxxThread
+</code></pre><p>在iOS7之前，苹果提供了<code>dispatch_get_current_queue()</code>用于获取当前正在执行的队列，如果有这个方法，我们就可以很容易判断这个队列和我们记录的队列是否是同一个了。但是很不幸的是，该方法已经被从GCD的Public API中移除了，一时间研究陷入了僵局。</p>
+<p>不过好在<code>libdispatch</code>是开源的，经过一段时间的摸索，我发现了这个方法<code>dispatch_get_specific</code>，其自身实现如下：</p>
+<pre><code><span class="function">DISPATCH_NOINLINE
+<span class="keyword">void</span> *
+<span class="title">dispatch_get_specific</span><span class="params">(<span class="keyword">const</span> <span class="keyword">void</span> *key)</span>
+</span>{
+    <span class="keyword">if</span> (slowpath(!key)) {
+        <span class="keyword">return</span> <span class="literal">NULL</span>;
+    }
+    <span class="keyword">void</span> *ctxt = <span class="literal">NULL</span>;
+    <span class="comment">// 1. 获取当前线程的执行队列</span>
+    <span class="keyword">dispatch_queue_t</span> dq = _dispatch_queue_get_current();
+
+    <span class="keyword">while</span> (slowpath(dq)) {
+        <span class="comment">// 2. 如果进行过标记</span>
+        <span class="keyword">if</span> (slowpath(dq-&gt;dq_specific_q)) {
+            ctxt = (<span class="keyword">void</span> *)key;
+            dispatch_sync_f(dq-&gt;dq_specific_q, &amp;ctxt,
+                    _dispatch_queue_get_specific);
+            <span class="keyword">if</span> (ctxt) <span class="keyword">break</span>;
+        }
+        <span class="comment">// 3. 向上传递至target Queue</span>
+        dq = dq-&gt;do_targetq;
+    }
+    <span class="keyword">return</span> ctxt;
+}
+</code></pre><p>通过上述代码不难理解，系统会自动获取当前线程正在执行的队列的。如果进行该队列进行过标记，就根据我们传入的key去获取key对应的value(ctxt)。如果查询到了，就返回。否则按照目标队列层层上查，直至root_queue也没找到为止。（关于libdispatch的具体原理，我下周还会专门写篇细细分析的文章）。</p>
+<p>通过这个方法，我们可以在直接记录初始化队列的时候对其进行特殊的标定：</p>
+<pre><code>dispatch_queue_set_specific<span class="list">(<span class="keyword">initQueue</span>, initQueueKey, initQueueContext, <span class="literal">nil</span>)</span><span class="comment">;</span>
+</code></pre><p>随后在后续setter执行的时候通过如下代码进行判断并进行相应的直接赋值或者队列重新派发：</p>
+<pre><code><span class="comment">// 如果是当前队列</span>
+<span class="keyword">if</span> (dispatch_get_specific(initQueueKey) == initQueueContext) {
+    _threadSafeArray = threadSafeArray;
+} <span class="keyword">else</span> {
+     <span class="comment">// 不是当前队列</span>
+    <span class="built_in">dispatch_sync</span>(initQueue, ^{
+        _threadSafeArray = threadSafeArray;
+    });
+}
+</code></pre><h4 id="3-_遍历所有的setter，重复上述过程">3. 遍历所有的setter，重复上述过程</h4><p>由于我们的目的是减轻其他开发的负担，所以不得不借助了runtime的Method Swizzling技术。但是传统的Method Swizzling技术是将函数实现两两交换。如果按照这个思路，我们就需要为每一个setter编写一个对应的<code>hook_setter</code>，这工作量无疑太巨大了。</p>
+<p>所以，在这里我们需要的一个中心重定向的过程：即，将所有的setter都转移到一个hook_proxy中。代码如下：</p>
+<pre><code>- (<span class="function_or_atom">void</span>)<span class="function_or_atom">hookAllPropertiesSetter</span>
+{
+    <span class="function_or_atom">unsigned</span> <span class="function_or_atom">int</span> <span class="function_or_atom">outCount</span>;
+    <span class="function_or_atom">objc_property_t</span> *<span class="function_or_atom">properties</span> = <span class="function_or_atom">class_copyPropertyList</span>([<span class="function_or_atom">self</span> <span class="function_or_atom">class</span>], &amp;<span class="function_or_atom">outCount</span>);
+
+    <span class="variable">NSMutableArray</span> *<span class="function_or_atom">readWriteProperties</span> = [[<span class="variable">NSMutableArray</span> <span class="function_or_atom">alloc</span>] <span class="function_or_atom">initWithCapacity:outCount</span>];
+    <span class="function_or_atom">for</span> (<span class="function_or_atom">unsigned</span> <span class="function_or_atom">int</span> <span class="function_or_atom">i</span> = <span class="number">0</span>; <span class="function_or_atom">i</span> &lt; <span class="function_or_atom">outCount</span>; <span class="function_or_atom">i</span>++) {
+        <span class="function_or_atom">objc_property_t</span> <span class="function_or_atom">property</span> = <span class="function_or_atom">properties</span>[<span class="function_or_atom">i</span>];
+        <span class="variable">NSString</span> *<span class="function_or_atom">propertyName</span> = [[<span class="variable">NSString</span> <span class="function_or_atom">alloc</span>] <span class="function_or_atom">initWithCString:property_getName</span>(<span class="function_or_atom">property</span>) <span class="function_or_atom">encoding</span>:<span class="variable">NSUTF8StringEncoding</span>];
+
+        <span class="function_or_atom">unsigned</span> <span class="function_or_atom">int</span> <span class="function_or_atom">attrCount</span>;
+        <span class="function_or_atom">objc_property_attribute_t</span> *<span class="function_or_atom">attrs</span> = <span class="function_or_atom">property_copyAttributeList</span>(<span class="function_or_atom">property</span>, &amp;<span class="function_or_atom">attrCount</span>);
+
+        // <span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span>特别注意<span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span>
+        // <span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span>特别注意<span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span>
+        <span class="variable">BOOL</span> <span class="function_or_atom">isReadOnlyProperty</span> = <span class="variable">NO</span>;
+        <span class="function_or_atom">for</span> (<span class="function_or_atom">unsigned</span> <span class="function_or_atom">int</span> <span class="function_or_atom">j</span> = <span class="number">0</span>; <span class="function_or_atom">j</span> &lt; <span class="function_or_atom">attrCount</span>; <span class="function_or_atom">j</span>++) {
+            <span class="function_or_atom">if</span> (<span class="function_or_atom">attrs</span>[<span class="function_or_atom">j</span>].<span class="function_or_atom">name</span>[<span class="number">0</span>] == <span class="string">'R'</span>) {
+                <span class="function_or_atom">isReadOnlyProperty</span> = <span class="variable">YES</span>;
+                <span class="function_or_atom">break</span>;
+            }
+        }
+        <span class="function_or_atom">free</span>(<span class="function_or_atom">attrs</span>);
+
+        <span class="function_or_atom">if</span> (<span class="exclamation_mark">!</span><span class="function_or_atom">isReadOnlyProperty</span>) {
+            [<span class="function_or_atom">readWriteProperties</span> <span class="function_or_atom">addObject:propertyName</span>];
+        }
+    }
+    <span class="function_or_atom">free</span>(<span class="function_or_atom">properties</span>);
+
+    <span class="function_or_atom">for</span> (<span class="variable">NSString</span> *<span class="function_or_atom">propertyName</span> <span class="function_or_atom">in</span> <span class="function_or_atom">readWriteProperties</span>) {
+
+        <span class="variable">NSString</span> *<span class="function_or_atom">setterName</span> = [<span class="variable">NSString</span> <span class="function_or_atom">stringWithFormat</span>:@<span class="string">"set%@%@:"</span>, [<span class="function_or_atom">propertyName</span> <span class="function_or_atom">substringToIndex</span>:<span class="number">1</span>].<span class="function_or_atom">uppercaseString</span>, [<span class="function_or_atom">propertyName</span> <span class="function_or_atom">substringFromIndex</span>:<span class="number">1</span>]];
+
+        // <span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span>特别注意<span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span>
+        // <span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span>特别注意<span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span>
+        <span class="variable">NSString</span> *<span class="function_or_atom">hookSetterName</span> = [<span class="variable">NSString</span> <span class="function_or_atom">stringWithFormat</span>:@<span class="string">"hook_set%@:"</span>, <span class="function_or_atom">propertyName</span>];
+
+        <span class="variable">SEL</span> <span class="function_or_atom">originSetter</span> = <span class="variable">NSSelectorFromString</span>(<span class="function_or_atom">setterName</span>);
+        <span class="variable">SEL</span> <span class="function_or_atom">newSetter</span> = <span class="variable">NSSelectorFromString</span>(<span class="function_or_atom">hookSetterName</span>);
+
+        <span class="function_or_atom">swizzleMethod</span>([<span class="function_or_atom">self</span> <span class="function_or_atom">class</span>], <span class="function_or_atom">originSetter</span>, <span class="function_or_atom">newSetter</span>);
+    }
+}
+</code></pre><p>在这里有两点需要注意的地方：</p>
+<ol>
+<li><strong>readonly</strong>的property是不具备setter功能的，所以将其过滤。</li>
+<li>将每个setter，比如<code>setThreadSafeArray</code>都<strong>swizzle</strong>成了<code>hook__setThreadSafeArray</code>。即为每一个setter都定制了一个对应的hook_setter。</li>
+</ol>
+<p>哎，有人会问，你刚刚不才说为每一个setter编写对应的hook_setter是费时费力的吗？怎么自己打自己脸啊？</p>
+<p>别急，容我慢慢道来。</p>
+<p>在Method Swizzling的时候，我们需要调用<code>class_getInstanceMethod</code>来进行对应方法名的函数查找。整个过程简述如下：</p>
+<pre><code><span class="keyword">method</span> cache list -&gt; <span class="keyword">method</span> list -&gt; 动态方法决议 -&gt; 方法转交 (forward <span class="type">Invocation</span>)
+</code></pre><p>其中，在动态方法决议这步，如果我们添加了之前的没找到的方法，那么整个查找过程又会重新开始一遍。</p>
+<p><strong><span style="color:red">由于那些hook_setter是压根不会存在于method list中的，所以在查找这些函数的时候，一定会走到动态决议这一步。</span></strong></p>
+<p>基于此，我实现了如下的动态决议函数：</p>
+<pre><code>+ (BOOL)resolveInstanceMethod:(SEL)sel
+{
+    NSString *selName = NSStringFromSelector(sel);
+
+    <span class="keyword">if</span> ([selName hasPrefix:@<span class="string">"hook_"</span>]) {
+        <span class="function"><span class="keyword">Method</span> <span class="title">proxyMethod</span> =</span> class_getInstanceMethod([<span class="variable">self</span> <span class="class"><span class="keyword">class</span>], @<span class="title">selector</span>(<span class="title">hook_proxy</span>:));</span>
+        class_addMethod([<span class="variable">self</span> <span class="class"><span class="keyword">class</span>], <span class="title">sel</span>, <span class="title">method_getImplementation</span>(<span class="title">proxyMethod</span>), <span class="title">method_getTypeEncoding</span>(<span class="title">proxyMethod</span>));</span>
+        <span class="keyword">return</span> YES;
+    }
+
+    <span class="keyword">return</span> [<span class="variable">super</span> resolveInstanceMethod:sel];
+}
+</code></pre><p>从代码中很容易发现，如果是之前那么hook_setter的函数名，我就讲这些方法的<strong>函数实现</strong>全部重定向到函数<code>hook__proxy</code>上。</p>
+<h4 id="4-_寻找上下文">4. 寻找上下文</h4><p>在传统的Method Swizzling技术中，由于我们是两两交换，因此我们不需要上下文这一个步骤，直接调用hook_setter就可以重新返回对应的原setter方法。</p>
+<p>可是在本文的实现中，由于我们将所有的setter都重定向到了<code>hook__proxy</code>中，所以我们需要在<code>hook_proxy</code>中寻找究竟是给哪个property赋值。</p>
+<p><strong><span style="color:red">如果对Method Swizzling的理解只停留在表面，是很难想到后续步骤的。</span></strong></p>
+<p>Method Swizzling的原理是只是交换IMP，即函数实现。而我们在Objective-C的函数调用统统是通过objc_msgSend结合函数的Selector(可以简单理解为函数名)来找到真正的函数实现。</p>
+<p><strong>因此，swizzle后的Selector没变，变的是IMP。</strong></p>
+<p>有了这个理解，我们就可以在hook_proxy使用<b style="color:red">__cmd</b>这个隐藏变量，它会指引我们究竟是哪个Setter当前正在被调用，具体代码如下：</p>
+<pre><code>- (<span class="typename">void</span>)<span class="string">hook_proxy:</span>(NSObject *)proxyObject
+{
+    <span class="comment">// 只是实现被换了，但是selector还是没变</span>
+    NSString *originSelector = NSStringFromSelector(_cmd);
+    NSString *propertyName = [[originSelector <span class="string">stringByTrimmingCharactersInSet:</span>[NSCharacterSet <span class="string">characterSetWithCharactersInString:</span>@<span class="string">":"</span>]] <span class="string">stringByReplacingOccurrencesOfString:</span>@<span class="string">"set"</span> <span class="string">withString:</span>@<span class="string">""</span>];
+    <span class="keyword">if</span> (propertyName.length &lt;= <span class="number">0</span>) <span class="keyword">return</span>;
+
+    NSString *ivarName = [NSString <span class="string">stringWithFormat:</span>@<span class="string">"_%@%@"</span>, [propertyName <span class="string">substringToIndex:</span><span class="number">1</span>].lowercaseString, [propertyName <span class="string">substringFromIndex:</span><span class="number">1</span>]];
+
+    <span class="comment">//NSLog(@"hook_proxy is %@ for property %@", proxyObject, propertyName);</span>
+
+    重复之前步骤即可。
+}
+</code></pre><h4 id="5-_其他拓展">5. 其他拓展</h4><p><strong>本文中只是探索了下没有重载setter的那些ivar，因此只需要简单对ivar进行赋值即可。</strong><br>如果你碰到了大量自定义setter的ivar，那么也一样很简单，你只需要维护一个ivar 到对应自定义的setter的imp映射，在hook_proxy将<code>setValue:ForKey:</code>替换成直接的IMP调用即可。</p>
+<h3 id="一些额外细节">一些额外细节</h3><ul>
+<li><ol>
+<li>线程和GCD Queue并不是一一对应的关系。</li>
+</ol>
+</li>
+</ul>
+<p>前面提到了，我们要记录的是队列而不是线程。相信很多人可能一开始都不能理解，那么我用如下这样的代码进行解释：</p>
+<pre><code><span class="tag">if</span> ([NSThread isMainThread]) {
+    <span class="attr_selector">[self doSomeThing]</span>;
+} <span class="tag">else</span> {
+    <span class="tag">dispatch_sync</span>(<span class="function">dispatch_get_main_queue</span>(), ^{
+        <span class="attr_selector">[self doSomething]</span>;
+    });
+}
+</code></pre><p>上述代码想必大家非常熟悉，就是全包在主线程执行一些操作，比如UI操作等等。但是事实上，这里有个误区：</p>
+<p><strong>主队列一定在主线程执行，而主线程不一定只执行主队列。</strong></p>
+<p><b style="color:red">换句话说：上述代码的if 和 else是不等价的。</b> </p>
+<p>有时候，主线程有可能会被调度到执行其他队列（其他线程亦是如此），比如如下代码：</p>
+<pre><code><span class="comment">// 在主线程创建</span>
+dispatch\_queue\_t dq = dispatch\_queue\_create(<span class="string">'com.mingyi.dashuaibi'</span>, <span class="keyword">NULL</span>);
+dispatch_sync(dq, ^{
+    NSLog(@<span class="string">"current thread is %@"</span>, [NSThread currentThread]);
+});
+</code></pre><p>具体效果，大家可以自己尝试下，看看Log输出的结果是不是主线程。</p>
+<ul>
+<li><ol>
+<li>为什么不能直接将所有的setter直接hook到hook_proxy，非要通过动态决议来进行。</li>
+</ol>
+</li>
+</ul>
+<p>我们举个简单的例子，假设我们有两个property，分别叫A和B。那么在执行下述代码的时候：</p>
+<pre><code>for <span class="list">(<span class="keyword">int</span> i = <span class="number">0</span><span class="comment">; i &lt; 2; i++) {</span>
+     SEL originSetter = NSSelectorFromString<span class="list">(<span class="keyword">setterName</span>)</span><span class="comment">;</span>
+     SEL newSetter = NSSelectorFromString<span class="list">(<span class="keyword">hook_proxy</span>)</span><span class="comment">;</span>
+     swizzleMethod<span class="list">([self class], originSetter, newSetter)</span><span class="comment">;</span>
+}</span>
+</code></pre><p>第一次交换的时候，Setter A的 IMP和 hook_proxy的 IMP进行了交换，这一步没问题。<br>第二次交换的时候，Setter B的 IMP和 hook_proxy的 IMP进行了交换，而此时hook_proxy的IMP已经指向了Setter A的IMP，因此导致的结果就是交换错乱了，调用setter B实质上是调用了setter A。</p>
+
+      
+    </div>
+    <footer class="article-footer">
+      <a data-url="http://satanwoo.github.io/2016/10/23/multithread-dangling-pointer/" data-id="ciuml8fnj000782i1oi7wex5j" class="article-share-link">Share</a>
+      
+      
+  <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
+
+    </footer>
+  </div>
+  
+</article>
+
+
+  
     <article id="post-uiwindow-iOS" class="article article-type-post" itemscope itemprop="blogPost">
   <div class="article-meta">
     <a href="/2016/09/17/uiwindow-iOS/" class="article-date">
@@ -184,7 +446,7 @@
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/09/17/uiwindow-iOS/" data-id="cit7be7t40003bsi1d1xxx0w4" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/09/17/uiwindow-iOS/" data-id="ciuml8fn1000382i1h5pqjqla" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
@@ -322,7 +584,7 @@ OSSpinUnlock(&amp;_lock)<span class="comment">;</span>
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/07/10/immutable-thread/" data-id="cit7be7tl0007bsi19lo7rc5e" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/07/10/immutable-thread/" data-id="ciuml8fnn000982i13cj4076g" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
@@ -424,7 +686,7 @@ OSSpinUnlock(&amp;_lock)<span class="comment">;</span>
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/05/02/Spotify/" data-id="cit7be7um000ybsi1xutqfkdk" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/05/02/Spotify/" data-id="ciuml8fom001082i1bevavnk7" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Growth/">Growth</a></li></ul>
@@ -530,7 +792,7 @@ OSSpinUnlock(&amp;_lock)<span class="comment">;</span>
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/04/26/blank-space-in-html/" data-id="cit7be7u3000mbsi1u609qeuj" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/04/26/blank-space-in-html/" data-id="ciuml8fo6000o82i13tik4g58" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/JavaScript/">JavaScript</a></li></ul>
@@ -766,7 +1028,7 @@ Elapsed application CPU <span class="keyword">time</span> (seconds): <span class
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/04/11/dispatch-once/" data-id="cit7be7tq000cbsi1ovf319a1" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/04/11/dispatch-once/" data-id="ciuml8fns000e82i18xdn170e" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
@@ -961,7 +1223,7 @@ a4.<span class="function"><span class="title">staticInfo</span><span class="para
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/03/22/dispatch-in-swift/" data-id="cit7be7tt000ebsi19rfl748l" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/03/22/dispatch-in-swift/" data-id="ciuml8fnv000g82i1tot887ju" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Swift/">Swift</a></li></ul>
@@ -1053,7 +1315,7 @@ a4.<span class="function"><span class="title">staticInfo</span><span class="para
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/03/14/RxSwift/" data-id="cit7be7uq0014bsi1w9zpn9ge" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/03/14/RxSwift/" data-id="ciuml8for001682i1hyexua3g" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Swift/">Swift</a></li></ul>
@@ -1141,7 +1403,7 @@ val = edx(<span class="literal">true</span>)
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/03/14/SizeUp/" data-id="cit7be7uo0011bsi11g9z6ixy" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/03/14/SizeUp/" data-id="ciuml8fop001382i1zefmvakn" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Reverse-Engineering/">Reverse Engineering</a></li></ul>
@@ -1281,7 +1543,7 @@ val = edx(<span class="literal">true</span>)
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/03/14/DXXcodeConsoleUnicodePlugin/" data-id="cit7be7w0001zbsi1y26up8ef" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/03/14/DXXcodeConsoleUnicodePlugin/" data-id="ciuml8fq0002182i1vjz6ov7i" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
@@ -1358,7 +1620,7 @@ fi
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/02/27/check-manifest/" data-id="cit7be7tz000jbsi1s9by4xv2" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/02/27/check-manifest/" data-id="ciuml8fo0000l82i1sspcgm5j" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/shell/">shell</a></li></ul>
@@ -1468,7 +1730,7 @@ fi
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/02/27/pod-install-plugin/" data-id="cit7be7th0005bsi1e2wft3vt" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/02/27/pod-install-plugin/" data-id="ciuml8fnf000582i10jbkthiq" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
@@ -1724,7 +1986,7 @@ fi
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/02/27/FBKVOController/" data-id="cit7be7vv001vbsi1qwjbaz1b" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/02/27/FBKVOController/" data-id="ciuml8fpt001x82i158dfinrb" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
@@ -1838,7 +2100,7 @@ selectedTitleLabelsContentView<span class="class">.layer</span><span class="clas
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/02/05/DGRunKeeperSwitch/" data-id="cit7be7w30021bsi1tb7o1vdl" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/02/05/DGRunKeeperSwitch/" data-id="ciuml8fq2002382i10teb25zc" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
@@ -2094,7 +2356,7 @@ NSLayoutConstraint *constraint = [NSLayoutConstraint <span class="string">constr
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/02/05/PureLayout/" data-id="cit7be7ux001bbsi1syk0v0uv" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/02/05/PureLayout/" data-id="ciuml8foz001d82i16u8zvcil" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
@@ -2420,7 +2682,7 @@ extension Task {
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/12/30/Refactor-Mega-ViewController/" data-id="cit7be7uv0019bsi1v3fsphg0" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/12/30/Refactor-Mega-ViewController/" data-id="ciuml8fow001b82i11hnvhkiy" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
@@ -2571,7 +2833,7 @@ extension Task {
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/12/20/Learn-R-2/" data-id="cit7be7v2001fbsi1jp6ph5v8" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/12/20/Learn-R-2/" data-id="ciuml8fp6001h82i1b3at0kgd" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/R/">R</a></li></ul>
@@ -2625,7 +2887,7 @@ extension Task {
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/12/15/Regression-Model-1/" data-id="cit7be7ut0016bsi1kmrf3lny" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/12/15/Regression-Model-1/" data-id="ciuml8fou001882i1zu5xp32q" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Math/">Math</a></li></ul>
@@ -2768,7 +3030,7 @@ $foo
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/12/13/Learn-R-1/" data-id="cit7be7v7001ibsi18uqrds3v" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/12/13/Learn-R-1/" data-id="ciuml8fp9001k82i1veiclew2" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/R/">R</a></li></ul>
@@ -2874,306 +3136,7 @@ frame <span class="preprocessor">#<span class="number">20</span>: libdyld.dylib`
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/12/11/LLDB-1/" data-id="cit7be7ve001nbsi16m6hi0hs" class="article-share-link">Share</a>
-      
-      
-  <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
-
-    </footer>
-  </div>
-  
-</article>
-
-
-  
-    <article id="post-TBAnnotationClustering" class="article article-type-post" itemscope itemprop="blogPost">
-  <div class="article-meta">
-    <a href="/2015/12/11/TBAnnotationClustering/" class="article-date">
-  <time datetime="2015-12-10T16:56:04.000Z" itemprop="datePublished">2015-12-11</time>
-</a>
-    
-  </div>
-  <div class="article-inner">
-    
-    
-      <header class="article-header">
-        
-  
-    <h1 itemprop="name">
-      <a class="article-title" href="/2015/12/11/TBAnnotationClustering/">TBAnnotationClustering源码解析</a>
-    </h1>
-  
-
-      </header>
-    
-    <div class="article-entry" itemprop="articleBody">
-      
-        <p>毕设这两天飞一般的加速，终于可以写写源码解析了，嘿嘿，这周读两个跟性能相关的源码，首先是一个跟地图相关的，今天来看看一个数据结构在iOS开发中的妙用。</p>
-<h3 id="TBAnnotationClustering">TBAnnotationClustering</h3><p>我们都知道，MapView的实现机制其实和UITableView类似，首先他们都是基于UIScrollView支持滑动的，此外，他们都采用了循环服用的机制了来保持内存的开销。</p>
-<p><strong>但是</strong>，两者之间有个很大的区别就是数量级的差距，UITableView就算充满整个屏幕，充其量也就是10多个同时可见的VisibleCell，因此就多维护一个大小是VisibleCells数量 ＋ 2的这样一个循环队列，进行复用。但是MapView就不一样了，地图上同时展示一段范围内几千个Point of Interest是非常有可能的，这一下子的内存开销和性能卡顿就非常不得了，因此我们需要一种合理的手段来避免，这就是我们今天要讲解的TBAnnotationClustering的由来。</p>
-<p><a href="https://github.com/thoughtbot/TBAnnotationClustering" target="_blank" rel="external">Github地址</a></p>
-<h3 id="Level_of_Detail">Level of Detail</h3><p>首先，让我们先介绍一下相关背景知识。</p>
-<p>根据图像渲染的理论我们可以知道，人的视野存在焦点区域和盲点区域，总是更倾向于关注处于视线左上角到视线中心部分的。因此，在现实应用中，如游戏场景，当场景需要展现的模型距离视线焦点非常近时，就采用高精度的模型来进行展示；而到模型处于较远位置时，比如体育游戏的场外观众，就可以采用低精度模型进行替换，减少渲染时候的计算量；而到模型所处位置基本可以考虑成为背景时，则会采用基本图元进行展示。通过这种方法，即保证了场景的真实观感，同时又大大减少了不必要的计算量。这也就是通常计算机图形学领域所谓的Level Of Detail技术。</p>
-<h3 id="QuadTree">QuadTree</h3><p>QuadTree可能很多人会比较陌生，但是一提到他的哥哥 － 二叉树，想必大家不会陌生，所以QuadTree又被称为四叉树，关于四叉树的定义，</p>
-<blockquote><br>A quadtree is a tree data structure in which each internal node has exactly four children.<br></blockquote>
-
-<p>四叉树被广泛的运用于空间划分。通过将空间递归划分不同层次的子结构，可以达到较高的空间数据插入和查询效果。</p>
-<p>下面就是一张比较经典的四叉树构造，首先先将一个大空间划分为四个字空间 a b c d。然后根据每一个子空间内的节点个数再进行细分。<strong>这里要强调一点，四叉树的细分没有具体要求，你可以按你的需求划分成每个节点能只包含一个，也可以根据平衡减少划分次数。</strong></p>
-<p><img src="http://img.blog.csdn.net/20131005154434687?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvemhvdXh1Z3VhbmcyMzY=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast"></p>
-<h3 id="TBAnnotationClustering源码讲解">TBAnnotationClustering源码讲解</h3><p>打开这个项目，粗略过一下项目结构，大致需要关注的代码如下：</p>
-<ul>
-<li>TBQuadTree.h/.m</li>
-<li>TBCoordinateQuadTree.h/.m</li>
-</ul>
-<p>让我们一个个来分析</p>
-<h4 id="TBQuadTree">TBQuadTree</h4><p>毫无疑问，从文件名称来看，我们就知道，这个类就代表基础的四叉树数据结构，首先让我们来看看数据结构的定义</p>
-<pre><code><span class="keyword">typedef</span> <span class="class"><span class="keyword">struct</span> <span class="title">TBQuadTreeNodeData</span> </span>{
-    <span class="built_in">double</span> x;
-    <span class="built_in">double</span> y;
-    <span class="keyword">void</span>* data;
-} TBQuadTreeNodeData;
-TBQuadTreeNodeData TBQuadTreeNodeDataMake(<span class="built_in">double</span> x, <span class="built_in">double</span> y, <span class="keyword">void</span>* data);
-</code></pre><p>这个毫无疑问，就是代表的坐标系的<strong>数据节点</strong>。 (x, y)表征坐标点，void *data自由的指向附加的数据。</p>
-<pre><code><span class="keyword">typedef</span> <span class="class"><span class="keyword">struct</span> <span class="title">TBBoundingBox</span> </span>{
-    <span class="built_in">double</span> x0; <span class="built_in">double</span> y0;
-    <span class="built_in">double</span> xf; <span class="built_in">double</span> yf;
-} TBBoundingBox;
-TBBoundingBox TBBoundingBoxMake(<span class="built_in">double</span> x0, <span class="built_in">double</span> y0, <span class="built_in">double</span> xf, <span class="built_in">double</span> yf);
-</code></pre><p>这个同样很简单，用两个对角点限定了一个长方形区域，也就是一个四叉树的节点究竟包含哪些范围。</p>
-<pre><code><span class="label">typedef</span> <span class="keyword">struct </span>quadTreeNode {
-    <span class="keyword">struct </span>quadTreeNode* northWest<span class="comment">;</span>
-    <span class="keyword">struct </span>quadTreeNode* northEast<span class="comment">;</span>
-    <span class="keyword">struct </span>quadTreeNode* southWest<span class="comment">;</span>
-    <span class="keyword">struct </span>quadTreeNode* southEast<span class="comment">;</span>
-    <span class="keyword">TBBoundingBox </span><span class="keyword">boundingBox;
-</span>    int <span class="keyword">bucketCapacity;
-</span>    TBQuadTreeNodeData *points<span class="comment">;</span>
-    int count<span class="comment">;</span>
-} TBQuadTreeNode<span class="comment">;</span>
-<span class="label">TBQuadTreeNode</span>* TBQuadTreeNodeMake(<span class="keyword">TBBoundingBox </span><span class="keyword">boundary, </span>int <span class="keyword">bucketCapacity);</span>
-</code></pre><p>这个稍微复杂点，是四叉树的树节点，其中</p>
-<ul>
-<li>northWest, northEast, southWest, southEast分别代表四叉树的四个子细分区域。</li>
-<li>bondingBox代表的当前这个树节点的涵盖区域。</li>
-<li>bucketCapacity表示这个树节点最大容纳的数据节点个数</li>
-<li>points 数据节点数组</li>
-<li>count 当前包含了数据节点。</li>
-</ul>
-<p><strong>再次强调，千万不要把树节点和数据节点搞混。树节点指的是四叉树上的数据结构，每个树节点最多有四个子树节点，但是可以有bucketCapacity大小的数据节点，数据节点仅仅是用来封装坐标系和其相关的数据的一个数据结构，非四叉树特有。</strong></p>
-<p>看完了数据定义，我们再来看看其实现部分。</p>
-<pre><code><span class="preprocessor">#<span class="keyword">pragma</span> mark - Constructors</span>
-
-<span class="function">TBQuadTreeNodeData <span class="title">TBQuadTreeNodeDataMake</span><span class="params">(<span class="keyword">double</span> x, <span class="keyword">double</span> y, <span class="keyword">void</span>* data)</span>
-</span>{
-    TBQuadTreeNodeData d; d.x = x; d.y = y; d.data = data;
-    <span class="keyword">return</span> d;
-}
-
-<span class="function">TBBoundingBox <span class="title">TBBoundingBoxMake</span><span class="params">(<span class="keyword">double</span> x0, <span class="keyword">double</span> y0, <span class="keyword">double</span> xf, <span class="keyword">double</span> yf)</span>
-</span>{
-    TBBoundingBox bb; bb.x0 = x0; bb.y0 = y0; bb.xf = xf; bb.yf = yf;
-    <span class="keyword">return</span> bb;
-}
-
-<span class="function">TBQuadTreeNode* <span class="title">TBQuadTreeNodeMake</span><span class="params">(TBBoundingBox boundary, <span class="keyword">int</span> bucketCapacity)</span>
-</span>{
-    TBQuadTreeNode* node = <span class="built_in">malloc</span>(<span class="keyword">sizeof</span>(TBQuadTreeNode));
-    node-&gt;northWest = <span class="literal">NULL</span>;
-    node-&gt;northEast = <span class="literal">NULL</span>;
-    node-&gt;southWest = <span class="literal">NULL</span>;
-    node-&gt;southEast = <span class="literal">NULL</span>;
-
-    node-&gt;boundingBox = boundary;
-    node-&gt;bucketCapacity = bucketCapacity;
-    node-&gt;count = <span class="number">0</span>;
-    node-&gt;points = <span class="built_in">malloc</span>(<span class="keyword">sizeof</span>(TBQuadTreeNodeData) * bucketCapacity);
-
-    <span class="keyword">return</span> node;
-}
-</code></pre><p>这三个构造函数，分别是构造<span style="color:red">数据节点</span>、长方形以及<span style="color:blue">四叉树节点</span>，默认情况下四叉树的节点<strong>并非满构造</strong>，而是初始化为空，根据需要插入新节点。</p>
-<pre><code><span class="label">#pragma</span> <span class="keyword">mark </span>- <span class="keyword">Bounding </span><span class="keyword">Box </span>Functions
-
-<span class="keyword">bool </span><span class="keyword">TBBoundingBoxContainsData(TBBoundingBox </span><span class="keyword">box, </span>TBQuadTreeNodeData <span class="preprocessor">data</span>)
-{
-    <span class="keyword">bool </span>containsX = <span class="keyword">box.x0 </span>&lt;= <span class="preprocessor">data</span>.x &amp;&amp; <span class="preprocessor">data</span>.x &lt;= <span class="keyword">box.xf;
-</span>    <span class="keyword">bool </span>containsY = <span class="keyword">box.y0 </span>&lt;= <span class="preprocessor">data</span>.y &amp;&amp; <span class="preprocessor">data</span>.y &lt;= <span class="keyword">box.yf;
-</span>
-    return containsX &amp;&amp; containsY<span class="comment">;</span>
-}
-
-<span class="keyword">bool </span><span class="keyword">TBBoundingBoxIntersectsBoundingBox(TBBoundingBox </span><span class="keyword">b1, </span><span class="keyword">TBBoundingBox </span><span class="keyword">b2)
-</span>{
-    return (<span class="keyword">b1.x0 </span>&lt;= <span class="keyword">b2.xf </span>&amp;&amp; <span class="keyword">b1.xf </span>&gt;= <span class="keyword">b2.x0 </span>&amp;&amp; <span class="keyword">b1.y0 </span>&lt;= <span class="keyword">b2.yf </span>&amp;&amp; <span class="keyword">b1.yf </span>&gt;= <span class="keyword">b2.y0);
-</span>}
-</code></pre><p>随后就是上面两个判断长方形包含和相交的方法了，包含自然是整个包围。而相交的补集是不相交，即在横坐标上一个长方形的xf另一个长方形的x0抑或是一个长方形的x0完全大于另一个长方形的xf，当然在y轴上也是同理，因此通过补集很容易就理解TBBoundingBoxIntersectsBoundingBox的实现了。</p>
-<p>然后来看看非常重要的几个函数，首先是<strong>TBQuadTreeNodeSubdivide</strong></p>
-<pre><code><span class="label">void</span> TBQuadTreeNodeSubdivide(TBQuadTreeNode* node)
-{
-    <span class="keyword">TBBoundingBox </span><span class="keyword">box </span>= node-&gt;<span class="keyword">boundingBox;
-</span>
-    double xMid = (<span class="keyword">box.xf </span>+ <span class="keyword">box.x0) </span>/ <span class="number">2</span>.<span class="number">0</span><span class="comment">;</span>
-    double yMid = (<span class="keyword">box.yf </span>+ <span class="keyword">box.y0) </span>/ <span class="number">2</span>.<span class="number">0</span><span class="comment">;</span>
-
-    <span class="keyword">TBBoundingBox </span>northWest = <span class="keyword">TBBoundingBoxMake(box.x0, </span><span class="keyword">box.y0, </span>xMid, yMid)<span class="comment">;</span>
-    node-&gt;northWest = TBQuadTreeNodeMake(northWest, node-&gt;<span class="keyword">bucketCapacity);
-</span>
-    <span class="keyword">TBBoundingBox </span>northEast = <span class="keyword">TBBoundingBoxMake(xMid, </span><span class="keyword">box.y0, </span><span class="keyword">box.xf, </span>yMid)<span class="comment">;</span>
-    node-&gt;northEast = TBQuadTreeNodeMake(northEast, node-&gt;<span class="keyword">bucketCapacity);
-</span>
-    <span class="keyword">TBBoundingBox </span>southWest = <span class="keyword">TBBoundingBoxMake(box.x0, </span>yMid, xMid, <span class="keyword">box.yf);
-</span>    node-&gt;southWest = TBQuadTreeNodeMake(southWest, node-&gt;<span class="keyword">bucketCapacity);
-</span>
-    <span class="keyword">TBBoundingBox </span>southEast = <span class="keyword">TBBoundingBoxMake(xMid, </span>yMid, <span class="keyword">box.xf, </span><span class="keyword">box.yf);
-</span>    node-&gt;southEast = TBQuadTreeNodeMake(southEast, node-&gt;<span class="keyword">bucketCapacity);
-</span>}
-</code></pre><p>这个函数负责将四叉树节点进行细分。首先获取当前节点负责的长方形区域的中点，然后根据中点到原有长方形的四个顶点，分成四个象限，进行划分。<strong>这个时候请注意</strong>，还只是进行四叉树节点的细分，还没重新更改数据节点的分布。</p>
-<pre><code><span class="keyword">bool</span> TBQuadTreeNodeInsertData(TBQuadTreeNode* node, TBQuadTreeNodeData data)
-{
-    <span class="keyword">if</span> (!TBBoundingBoxContainsData(node-&gt;boundingBox, data)) {
-        <span class="keyword">return</span> <span class="keyword">false</span>;
-    }
-
-    <span class="keyword">if</span> (node-&gt;count &lt; node-&gt;bucketCapacity) {
-        node-&gt;points[node-&gt;count++] = data;
-        <span class="keyword">return</span> <span class="keyword">true</span>;
-    }
-
-    <span class="keyword">if</span> (node-&gt;northWest == <span class="keyword">NULL</span>) {
-        TBQuadTreeNodeSubdivide(node);
-    }
-
-    <span class="keyword">if</span> (TBQuadTreeNodeInsertData(node-&gt;northWest, data)) <span class="keyword">return</span> <span class="keyword">true</span>;
-    <span class="keyword">if</span> (TBQuadTreeNodeInsertData(node-&gt;northEast, data)) <span class="keyword">return</span> <span class="keyword">true</span>;
-    <span class="keyword">if</span> (TBQuadTreeNodeInsertData(node-&gt;southWest, data)) <span class="keyword">return</span> <span class="keyword">true</span>;
-    <span class="keyword">if</span> (TBQuadTreeNodeInsertData(node-&gt;southEast, data)) <span class="keyword">return</span> <span class="keyword">true</span>;
-
-    <span class="keyword">return</span> <span class="keyword">false</span>;
-}
-</code></pre><p>这个函数则是真正的将数据插入到节点中。</p>
-<ul>
-<li>首先先判断这个数据是否落在该长方形中，不是直接滚蛋。</li>
-<li>如果当前包含的数据节点个数没有超过最大数目，直接应用在其中。</li>
-<li>如果四个子节点为空，就先创建</li>
-<li>然后再递归插入</li>
-</ul>
-<pre><code><span class="type">void</span> <span class="type">TBQuadTreeGatherDataInRange</span>(<span class="type">TBQuadTreeNode</span>* node, <span class="type">TBBoundingBox</span> <span class="type">range</span>, <span class="type">TBDataReturnBlock</span> <span class="keyword">block</span>)
-{
-    <span class="keyword">if</span> (!<span class="type">TBBoundingBoxIntersectsBoundingBox</span>(node-&gt;boundingBox, <span class="type">range</span>)) {
-        <span class="keyword">return</span>;
-    }
-
-    <span class="keyword">for</span> (<span class="type">int</span> i = <span class="number">0</span>; i &lt; node-&gt;count; i++) {
-        <span class="keyword">if</span> (<span class="type">TBBoundingBoxContainsData</span>(<span class="type">range</span>, node-&gt;points[i])) {
-            <span class="keyword">block</span>(node-&gt;points[i]);
-        }
-    }
-
-    <span class="keyword">if</span> (node-&gt;northWest == <span class="type">NULL</span>) {
-        <span class="keyword">return</span>;
-    }
-
-    <span class="type">TBQuadTreeGatherDataInRange</span>(node-&gt;northWest, <span class="type">range</span>, <span class="keyword">block</span>);
-    <span class="type">TBQuadTreeGatherDataInRange</span>(node-&gt;northEast, <span class="type">range</span>, <span class="keyword">block</span>);
-    <span class="type">TBQuadTreeGatherDataInRange</span>(node-&gt;southWest, <span class="type">range</span>, <span class="keyword">block</span>);
-    <span class="type">TBQuadTreeGatherDataInRange</span>(node-&gt;southEast, <span class="type">range</span>, <span class="keyword">block</span>);
-}
-</code></pre><p>这个就是通过DFS进行节点的遍历，一旦有落在range内的数据节点，就进行回调。</p>
-<p><strong>综上所述，就是一个基本的四叉树，可以很明显的看到，在四叉树的构建、遍历中，都用了树的递归，也就是俗称的DFS算法。</strong></p>
-<h4 id="TBCoordinateQuadTree">TBCoordinateQuadTree</h4><p>这个类呢，和实质上的四叉树或者性能优化并无太大关系，只是一层简单的封装，我们大致来了解一下就好。</p>
-<pre><code><span class="keyword">TBBoundingBox </span><span class="keyword">TBBoundingBoxForMapRect(MKMapRect </span>mapRect)
-{
-    CLLocationCoordinate2D topLeft = MKCoordinateForMapPoint(mapRect.origin)<span class="comment">;</span>
-    CLLocationCoordinate2D <span class="keyword">botRight </span>= MKCoordinateForMapPoint(MKMapPointMake(MKMapRectGetMaxX(mapRect), MKMapRectGetMaxY(mapRect)))<span class="comment">;</span>
-
-    CLLocationDegrees minLat = <span class="keyword">botRight.latitude;
-</span>    CLLocationDegrees maxLat = topLeft.latitude<span class="comment">;</span>
-
-    CLLocationDegrees minLon = topLeft.longitude<span class="comment">;</span>
-    CLLocationDegrees maxLon = <span class="keyword">botRight.longitude;
-</span>
-    return <span class="keyword">TBBoundingBoxMake(minLat, </span>minLon, maxLat, maxLon)<span class="comment">;</span>
-}
-
-<span class="label">MKMapRect</span> TBMapRectForBoundingBox(<span class="keyword">TBBoundingBox </span><span class="keyword">boundingBox)
-</span>{
-    MKMapPoint topLeft = MKMapPointForCoordinate(CLLocationCoordinate2DMake(<span class="keyword">boundingBox.x0, </span><span class="keyword">boundingBox.y0));
-</span>    MKMapPoint <span class="keyword">botRight </span>= MKMapPointForCoordinate(CLLocationCoordinate2DMake(<span class="keyword">boundingBox.xf, </span><span class="keyword">boundingBox.yf));
-</span>
-    return MKMapRectMake(topLeft.x, <span class="keyword">botRight.y, </span>fabs(<span class="keyword">botRight.x </span>- topLeft.x), fabs(<span class="keyword">botRight.y </span>- topLeft.y))<span class="comment">;</span>
-}
-</code></pre><p>这两个函数就是MKMapRect和我们的BoundingBox之间的转换，难度很小，但是很有意思啊。从中我们可以一窥MapView的一些实现。比如MapView不仅仅是传统的ContentView和ContainerView，更重要的其坐标系和传统的CGRect之间的无法换算，<strong>简而言之，就是，在MapView中，所有的东西都要拿经度纬度来谈。</strong></p>
-<pre><code>- (<span class="built_in">NSArray</span> *)clusteredAnnotationsWithinMapRect:(<span class="built_in">MKMapRect</span>)rect withZoomScale:(<span class="keyword">double</span>)zoomScale
-{
-     <span class="comment">// 1.</span>
-    <span class="keyword">double</span> TBCellSize = TBCellSizeForZoomScale(zoomScale);
-    <span class="keyword">double</span> scaleFactor = zoomScale / TBCellSize;
-
-     <span class="comment">// 2.</span>
-    <span class="built_in">NSInteger</span> minX = floor(<span class="built_in">MKMapRectGetMinX</span>(rect) * scaleFactor);
-    <span class="built_in">NSInteger</span> maxX = floor(<span class="built_in">MKMapRectGetMaxX</span>(rect) * scaleFactor);
-    <span class="built_in">NSInteger</span> minY = floor(<span class="built_in">MKMapRectGetMinY</span>(rect) * scaleFactor);
-    <span class="built_in">NSInteger</span> maxY = floor(<span class="built_in">MKMapRectGetMaxY</span>(rect) * scaleFactor);
-
-    <span class="built_in">NSMutableArray</span> *clusteredAnnotations = [[<span class="built_in">NSMutableArray</span> alloc] init];
-    <span class="keyword">for</span> (<span class="built_in">NSInteger</span> x = minX; x &lt;= maxX; x++) {
-        <span class="keyword">for</span> (<span class="built_in">NSInteger</span> y = minY; y &lt;= maxY; y++) {
-            <span class="built_in">MKMapRect</span> mapRect = <span class="built_in">MKMapRectMake</span>(x / scaleFactor, y / scaleFactor, <span class="number">1.0</span> / scaleFactor, <span class="number">1.0</span> / scaleFactor);
-
-            __block <span class="keyword">double</span> totalX = <span class="number">0</span>;
-            __block <span class="keyword">double</span> totalY = <span class="number">0</span>;
-            __block <span class="keyword">int</span> count = <span class="number">0</span>;
-
-            <span class="built_in">NSMutableArray</span> *names = [[<span class="built_in">NSMutableArray</span> alloc] init];
-            <span class="built_in">NSMutableArray</span> *phoneNumbers = [[<span class="built_in">NSMutableArray</span> alloc] init];
-
-              <span class="comment">// 3.</span>
-            TBQuadTreeGatherDataInRange(<span class="keyword">self</span><span class="variable">.root</span>, TBBoundingBoxForMapRect(mapRect), ^(TBQuadTreeNodeData data) {
-                totalX += data<span class="variable">.x</span>;
-                totalY += data<span class="variable">.y</span>;
-                count++;
-
-                TBHotelInfo hotelInfo = *(TBHotelInfo *)data<span class="variable">.data</span>;
-                [names addObject:[<span class="built_in">NSString</span> stringWithFormat:<span class="string">@"%s"</span>, hotelInfo<span class="variable">.hotelName</span>]];
-                [phoneNumbers addObject:[<span class="built_in">NSString</span> stringWithFormat:<span class="string">@"%s"</span>, hotelInfo<span class="variable">.hotelPhoneNumber</span>]];
-            });
-
-              <span class="comment">// 4.</span>
-            <span class="keyword">if</span> (count == <span class="number">1</span>) {
-                CLLocationCoordinate2D coordinate = CLLocationCoordinate2DMake(totalX, totalY);
-                TBClusterAnnotation *annotation = [[TBClusterAnnotation alloc] initWithCoordinate:coordinate count:count];
-                annotation<span class="variable">.title</span> = [names lastObject];
-                annotation<span class="variable">.subtitle</span> = [phoneNumbers lastObject];
-                [clusteredAnnotations addObject:annotation];
-            }
-
-           <span class="comment">// 5.</span>
-            <span class="keyword">if</span> (count &gt; <span class="number">1</span>) {
-                CLLocationCoordinate2D coordinate = CLLocationCoordinate2DMake(totalX / count, totalY / count);
-                TBClusterAnnotation *annotation = [[TBClusterAnnotation alloc] initWithCoordinate:coordinate count:count];
-                [clusteredAnnotations addObject:annotation];
-            }
-        }
-    }
-
-    <span class="keyword">return</span> [<span class="built_in">NSArray</span> arrayWithArray:clusteredAnnotations];
-}
-</code></pre><p>而上述的最后一个函数，就是根据传入的MKMapRect，返回簇类数组的。</p>
-<ul>
-<li>1.首先根据放缩比例，或者Cell大小。</li>
-<li>2.根据cell大小计算当前地图区域的范围所对应的minX - maxX，minY - maxY对应的网格。</li>
-</ul>
-<p>什么是网格？就是根据Cell大小将地图划分成了一块块区域，通过minX， maxX, minY - maxY找到对应的网格。类似于array[1][2]找到第二行第三列的网格（从0开始索引）。</p>
-<ul>
-<li>3.遍历每一个网格，获取当前网格对应的四叉树节点中的数据信息，并记录个数。</li>
-<li>4.如果个数是1，那么直接显示，包含数据节点的附加信息，比如在这里就是酒店名称和酒店电话。</li>
-<li>5.如果个数大于1的话，利用均值计算中心点，中心点是所有包含的数据节点平均值，同时信息只简单的显示个数。</li>
-</ul>
-<p>至此，整个代码就解读完整啦。</p>
-
-      
-    </div>
-    <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/12/11/TBAnnotationClustering/" data-id="cit7be7ub000qbsi1n5vkuucs" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/12/11/LLDB-1/" data-id="ciuml8fpg001p82i1bgyi74iz" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
@@ -3200,7 +3163,7 @@ TBBoundingBox TBBoundingBoxMake(<span class="built_in">double</span> x0, <span c
   <div class="widget-wrap">
     <h3 class="widget-title">Tags</h3>
     <div class="widget">
-      <ul class="tag-list"><li class="tag-list-item"><a class="tag-list-link" href="/tags/Android/">Android</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Growth/">Growth</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/JavaScript/">JavaScript</a><span class="tag-list-count">3</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Math/">Math</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/R/">R</a><span class="tag-list-count">2</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Reverse-Engineering/">Reverse Engineering</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Swift/">Swift</a><span class="tag-list-count">6</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/iOS/">iOS</a><span class="tag-list-count">17</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/shell/">shell</a><span class="tag-list-count">1</span></li></ul>
+      <ul class="tag-list"><li class="tag-list-item"><a class="tag-list-link" href="/tags/Android/">Android</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Growth/">Growth</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/JavaScript/">JavaScript</a><span class="tag-list-count">3</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Math/">Math</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/R/">R</a><span class="tag-list-count">2</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Reverse-Engineering/">Reverse Engineering</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Swift/">Swift</a><span class="tag-list-count">6</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/iOS/">iOS</a><span class="tag-list-count">18</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/shell/">shell</a><span class="tag-list-count">1</span></li></ul>
     </div>
   </div>
 
@@ -3218,7 +3181,7 @@ TBBoundingBox TBBoundingBoxMake(<span class="built_in">double</span> x0, <span c
   <div class="widget-wrap">
     <h3 class="widget-title">Archives</h3>
     <div class="widget">
-      <ul class="archive-list"><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/09/">September 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/07/">July 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/05/">May 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/04/">April 2016</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/03/">March 2016</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/02/">February 2016</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/12/">December 2015</a><span class="archive-list-count">6</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/11/">November 2015</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/10/">October 2015</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/09/">September 2015</a><span class="archive-list-count">4</span></li></ul>
+      <ul class="archive-list"><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/10/">October 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/09/">September 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/07/">July 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/05/">May 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/04/">April 2016</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/03/">March 2016</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/02/">February 2016</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/12/">December 2015</a><span class="archive-list-count">6</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/11/">November 2015</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/10/">October 2015</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/09/">September 2015</a><span class="archive-list-count">4</span></li></ul>
     </div>
   </div>
 
@@ -3228,6 +3191,10 @@ TBBoundingBox TBBoundingBoxMake(<span class="built_in">double</span> x0, <span c
     <h3 class="widget-title">Recents</h3>
     <div class="widget">
       <ul>
+        
+          <li>
+            <a href="/2016/10/23/multithread-dangling-pointer/">浅谈一种解决多线程野指针的新思路</a>
+          </li>
         
           <li>
             <a href="/2016/09/17/uiwindow-iOS/">浅谈iOS的多Window处理</a>
@@ -3243,10 +3210,6 @@ TBBoundingBox TBBoundingBoxMake(<span class="built_in">double</span> x0, <span c
         
           <li>
             <a href="/2016/04/26/blank-space-in-html/">HTML中的“空白符”，你真的懂了吗？</a>
-          </li>
-        
-          <li>
-            <a href="/2016/04/11/dispatch-once/">滥用单例之dispatch_once死锁</a>
           </li>
         
       </ul>

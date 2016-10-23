@@ -62,6 +62,305 @@
       <div class="outer">
         <section id="main">
   
+    <article id="post-TBAnnotationClustering" class="article article-type-post" itemscope itemprop="blogPost">
+  <div class="article-meta">
+    <a href="/2015/12/11/TBAnnotationClustering/" class="article-date">
+  <time datetime="2015-12-10T16:56:04.000Z" itemprop="datePublished">2015-12-11</time>
+</a>
+    
+  </div>
+  <div class="article-inner">
+    
+    
+      <header class="article-header">
+        
+  
+    <h1 itemprop="name">
+      <a class="article-title" href="/2015/12/11/TBAnnotationClustering/">TBAnnotationClustering源码解析</a>
+    </h1>
+  
+
+      </header>
+    
+    <div class="article-entry" itemprop="articleBody">
+      
+        <p>毕设这两天飞一般的加速，终于可以写写源码解析了，嘿嘿，这周读两个跟性能相关的源码，首先是一个跟地图相关的，今天来看看一个数据结构在iOS开发中的妙用。</p>
+<h3 id="TBAnnotationClustering">TBAnnotationClustering</h3><p>我们都知道，MapView的实现机制其实和UITableView类似，首先他们都是基于UIScrollView支持滑动的，此外，他们都采用了循环服用的机制了来保持内存的开销。</p>
+<p><strong>但是</strong>，两者之间有个很大的区别就是数量级的差距，UITableView就算充满整个屏幕，充其量也就是10多个同时可见的VisibleCell，因此就多维护一个大小是VisibleCells数量 ＋ 2的这样一个循环队列，进行复用。但是MapView就不一样了，地图上同时展示一段范围内几千个Point of Interest是非常有可能的，这一下子的内存开销和性能卡顿就非常不得了，因此我们需要一种合理的手段来避免，这就是我们今天要讲解的TBAnnotationClustering的由来。</p>
+<p><a href="https://github.com/thoughtbot/TBAnnotationClustering" target="_blank" rel="external">Github地址</a></p>
+<h3 id="Level_of_Detail">Level of Detail</h3><p>首先，让我们先介绍一下相关背景知识。</p>
+<p>根据图像渲染的理论我们可以知道，人的视野存在焦点区域和盲点区域，总是更倾向于关注处于视线左上角到视线中心部分的。因此，在现实应用中，如游戏场景，当场景需要展现的模型距离视线焦点非常近时，就采用高精度的模型来进行展示；而到模型处于较远位置时，比如体育游戏的场外观众，就可以采用低精度模型进行替换，减少渲染时候的计算量；而到模型所处位置基本可以考虑成为背景时，则会采用基本图元进行展示。通过这种方法，即保证了场景的真实观感，同时又大大减少了不必要的计算量。这也就是通常计算机图形学领域所谓的Level Of Detail技术。</p>
+<h3 id="QuadTree">QuadTree</h3><p>QuadTree可能很多人会比较陌生，但是一提到他的哥哥 － 二叉树，想必大家不会陌生，所以QuadTree又被称为四叉树，关于四叉树的定义，</p>
+<blockquote><br>A quadtree is a tree data structure in which each internal node has exactly four children.<br></blockquote>
+
+<p>四叉树被广泛的运用于空间划分。通过将空间递归划分不同层次的子结构，可以达到较高的空间数据插入和查询效果。</p>
+<p>下面就是一张比较经典的四叉树构造，首先先将一个大空间划分为四个字空间 a b c d。然后根据每一个子空间内的节点个数再进行细分。<strong>这里要强调一点，四叉树的细分没有具体要求，你可以按你的需求划分成每个节点能只包含一个，也可以根据平衡减少划分次数。</strong></p>
+<p><img src="http://img.blog.csdn.net/20131005154434687?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvemhvdXh1Z3VhbmcyMzY=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast"></p>
+<h3 id="TBAnnotationClustering源码讲解">TBAnnotationClustering源码讲解</h3><p>打开这个项目，粗略过一下项目结构，大致需要关注的代码如下：</p>
+<ul>
+<li>TBQuadTree.h/.m</li>
+<li>TBCoordinateQuadTree.h/.m</li>
+</ul>
+<p>让我们一个个来分析</p>
+<h4 id="TBQuadTree">TBQuadTree</h4><p>毫无疑问，从文件名称来看，我们就知道，这个类就代表基础的四叉树数据结构，首先让我们来看看数据结构的定义</p>
+<pre><code><span class="keyword">typedef</span> <span class="class"><span class="keyword">struct</span> <span class="title">TBQuadTreeNodeData</span> </span>{
+    <span class="built_in">double</span> x;
+    <span class="built_in">double</span> y;
+    <span class="keyword">void</span>* data;
+} TBQuadTreeNodeData;
+TBQuadTreeNodeData TBQuadTreeNodeDataMake(<span class="built_in">double</span> x, <span class="built_in">double</span> y, <span class="keyword">void</span>* data);
+</code></pre><p>这个毫无疑问，就是代表的坐标系的<strong>数据节点</strong>。 (x, y)表征坐标点，void *data自由的指向附加的数据。</p>
+<pre><code><span class="keyword">typedef</span> <span class="class"><span class="keyword">struct</span> <span class="title">TBBoundingBox</span> </span>{
+    <span class="built_in">double</span> x0; <span class="built_in">double</span> y0;
+    <span class="built_in">double</span> xf; <span class="built_in">double</span> yf;
+} TBBoundingBox;
+TBBoundingBox TBBoundingBoxMake(<span class="built_in">double</span> x0, <span class="built_in">double</span> y0, <span class="built_in">double</span> xf, <span class="built_in">double</span> yf);
+</code></pre><p>这个同样很简单，用两个对角点限定了一个长方形区域，也就是一个四叉树的节点究竟包含哪些范围。</p>
+<pre><code><span class="label">typedef</span> <span class="keyword">struct </span>quadTreeNode {
+    <span class="keyword">struct </span>quadTreeNode* northWest<span class="comment">;</span>
+    <span class="keyword">struct </span>quadTreeNode* northEast<span class="comment">;</span>
+    <span class="keyword">struct </span>quadTreeNode* southWest<span class="comment">;</span>
+    <span class="keyword">struct </span>quadTreeNode* southEast<span class="comment">;</span>
+    <span class="keyword">TBBoundingBox </span><span class="keyword">boundingBox;
+</span>    int <span class="keyword">bucketCapacity;
+</span>    TBQuadTreeNodeData *points<span class="comment">;</span>
+    int count<span class="comment">;</span>
+} TBQuadTreeNode<span class="comment">;</span>
+<span class="label">TBQuadTreeNode</span>* TBQuadTreeNodeMake(<span class="keyword">TBBoundingBox </span><span class="keyword">boundary, </span>int <span class="keyword">bucketCapacity);</span>
+</code></pre><p>这个稍微复杂点，是四叉树的树节点，其中</p>
+<ul>
+<li>northWest, northEast, southWest, southEast分别代表四叉树的四个子细分区域。</li>
+<li>bondingBox代表的当前这个树节点的涵盖区域。</li>
+<li>bucketCapacity表示这个树节点最大容纳的数据节点个数</li>
+<li>points 数据节点数组</li>
+<li>count 当前包含了数据节点。</li>
+</ul>
+<p><strong>再次强调，千万不要把树节点和数据节点搞混。树节点指的是四叉树上的数据结构，每个树节点最多有四个子树节点，但是可以有bucketCapacity大小的数据节点，数据节点仅仅是用来封装坐标系和其相关的数据的一个数据结构，非四叉树特有。</strong></p>
+<p>看完了数据定义，我们再来看看其实现部分。</p>
+<pre><code><span class="preprocessor">#<span class="keyword">pragma</span> mark - Constructors</span>
+
+<span class="function">TBQuadTreeNodeData <span class="title">TBQuadTreeNodeDataMake</span><span class="params">(<span class="keyword">double</span> x, <span class="keyword">double</span> y, <span class="keyword">void</span>* data)</span>
+</span>{
+    TBQuadTreeNodeData d; d.x = x; d.y = y; d.data = data;
+    <span class="keyword">return</span> d;
+}
+
+<span class="function">TBBoundingBox <span class="title">TBBoundingBoxMake</span><span class="params">(<span class="keyword">double</span> x0, <span class="keyword">double</span> y0, <span class="keyword">double</span> xf, <span class="keyword">double</span> yf)</span>
+</span>{
+    TBBoundingBox bb; bb.x0 = x0; bb.y0 = y0; bb.xf = xf; bb.yf = yf;
+    <span class="keyword">return</span> bb;
+}
+
+<span class="function">TBQuadTreeNode* <span class="title">TBQuadTreeNodeMake</span><span class="params">(TBBoundingBox boundary, <span class="keyword">int</span> bucketCapacity)</span>
+</span>{
+    TBQuadTreeNode* node = <span class="built_in">malloc</span>(<span class="keyword">sizeof</span>(TBQuadTreeNode));
+    node-&gt;northWest = <span class="literal">NULL</span>;
+    node-&gt;northEast = <span class="literal">NULL</span>;
+    node-&gt;southWest = <span class="literal">NULL</span>;
+    node-&gt;southEast = <span class="literal">NULL</span>;
+
+    node-&gt;boundingBox = boundary;
+    node-&gt;bucketCapacity = bucketCapacity;
+    node-&gt;count = <span class="number">0</span>;
+    node-&gt;points = <span class="built_in">malloc</span>(<span class="keyword">sizeof</span>(TBQuadTreeNodeData) * bucketCapacity);
+
+    <span class="keyword">return</span> node;
+}
+</code></pre><p>这三个构造函数，分别是构造<span style="color:red">数据节点</span>、长方形以及<span style="color:blue">四叉树节点</span>，默认情况下四叉树的节点<strong>并非满构造</strong>，而是初始化为空，根据需要插入新节点。</p>
+<pre><code><span class="label">#pragma</span> <span class="keyword">mark </span>- <span class="keyword">Bounding </span><span class="keyword">Box </span>Functions
+
+<span class="keyword">bool </span><span class="keyword">TBBoundingBoxContainsData(TBBoundingBox </span><span class="keyword">box, </span>TBQuadTreeNodeData <span class="preprocessor">data</span>)
+{
+    <span class="keyword">bool </span>containsX = <span class="keyword">box.x0 </span>&lt;= <span class="preprocessor">data</span>.x &amp;&amp; <span class="preprocessor">data</span>.x &lt;= <span class="keyword">box.xf;
+</span>    <span class="keyword">bool </span>containsY = <span class="keyword">box.y0 </span>&lt;= <span class="preprocessor">data</span>.y &amp;&amp; <span class="preprocessor">data</span>.y &lt;= <span class="keyword">box.yf;
+</span>
+    return containsX &amp;&amp; containsY<span class="comment">;</span>
+}
+
+<span class="keyword">bool </span><span class="keyword">TBBoundingBoxIntersectsBoundingBox(TBBoundingBox </span><span class="keyword">b1, </span><span class="keyword">TBBoundingBox </span><span class="keyword">b2)
+</span>{
+    return (<span class="keyword">b1.x0 </span>&lt;= <span class="keyword">b2.xf </span>&amp;&amp; <span class="keyword">b1.xf </span>&gt;= <span class="keyword">b2.x0 </span>&amp;&amp; <span class="keyword">b1.y0 </span>&lt;= <span class="keyword">b2.yf </span>&amp;&amp; <span class="keyword">b1.yf </span>&gt;= <span class="keyword">b2.y0);
+</span>}
+</code></pre><p>随后就是上面两个判断长方形包含和相交的方法了，包含自然是整个包围。而相交的补集是不相交，即在横坐标上一个长方形的xf另一个长方形的x0抑或是一个长方形的x0完全大于另一个长方形的xf，当然在y轴上也是同理，因此通过补集很容易就理解TBBoundingBoxIntersectsBoundingBox的实现了。</p>
+<p>然后来看看非常重要的几个函数，首先是<strong>TBQuadTreeNodeSubdivide</strong></p>
+<pre><code><span class="label">void</span> TBQuadTreeNodeSubdivide(TBQuadTreeNode* node)
+{
+    <span class="keyword">TBBoundingBox </span><span class="keyword">box </span>= node-&gt;<span class="keyword">boundingBox;
+</span>
+    double xMid = (<span class="keyword">box.xf </span>+ <span class="keyword">box.x0) </span>/ <span class="number">2</span>.<span class="number">0</span><span class="comment">;</span>
+    double yMid = (<span class="keyword">box.yf </span>+ <span class="keyword">box.y0) </span>/ <span class="number">2</span>.<span class="number">0</span><span class="comment">;</span>
+
+    <span class="keyword">TBBoundingBox </span>northWest = <span class="keyword">TBBoundingBoxMake(box.x0, </span><span class="keyword">box.y0, </span>xMid, yMid)<span class="comment">;</span>
+    node-&gt;northWest = TBQuadTreeNodeMake(northWest, node-&gt;<span class="keyword">bucketCapacity);
+</span>
+    <span class="keyword">TBBoundingBox </span>northEast = <span class="keyword">TBBoundingBoxMake(xMid, </span><span class="keyword">box.y0, </span><span class="keyword">box.xf, </span>yMid)<span class="comment">;</span>
+    node-&gt;northEast = TBQuadTreeNodeMake(northEast, node-&gt;<span class="keyword">bucketCapacity);
+</span>
+    <span class="keyword">TBBoundingBox </span>southWest = <span class="keyword">TBBoundingBoxMake(box.x0, </span>yMid, xMid, <span class="keyword">box.yf);
+</span>    node-&gt;southWest = TBQuadTreeNodeMake(southWest, node-&gt;<span class="keyword">bucketCapacity);
+</span>
+    <span class="keyword">TBBoundingBox </span>southEast = <span class="keyword">TBBoundingBoxMake(xMid, </span>yMid, <span class="keyword">box.xf, </span><span class="keyword">box.yf);
+</span>    node-&gt;southEast = TBQuadTreeNodeMake(southEast, node-&gt;<span class="keyword">bucketCapacity);
+</span>}
+</code></pre><p>这个函数负责将四叉树节点进行细分。首先获取当前节点负责的长方形区域的中点，然后根据中点到原有长方形的四个顶点，分成四个象限，进行划分。<strong>这个时候请注意</strong>，还只是进行四叉树节点的细分，还没重新更改数据节点的分布。</p>
+<pre><code><span class="keyword">bool</span> TBQuadTreeNodeInsertData(TBQuadTreeNode* node, TBQuadTreeNodeData data)
+{
+    <span class="keyword">if</span> (!TBBoundingBoxContainsData(node-&gt;boundingBox, data)) {
+        <span class="keyword">return</span> <span class="keyword">false</span>;
+    }
+
+    <span class="keyword">if</span> (node-&gt;count &lt; node-&gt;bucketCapacity) {
+        node-&gt;points[node-&gt;count++] = data;
+        <span class="keyword">return</span> <span class="keyword">true</span>;
+    }
+
+    <span class="keyword">if</span> (node-&gt;northWest == <span class="keyword">NULL</span>) {
+        TBQuadTreeNodeSubdivide(node);
+    }
+
+    <span class="keyword">if</span> (TBQuadTreeNodeInsertData(node-&gt;northWest, data)) <span class="keyword">return</span> <span class="keyword">true</span>;
+    <span class="keyword">if</span> (TBQuadTreeNodeInsertData(node-&gt;northEast, data)) <span class="keyword">return</span> <span class="keyword">true</span>;
+    <span class="keyword">if</span> (TBQuadTreeNodeInsertData(node-&gt;southWest, data)) <span class="keyword">return</span> <span class="keyword">true</span>;
+    <span class="keyword">if</span> (TBQuadTreeNodeInsertData(node-&gt;southEast, data)) <span class="keyword">return</span> <span class="keyword">true</span>;
+
+    <span class="keyword">return</span> <span class="keyword">false</span>;
+}
+</code></pre><p>这个函数则是真正的将数据插入到节点中。</p>
+<ul>
+<li>首先先判断这个数据是否落在该长方形中，不是直接滚蛋。</li>
+<li>如果当前包含的数据节点个数没有超过最大数目，直接应用在其中。</li>
+<li>如果四个子节点为空，就先创建</li>
+<li>然后再递归插入</li>
+</ul>
+<pre><code><span class="type">void</span> <span class="type">TBQuadTreeGatherDataInRange</span>(<span class="type">TBQuadTreeNode</span>* node, <span class="type">TBBoundingBox</span> <span class="type">range</span>, <span class="type">TBDataReturnBlock</span> <span class="keyword">block</span>)
+{
+    <span class="keyword">if</span> (!<span class="type">TBBoundingBoxIntersectsBoundingBox</span>(node-&gt;boundingBox, <span class="type">range</span>)) {
+        <span class="keyword">return</span>;
+    }
+
+    <span class="keyword">for</span> (<span class="type">int</span> i = <span class="number">0</span>; i &lt; node-&gt;count; i++) {
+        <span class="keyword">if</span> (<span class="type">TBBoundingBoxContainsData</span>(<span class="type">range</span>, node-&gt;points[i])) {
+            <span class="keyword">block</span>(node-&gt;points[i]);
+        }
+    }
+
+    <span class="keyword">if</span> (node-&gt;northWest == <span class="type">NULL</span>) {
+        <span class="keyword">return</span>;
+    }
+
+    <span class="type">TBQuadTreeGatherDataInRange</span>(node-&gt;northWest, <span class="type">range</span>, <span class="keyword">block</span>);
+    <span class="type">TBQuadTreeGatherDataInRange</span>(node-&gt;northEast, <span class="type">range</span>, <span class="keyword">block</span>);
+    <span class="type">TBQuadTreeGatherDataInRange</span>(node-&gt;southWest, <span class="type">range</span>, <span class="keyword">block</span>);
+    <span class="type">TBQuadTreeGatherDataInRange</span>(node-&gt;southEast, <span class="type">range</span>, <span class="keyword">block</span>);
+}
+</code></pre><p>这个就是通过DFS进行节点的遍历，一旦有落在range内的数据节点，就进行回调。</p>
+<p><strong>综上所述，就是一个基本的四叉树，可以很明显的看到，在四叉树的构建、遍历中，都用了树的递归，也就是俗称的DFS算法。</strong></p>
+<h4 id="TBCoordinateQuadTree">TBCoordinateQuadTree</h4><p>这个类呢，和实质上的四叉树或者性能优化并无太大关系，只是一层简单的封装，我们大致来了解一下就好。</p>
+<pre><code><span class="keyword">TBBoundingBox </span><span class="keyword">TBBoundingBoxForMapRect(MKMapRect </span>mapRect)
+{
+    CLLocationCoordinate2D topLeft = MKCoordinateForMapPoint(mapRect.origin)<span class="comment">;</span>
+    CLLocationCoordinate2D <span class="keyword">botRight </span>= MKCoordinateForMapPoint(MKMapPointMake(MKMapRectGetMaxX(mapRect), MKMapRectGetMaxY(mapRect)))<span class="comment">;</span>
+
+    CLLocationDegrees minLat = <span class="keyword">botRight.latitude;
+</span>    CLLocationDegrees maxLat = topLeft.latitude<span class="comment">;</span>
+
+    CLLocationDegrees minLon = topLeft.longitude<span class="comment">;</span>
+    CLLocationDegrees maxLon = <span class="keyword">botRight.longitude;
+</span>
+    return <span class="keyword">TBBoundingBoxMake(minLat, </span>minLon, maxLat, maxLon)<span class="comment">;</span>
+}
+
+<span class="label">MKMapRect</span> TBMapRectForBoundingBox(<span class="keyword">TBBoundingBox </span><span class="keyword">boundingBox)
+</span>{
+    MKMapPoint topLeft = MKMapPointForCoordinate(CLLocationCoordinate2DMake(<span class="keyword">boundingBox.x0, </span><span class="keyword">boundingBox.y0));
+</span>    MKMapPoint <span class="keyword">botRight </span>= MKMapPointForCoordinate(CLLocationCoordinate2DMake(<span class="keyword">boundingBox.xf, </span><span class="keyword">boundingBox.yf));
+</span>
+    return MKMapRectMake(topLeft.x, <span class="keyword">botRight.y, </span>fabs(<span class="keyword">botRight.x </span>- topLeft.x), fabs(<span class="keyword">botRight.y </span>- topLeft.y))<span class="comment">;</span>
+}
+</code></pre><p>这两个函数就是MKMapRect和我们的BoundingBox之间的转换，难度很小，但是很有意思啊。从中我们可以一窥MapView的一些实现。比如MapView不仅仅是传统的ContentView和ContainerView，更重要的其坐标系和传统的CGRect之间的无法换算，<strong>简而言之，就是，在MapView中，所有的东西都要拿经度纬度来谈。</strong></p>
+<pre><code>- (<span class="built_in">NSArray</span> *)clusteredAnnotationsWithinMapRect:(<span class="built_in">MKMapRect</span>)rect withZoomScale:(<span class="keyword">double</span>)zoomScale
+{
+     <span class="comment">// 1.</span>
+    <span class="keyword">double</span> TBCellSize = TBCellSizeForZoomScale(zoomScale);
+    <span class="keyword">double</span> scaleFactor = zoomScale / TBCellSize;
+
+     <span class="comment">// 2.</span>
+    <span class="built_in">NSInteger</span> minX = floor(<span class="built_in">MKMapRectGetMinX</span>(rect) * scaleFactor);
+    <span class="built_in">NSInteger</span> maxX = floor(<span class="built_in">MKMapRectGetMaxX</span>(rect) * scaleFactor);
+    <span class="built_in">NSInteger</span> minY = floor(<span class="built_in">MKMapRectGetMinY</span>(rect) * scaleFactor);
+    <span class="built_in">NSInteger</span> maxY = floor(<span class="built_in">MKMapRectGetMaxY</span>(rect) * scaleFactor);
+
+    <span class="built_in">NSMutableArray</span> *clusteredAnnotations = [[<span class="built_in">NSMutableArray</span> alloc] init];
+    <span class="keyword">for</span> (<span class="built_in">NSInteger</span> x = minX; x &lt;= maxX; x++) {
+        <span class="keyword">for</span> (<span class="built_in">NSInteger</span> y = minY; y &lt;= maxY; y++) {
+            <span class="built_in">MKMapRect</span> mapRect = <span class="built_in">MKMapRectMake</span>(x / scaleFactor, y / scaleFactor, <span class="number">1.0</span> / scaleFactor, <span class="number">1.0</span> / scaleFactor);
+
+            __block <span class="keyword">double</span> totalX = <span class="number">0</span>;
+            __block <span class="keyword">double</span> totalY = <span class="number">0</span>;
+            __block <span class="keyword">int</span> count = <span class="number">0</span>;
+
+            <span class="built_in">NSMutableArray</span> *names = [[<span class="built_in">NSMutableArray</span> alloc] init];
+            <span class="built_in">NSMutableArray</span> *phoneNumbers = [[<span class="built_in">NSMutableArray</span> alloc] init];
+
+              <span class="comment">// 3.</span>
+            TBQuadTreeGatherDataInRange(<span class="keyword">self</span><span class="variable">.root</span>, TBBoundingBoxForMapRect(mapRect), ^(TBQuadTreeNodeData data) {
+                totalX += data<span class="variable">.x</span>;
+                totalY += data<span class="variable">.y</span>;
+                count++;
+
+                TBHotelInfo hotelInfo = *(TBHotelInfo *)data<span class="variable">.data</span>;
+                [names addObject:[<span class="built_in">NSString</span> stringWithFormat:<span class="string">@"%s"</span>, hotelInfo<span class="variable">.hotelName</span>]];
+                [phoneNumbers addObject:[<span class="built_in">NSString</span> stringWithFormat:<span class="string">@"%s"</span>, hotelInfo<span class="variable">.hotelPhoneNumber</span>]];
+            });
+
+              <span class="comment">// 4.</span>
+            <span class="keyword">if</span> (count == <span class="number">1</span>) {
+                CLLocationCoordinate2D coordinate = CLLocationCoordinate2DMake(totalX, totalY);
+                TBClusterAnnotation *annotation = [[TBClusterAnnotation alloc] initWithCoordinate:coordinate count:count];
+                annotation<span class="variable">.title</span> = [names lastObject];
+                annotation<span class="variable">.subtitle</span> = [phoneNumbers lastObject];
+                [clusteredAnnotations addObject:annotation];
+            }
+
+           <span class="comment">// 5.</span>
+            <span class="keyword">if</span> (count &gt; <span class="number">1</span>) {
+                CLLocationCoordinate2D coordinate = CLLocationCoordinate2DMake(totalX / count, totalY / count);
+                TBClusterAnnotation *annotation = [[TBClusterAnnotation alloc] initWithCoordinate:coordinate count:count];
+                [clusteredAnnotations addObject:annotation];
+            }
+        }
+    }
+
+    <span class="keyword">return</span> [<span class="built_in">NSArray</span> arrayWithArray:clusteredAnnotations];
+}
+</code></pre><p>而上述的最后一个函数，就是根据传入的MKMapRect，返回簇类数组的。</p>
+<ul>
+<li>1.首先根据放缩比例，或者Cell大小。</li>
+<li>2.根据cell大小计算当前地图区域的范围所对应的minX - maxX，minY - maxY对应的网格。</li>
+</ul>
+<p>什么是网格？就是根据Cell大小将地图划分成了一块块区域，通过minX， maxX, minY - maxY找到对应的网格。类似于array[1][2]找到第二行第三列的网格（从0开始索引）。</p>
+<ul>
+<li>3.遍历每一个网格，获取当前网格对应的四叉树节点中的数据信息，并记录个数。</li>
+<li>4.如果个数是1，那么直接显示，包含数据节点的附加信息，比如在这里就是酒店名称和酒店电话。</li>
+<li>5.如果个数大于1的话，利用均值计算中心点，中心点是所有包含的数据节点平均值，同时信息只简单的显示个数。</li>
+</ul>
+<p>至此，整个代码就解读完整啦。</p>
+
+      
+    </div>
+    <footer class="article-footer">
+      <a data-url="http://satanwoo.github.io/2015/12/11/TBAnnotationClustering/" data-id="ciuml8foa000s82i1h4g81vzt" class="article-share-link">Share</a>
+      
+      
+  <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
+
+    </footer>
+  </div>
+  
+</article>
+
+
+  
     <article id="post-FDFullScreenPopGesture-Source-Code" class="article article-type-post" itemscope itemprop="blogPost">
   <div class="article-meta">
     <a href="/2015/11/26/FDFullScreenPopGesture-Source-Code/" class="article-date">
@@ -275,7 +574,7 @@ BOOL success = class_addMethod(<span class="keyword">class</span>, originalSelec
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/11/26/FDFullScreenPopGesture-Source-Code/" data-id="cit7be7vr001tbsi136y78i4o" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/11/26/FDFullScreenPopGesture-Source-Code/" data-id="ciuml8fpq001v82i1t1tbd835" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
@@ -385,7 +684,7 @@ replicationLayer.instanceDelay = <span class="number">0.3</span>
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/11/17/Fun-of-CAReplicationLayer/" data-id="cit7be7vn001rbsi12ah2htow" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/11/17/Fun-of-CAReplicationLayer/" data-id="ciuml8fpn001t82i1g1sj8n0a" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Swift/">Swift</a></li></ul>
@@ -591,7 +890,7 @@ modalVC<span class="class">.modalPresentationStyle</span> = <span class="class">
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/11/12/Swift-UITransition-iOS8/" data-id="cit7be7uc000sbsi1kkxdvjqx" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/11/12/Swift-UITransition-iOS8/" data-id="ciuml8fod000u82i1h13uioqm" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Swift/">Swift</a></li></ul>
@@ -751,7 +1050,7 @@ modalVC<span class="class">.modalPresentationStyle</span> = <span class="class">
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/11/05/Understand-Viper/" data-id="cit7be7u8000obsi1bj5x19ls" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/11/05/Understand-Viper/" data-id="ciuml8fo8000q82i1il3ghnk8" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
@@ -980,7 +1279,7 @@ objectPath.<span class="keyword">get</span>(obj, <span class="string">'a.\u1200'
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/11/05/Object-Path-Source-Code/" data-id="cit7be7uz001dbsi1wjb2693l" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/11/05/Object-Path-Source-Code/" data-id="ciuml8fp2001f82i1kq31d8v6" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/JavaScript/">JavaScript</a></li></ul>
@@ -1043,7 +1342,7 @@ objectPath.<span class="keyword">get</span>(obj, <span class="string">'a.\u1200'
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/10/29/Learn-Android-Day-by-Day/" data-id="cit7be7v9001kbsi1myzs97z1" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/10/29/Learn-Android-Day-by-Day/" data-id="ciuml8fpc001m82i17flgmv7i" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Android/">Android</a></li></ul>
@@ -1255,7 +1554,7 @@ objectPath.<span class="keyword">get</span>(obj, <span class="string">'a.\u1200'
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/10/29/Swift-Count-Down-Label/" data-id="cit7be7ug000ubsi1g45z6bx1" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/10/29/Swift-Count-Down-Label/" data-id="ciuml8fof000w82i1qejr0gk1" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Swift/">Swift</a></li></ul>
@@ -1386,7 +1685,7 @@ func computeAngle(p1:<span class="type">CGPoint</span> , p2:<span class="type">C
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/10/27/Swift-Circle-Slider/" data-id="cit7be7uj000wbsi1wblr57ad" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/10/27/Swift-Circle-Slider/" data-id="ciuml8foj000y82i14ws1dx84" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Swift/">Swift</a></li></ul>
@@ -1608,7 +1907,7 @@ func computeAngle(p1:<span class="type">CGPoint</span> , p2:<span class="type">C
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/10/14/GLCalendarView/" data-id="cit7be7vi001pbsi1imqdbloh" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/10/14/GLCalendarView/" data-id="ciuml8fpk001r82i1rd3jrlly" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
@@ -1829,7 +2128,7 @@ func computeAngle(p1:<span class="type">CGPoint</span> , p2:<span class="type">C
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/09/30/Debounce-and-Throttle-in-iOS/" data-id="cit7be7vx001xbsi1u7qsllzb" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/09/30/Debounce-and-Throttle-in-iOS/" data-id="ciuml8fpw001z82i14dc2x148" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
@@ -2130,7 +2429,7 @@ func computeAngle(p1:<span class="type">CGPoint</span> , p2:<span class="type">C
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/09/23/flux-js-part-one/" data-id="cit7be7tn0009bsi1e7y000uy" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/09/23/flux-js-part-one/" data-id="ciuml8fnp000b82i12adhvzj4" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/JavaScript/">JavaScript</a></li></ul>
@@ -2802,7 +3101,7 @@ CountryModel<span class="keyword">*</span> country = [[CountryModel alloc] initW
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/09/17/code-of-JSONModel/" data-id="cit7be7tw000hbsi1nv60yc4i" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/09/17/code-of-JSONModel/" data-id="ciuml8fnx000j82i18x09uajz" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
@@ -2850,7 +3149,7 @@ CountryModel<span class="keyword">*</span> country = [[CountryModel alloc] initW
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/09/11/A-New-Start/" data-id="cit7be7rn0000bsi1hbm3q8w5" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/09/11/A-New-Start/" data-id="ciuml8flo000082i1gkuhfmwx" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
@@ -2877,7 +3176,7 @@ CountryModel<span class="keyword">*</span> country = [[CountryModel alloc] initW
   <div class="widget-wrap">
     <h3 class="widget-title">Tags</h3>
     <div class="widget">
-      <ul class="tag-list"><li class="tag-list-item"><a class="tag-list-link" href="/tags/Android/">Android</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Growth/">Growth</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/JavaScript/">JavaScript</a><span class="tag-list-count">3</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Math/">Math</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/R/">R</a><span class="tag-list-count">2</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Reverse-Engineering/">Reverse Engineering</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Swift/">Swift</a><span class="tag-list-count">6</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/iOS/">iOS</a><span class="tag-list-count">17</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/shell/">shell</a><span class="tag-list-count">1</span></li></ul>
+      <ul class="tag-list"><li class="tag-list-item"><a class="tag-list-link" href="/tags/Android/">Android</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Growth/">Growth</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/JavaScript/">JavaScript</a><span class="tag-list-count">3</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Math/">Math</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/R/">R</a><span class="tag-list-count">2</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Reverse-Engineering/">Reverse Engineering</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Swift/">Swift</a><span class="tag-list-count">6</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/iOS/">iOS</a><span class="tag-list-count">18</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/shell/">shell</a><span class="tag-list-count">1</span></li></ul>
     </div>
   </div>
 
@@ -2895,7 +3194,7 @@ CountryModel<span class="keyword">*</span> country = [[CountryModel alloc] initW
   <div class="widget-wrap">
     <h3 class="widget-title">Archives</h3>
     <div class="widget">
-      <ul class="archive-list"><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/09/">September 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/07/">July 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/05/">May 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/04/">April 2016</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/03/">March 2016</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/02/">February 2016</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/12/">December 2015</a><span class="archive-list-count">6</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/11/">November 2015</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/10/">October 2015</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/09/">September 2015</a><span class="archive-list-count">4</span></li></ul>
+      <ul class="archive-list"><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/10/">October 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/09/">September 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/07/">July 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/05/">May 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/04/">April 2016</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/03/">March 2016</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/02/">February 2016</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/12/">December 2015</a><span class="archive-list-count">6</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/11/">November 2015</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/10/">October 2015</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/09/">September 2015</a><span class="archive-list-count">4</span></li></ul>
     </div>
   </div>
 
@@ -2905,6 +3204,10 @@ CountryModel<span class="keyword">*</span> country = [[CountryModel alloc] initW
     <h3 class="widget-title">Recents</h3>
     <div class="widget">
       <ul>
+        
+          <li>
+            <a href="/2016/10/23/multithread-dangling-pointer/">浅谈一种解决多线程野指针的新思路</a>
+          </li>
         
           <li>
             <a href="/2016/09/17/uiwindow-iOS/">浅谈iOS的多Window处理</a>
@@ -2920,10 +3223,6 @@ CountryModel<span class="keyword">*</span> country = [[CountryModel alloc] initW
         
           <li>
             <a href="/2016/04/26/blank-space-in-html/">HTML中的“空白符”，你真的懂了吗？</a>
-          </li>
-        
-          <li>
-            <a href="/2016/04/11/dispatch-once/">滥用单例之dispatch_once死锁</a>
           </li>
         
       </ul>
