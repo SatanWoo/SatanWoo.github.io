@@ -4,7 +4,7 @@
   
   <link href="/atom.xml" rel="self"/>
   <link href="http://satanwoo.github.io/"/>
-  <updated>2017-01-07T13:59:31.000Z</updated>
+  <updated>2017-01-07T14:05:17.000Z</updated>
   <id>http://satanwoo.github.io/</id>
   
   <author>
@@ -19,7 +19,7 @@
     <link href="http://satanwoo.github.io/2017/01/07/DispatchGroupCrash/"/>
     <id>http://satanwoo.github.io/2017/01/07/DispatchGroupCrash/</id>
     <published>2017-01-07T13:44:39.000Z</published>
-    <updated>2017-01-07T13:59:31.000Z</updated>
+    <updated>2017-01-07T14:05:17.000Z</updated>
     <content type="html"><![CDATA[<h3 id="起因">起因</h3><p>昨天其他部门的同事突然反馈一起相对来说比较严重的Crash问题（占比达到了yyyy左右，并且从Crash堆栈上可以发现很多情况下是一启动就Crash了）。去掉隐私数据大致堆栈如下：</p>
 <pre><code>Thread <span class="number">0</span> Crashed:
 <span class="number">0</span>   libdispatch.dylib               <span class="number">0x000000018953e828</span> _dispatch_group_leave :<span class="number">76</span> (in libdispatch.dylib)
@@ -156,7 +156,7 @@ dispatch_group_create(<span class="keyword">void</span>)
 <pre><code>Thread <span]]>
     </summary>
     
-      <category term="iOS Reverse Engineering" scheme="http://satanwoo.github.io/tags/iOS-Reverse-Engineering/"/>
+      <category term="iOS, Reverse Engineering" scheme="http://satanwoo.github.io/tags/iOS-Reverse-Engineering/"/>
     
   </entry>
   
