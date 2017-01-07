@@ -62,6 +62,232 @@
       <div class="outer">
         <section id="main">
   
+    <article id="post-JSONRPCKit" class="article article-type-post" itemscope itemprop="blogPost">
+  <div class="article-meta">
+    <a href="/2017/01/07/JSONRPCKit/" class="article-date">
+  <time datetime="2017-01-07T13:40:51.000Z" itemprop="datePublished">2017-01-07</time>
+</a>
+    
+  </div>
+  <div class="article-inner">
+    
+    
+      <header class="article-header">
+        
+  
+    <h1 itemprop="name">
+      <a class="article-title" href="/2017/01/07/JSONRPCKit/">JSONRPCKit源码解析</a>
+    </h1>
+  
+
+      </header>
+    
+    <div class="article-entry" itemprop="articleBody">
+      
+        <p>最近公司参与开源项目<code>BeeHive</code>的开发（第一版的代码是由前辈们写的，已经开源在了GitHub上的Alibaba项目里）。在参与开发的过程中，我一直在思考一个问题：基于Protocol的服务调用真的是最合理的方式吗？这种方式从某种方式来说还是一种强依赖（至少需要引入相对应的整个Protocol的头文件），能否有更通用的方式来进行呢？而且，从目前的实现进度来看，也无法做到对方法级的解耦。</p>
+<h3 id="C/S架构">C/S架构</h3><p>在传统的开发框架下，我们一般调用HTTP/HTTPS的请求的方式都是一个API接口，配合一些参数外加GET/POST的调用方式来获取远程服务器的响应返回。如：</p>
+<pre><code><span class="collection">[self.manager request:@<span class="string">"api.com"</span> withParams:@<span class="collection">{@<span class="string">"name"</span>:<span class="string">"satanwoo"</span>}</span> withCompletionBlock:^<span class="list">(<span class="keyword">id</span> responseObject)</span><span class="collection">{
+    NSLog<span class="list">(@<span class="string">"return response is %@"</span>, responseObject)</span><span class="comment">;</span>
+)]</span><span class="comment">;</span></span>
+</code></pre><h3 id="JSONRPCKit">JSONRPCKit</h3><p>JSONRPCKit是一套基于JSON RPC 2.0协议的远程服务调用框架。这套框架基于JSON格式（NULL，Boolean，String，Number，Array，Object）来传递请求以及接受返回的响应，是一套应用层之上的协议。</p>
+<p>什么意思呢？  </p>
+<ol>
+<li>所有的客户端请求首先都必须构造成JSON格式  </li>
+<li>请求中必须带有JSON RPC 2.0协议要求的字段作为标示符。  </li>
+<li>服务端在处理客户端请求的时候，就从协议指定的字段去取调用的方法名、参数、版本号等等。</li>
+<li>服务端将请求的结果也封装成复合JSON RPC要求的形式，通过JSON格式传回给客户端。</li>
+<li>客户端根据指定的字段解析返回的结果。</li>
+</ol>
+<p>如果还有不懂的，我们可以看看这篇<a href="http://wiki.geekdream.com/Specification/json-rpc_2.0.html#3" target="_blank" rel="external">文章</a>。</p>
+<p>所以，JSONRPCKit就是一套封装了该协议的框架，它主要包含如下几个类：</p>
+<ul>
+<li><code>RequestType</code> 代表着当前的请求</li>
+<li><code>BatchType</code>   代表着一个批次（即里面可以一次性包含多个请求，减少调用开销）</li>
+<li><code>BatchElementType</code> 将业务请求转换成批次请求的数据结构</li>
+<li><code>BatchFactory</code> 构造批次请求的地方</li>
+<li><code>JSONRPCError</code>  JSONRPC出错的原因</li>
+<li><code>Id</code> 代表着一次（或者一批次）请求的识别符，网络回调要和客户端请求进行ID匹配，否则谁知道哪个请求需要哪个响应。</li>
+</ul>
+<h4 id="RequestType">RequestType</h4><p>RequestType就是一个符合JSONRPCKit定义的数据结构，包含里几个主要的字段：</p>
+<pre><code>public <span class="class"><span class="keyword">protocol</span> <span class="title">RequestType</span> </span>{
+    <span class="comment">/// If `Response == Void`, request is treated as a notification.</span>
+    associatedtype <span class="type">Response</span>
+
+    <span class="keyword">var</span> method: <span class="type">String</span> { <span class="keyword">get</span> }
+    <span class="keyword">var</span> parameters: <span class="type">AnyObject</span>? { <span class="keyword">get</span> }
+    <span class="keyword">var</span> extendedFields: [<span class="type">String</span>: <span class="type">AnyObject</span>]? { <span class="keyword">get</span> }
+    <span class="keyword">var</span> isNotification: <span class="type">Bool</span> { <span class="keyword">get</span> }
+
+    <span class="func"><span class="keyword">func</span> <span class="title">responseFromResultObject</span><span class="params">(resultObject: AnyObject)</span></span> throws -&gt; <span class="type">Response</span>
+}
+</code></pre><ol>
+<li><code>method</code> 远程调用的方法名</li>
+<li><code>parameters</code> 调用该方法需要传入的参数，顺序需要严格按照方法的入餐，<strong>从左至右</strong>。</li>
+<li><code>extendFields</code> 这个在协议中并没有定义，可以理解为自身业务需要，扩展字段。</li>
+<li><code>isNotification</code> 在JSON RPC协议中规定，当请求或者相应不带有识别ID的时候，意味着这是一个全局通知，可以没有对应的解析结果。</li>
+</ol>
+<p>此外，还有一个<code>associatedType Response</code>可以定义响应的类型，用作校验。</p>
+<h4 id="BatchElementType">BatchElementType</h4><p>大家都知道，网络调用是有其延迟性和资源消耗的，每次都去建立连接（采用TCP长链接或者HTTP keep alive除外）进行资源传输是非常不划算的话，<strong>尤其是当你的数据payload非常小，在整个传输数据占比非常小的情况下就极其的蛋疼</strong>。因此，JSON RPC 协议定义了一种可以批量传输的方式：就是一批请求包在一次传输；服务端处理好了以后，同样也在一次性将数据响应返回。</p>
+<p>有人会问，那一次性批处理的响应怎么和请求对应呢？<br>这就是我们之前提到的<code>ID</code>字段的作用了，这是一个全局唯一性的识别符，请求时的id在服务端处理完后，会同样放在数据中进行返回。</p>
+<p>好了，我们来看一下这个数据结构的设计：</p>
+<pre><code><span class="comment">// 协议定义</span>
+public <span class="class"><span class="keyword">protocol</span> <span class="title">BatchElementType</span> </span>{
+    associatedtype <span class="type">Request</span>: <span class="type">RequestType</span>
+
+    <span class="keyword">var</span> request: <span class="type">Request</span> { <span class="keyword">get</span> }
+    <span class="keyword">var</span> version: <span class="type">String</span> { <span class="keyword">get</span> }
+    <span class="keyword">var</span> id: <span class="type">Id</span>? { <span class="keyword">get</span> }
+    <span class="keyword">var</span> body: <span class="type">AnyObject</span> { <span class="keyword">get</span> }
+
+    <span class="func"><span class="keyword">func</span> <span class="title">responseFromObject</span><span class="params">(object: AnyObject)</span></span> throws -&gt; <span class="type">Request</span>.<span class="type">Response</span>
+    <span class="func"><span class="keyword">func</span> <span class="title">responseFromBatchObjects</span><span class="params">(objects: [AnyObject])</span></span> throws -&gt; <span class="type">Request</span>.<span class="type">Response</span>
+
+    <span class="func"><span class="keyword">func</span> <span class="title">resultFromObject</span><span class="params">(object: AnyObject)</span></span> -&gt; <span class="type">Result</span>&lt;<span class="type">Request</span>.<span class="type">Response</span>, <span class="type">JSONRPCError</span>&gt;
+    <span class="func"><span class="keyword">func</span> <span class="title">resultFromBatchObjects</span><span class="params">(objects: [AnyObject])</span></span> -&gt; <span class="type">Result</span>&lt;<span class="type">Request</span>.<span class="type">Response</span>, <span class="type">JSONRPCError</span>&gt;
+}
+
+<span class="comment">// 具体实现</span>
+public <span class="class"><span class="keyword">struct</span> <span class="title">BatchElement</span>&lt;<span class="title">Request</span>: <span class="title">RequestType</span>&gt;: <span class="title">BatchElementType</span> </span>{
+    public <span class="keyword">let</span> request: <span class="type">Request</span>
+    public <span class="keyword">let</span> version: <span class="type">String</span>
+    public <span class="keyword">let</span> id: <span class="type">Id</span>?
+    public <span class="keyword">let</span> body: <span class="type">AnyObject</span>
+
+    public <span class="keyword">init</span>(request: <span class="type">Request</span>, version: <span class="type">String</span>, id: <span class="type">Id</span>) {
+        <span class="keyword">let</span> id: <span class="type">Id</span>? = request.isNotification ? <span class="literal">nil</span> : id
+        <span class="keyword">var</span> body: [<span class="type">String</span>: <span class="type">AnyObject</span>] = [
+            <span class="string">"jsonrpc"</span>: version,
+            <span class="string">"method"</span>: request.method,
+        ]
+
+        <span class="keyword">if</span> <span class="keyword">let</span> id = id {
+            body[<span class="string">"id"</span>] = id.value
+        }
+
+        <span class="keyword">if</span> <span class="keyword">let</span> parameters = request.parameters {
+            body[<span class="string">"params"</span>] = parameters
+        }
+
+        request.extendedFields?.forEach { key, value <span class="keyword">in</span>
+            body[key] = value
+        }
+
+        <span class="keyword">self</span>.request = request
+        <span class="keyword">self</span>.version = version
+        <span class="keyword">self</span>.id = id
+        <span class="keyword">self</span>.body = body
+    }
+}
+</code></pre><p>从代码中不难看出，<code>BatchElement</code>是对之前的<code>Request</code>的进一步封装，将所有<code>Request</code>的字段塞到了一个<code>body</code>中（我们可以理解为HTTP Body），这个<code>body</code>是真正用于传输的，其余字段都是用于校验的，总共需要进行如下校验：</p>
+<ol>
+<li>查看JSON RPC协议是不是2.0。</li>
+<li>响应数据的id和请求的id是不是能匹配。</li>
+</ol>
+<p>为了处理这些默认逻辑，BatchElement基于Protocol Extension提供了默认的实现，具体如下：</p>
+<pre><code>func <span class="function"><span class="title">responseFromObject</span><span class="params">(object: AnyObject)</span></span> throws -&gt; Request<span class="class">.Response</span>
+func <span class="function"><span class="title">responseFromBatchObjects</span><span class="params">(objects: [AnyObject])</span></span> throws -&gt; Request<span class="class">.Response</span>
+
+func <span class="function"><span class="title">resultFromObject</span><span class="params">(object: AnyObject)</span></span> -&gt; Result&lt;Request<span class="class">.Response</span>, JSONRPCError&gt;
+func <span class="function"><span class="title">resultFromBatchObjects</span><span class="params">(objects: [AnyObject])</span></span> -&gt; Result&lt;Request<span class="class">.Response</span>, JSONRPCError&gt;
+</code></pre><p>从命名中不难看出，上述4个API分成两组，分别对应单个请求和批处理的。出于篇幅考虑，我们仅以单个批次进行分析。</p>
+<pre><code><span class="function"><span class="keyword">public</span> func <span class="title">resultFromObject</span>(<span class="params"><span class="keyword">object</span>: AnyObject</span>) -&gt; Result&lt;Request.Response, JSONRPCError&gt; </span>{
+    <span class="keyword">let</span> receivedVersion = <span class="keyword">object</span>[<span class="string">"jsonrpc"</span>] <span class="keyword">as</span>? String
+    <span class="comment">// 校验协议版本</span>
+    guard version == receivedVersion <span class="keyword">else</span> {
+        <span class="keyword">return</span> .Failure(.UnsupportedVersion(receivedVersion))
+    }
+
+     <span class="comment">// 校验标识符ID</span>
+    guard id == <span class="keyword">object</span>[<span class="string">"id"</span>].flatMap(Id.init) <span class="keyword">else</span> {
+        <span class="keyword">return</span> .Failure(.ResponseNotFound(requestId: id, <span class="keyword">object</span>: <span class="keyword">object</span>))
+    }
+
+
+    <span class="keyword">let</span> resultObject: AnyObject? = <span class="keyword">object</span>[<span class="string">"result"</span>]
+    <span class="keyword">let</span> errorObject: AnyObject? = <span class="keyword">object</span>[<span class="string">"error"</span>]
+
+      <span class="comment">// 根据错误或者结果进行解析</span>
+    <span class="keyword">switch</span> (resultObject, errorObject) {
+    <span class="keyword">case</span> (nil, <span class="keyword">let</span> errorObject?):
+        <span class="keyword">return</span> .Failure(JSONRPCError(errorObject: errorObject))
+
+    <span class="keyword">case</span> (<span class="keyword">let</span> resultObject?, nil):
+        <span class="keyword">do</span> {
+            <span class="comment">// 请求还要再单独校验一次</span>
+            <span class="keyword">return</span> .Success(<span class="keyword">try</span> request.responseFromResultObject(resultObject))
+        } <span class="keyword">catch</span> {
+            <span class="keyword">return</span> .Failure(.ResultObjectParseError(error))
+        }
+
+    <span class="keyword">default</span>:
+        <span class="keyword">return</span> .Failure(.MissingBothResultAndError(<span class="keyword">object</span>))
+    }
+}
+</code></pre><p>根据JSON RPC的协议规定，数据在成功处理后，必须将响应结果放在<code>result</code>字段里；而如果有出错的时候，就必须放在<code>error</code>字段中。并且必须包含<code>error code</code>和<code>error message</code>。</p>
+<p>所以，上述代码利用Swift强大的Pattern Match机制，进行对应的解析。<strong>有一点需要注意的是，即使是服务端成功返回了数据，但是该数据可能和我们请求需求的数据类型不一致等等，仍然有可能出错。</strong></p>
+<h4 id="BatchType">BatchType</h4><p><code>BatchType</code>顾名思义，就是批次对应的数据结构。简单理解就是包着一堆<code>BatchElement</code>，没啥可以特别讲述的。</p>
+<pre><code>public <span class="class"><span class="keyword">protocol</span> <span class="title">BatchType</span> </span>{
+    associatedtype <span class="type">Responses</span>
+    associatedtype <span class="type">Results</span>
+
+    <span class="keyword">var</span> requestObject: <span class="type">AnyObject</span> { <span class="keyword">get</span> }
+
+    <span class="func"><span class="keyword">func</span> <span class="title">responsesFromObject</span><span class="params">(object: AnyObject)</span></span> throws -&gt; <span class="type">Responses</span>
+    <span class="func"><span class="keyword">func</span> <span class="title">resultsFromObject</span><span class="params">(object: AnyObject)</span></span> -&gt; <span class="type">Results</span>
+
+    <span class="keyword">static</span> <span class="func"><span class="keyword">func</span> <span class="title">responsesFromResults</span><span class="params">(results: Results)</span></span> throws -&gt; <span class="type">Responses</span>
+}
+</code></pre><h4 id="BatchFactory">BatchFactory</h4><p>通过上面的讲述不难看出，我们要使用JSON RPC 需要有三步骤：</p>
+<ol>
+<li>构造一个符合JSON RPC 2.0协议的请求</li>
+<li>将其转换成批处理元素</li>
+<li>将批处理元素合并，构造成一个批次。</li>
+</ol>
+<p>这样的步骤虽然不困难，但是每次都这么干，估计使用者要吐血。所以<code>BatchFactory</code>的目的是提供简单的工厂方法。我们以构造包含1-2个请求的批处理为例：</p>
+<pre><code><span class="keyword">public</span> func create&lt;<span class="string">Request:</span> RequestType&gt;(<span class="string">request:</span> Request) -&gt; Batch&lt;Request&gt; {
+       dispatch_semaphore_wait(semaphore, DISPATCH_TIME_FOREVER)
+       let batchElement = BatchElement(<span class="string">request:</span> request, <span class="string">version:</span> version, <span class="string">id:</span> idGenerator.next())
+       dispatch_semaphore_signal(semaphore)
+
+       <span class="keyword">return</span> Batch(<span class="string">batchElement:</span> batchElement)
+   }
+
+   <span class="keyword">public</span> func create&lt;<span class="string">Request1:</span> RequestType, <span class="string">Request2:</span> RequestType&gt;(<span class="string">request1:</span> Request1, _ <span class="string">request2:</span> Request2) -&gt; Batch2&lt;Request1, Request2&gt; {
+       dispatch_semaphore_wait(semaphore, DISPATCH_TIME_FOREVER)
+       let batchElement1 = BatchElement(<span class="string">request:</span> request1, <span class="string">version:</span> version, <span class="string">id:</span> idGenerator.next())
+       let batchElement2 = BatchElement(<span class="string">request:</span> request2, <span class="string">version:</span> version, <span class="string">id:</span> idGenerator.next())
+       dispatch_semaphore_signal(semaphore)
+
+       <span class="keyword">return</span> Batch2(<span class="string">batchElement1:</span> batchElement1, <span class="string">batchElement2:</span> batchElement2)
+   }
+</code></pre><p>看了代码，简单吧。什么高深的都没干，就是用信号量构造了互斥区域，为什么要这么做？<strong>是为了确保<code>idGenerator</code>生成的标识符是连续的，并且是唯一的。</strong></p>
+<h4 id="其他">其他</h4><p>借这里正好复习下<code>dispatch_semaphore</code>相关知识。</p>
+<p><code>dispatch_semaphore</code>对应的就是信号量，当有多个线程想要访问一个需要并发保护的资源的时候，信号量可以帮助我们协调并发数。</p>
+<p>我们用互斥变量（即信号量为1）来举例：<br>    xxx = dispatch_semaphore_create(1);</p>
+<pre><code>for <span class="list">(<span class="keyword">int</span> i = <span class="number">0</span><span class="comment">; i &lt; 10; i++) {</span>
+    dispatch_async<span class="list">(<span class="keyword">dispatch_get_global_queue</span><span class="list">(<span class="keyword">yyy</span>, <span class="number">0</span>)</span>, ^{
+        dispatch_semaphore_wait<span class="list">(<span class="keyword">xxx</span>, DISPATCH_TIME_FOREVER)</span><span class="comment">;</span>
+        [self doSomething]<span class="comment">;</span>
+        dispatch_semaphore_signal<span class="list">(<span class="keyword">semaphore</span>)</span><span class="comment">;</span>
+    })</span><span class="comment">;    </span>
+}<span class="comment">;</span></span>
+</code></pre><p>就可以保证任意时候，只有一个线程中可以访问到资源了。</p>
+
+      
+    </div>
+    <footer class="article-footer">
+      <a data-url="http://satanwoo.github.io/2017/01/07/JSONRPCKit/" data-id="cixna4yy1001r1gi1mee8h694" class="article-share-link">Share</a>
+      
+      
+  <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
+
+    </footer>
+  </div>
+  
+</article>
+
+
+  
     <article id="post-multithread-dangling-pointer" class="article article-type-post" itemscope itemprop="blogPost">
   <div class="article-meta">
     <a href="/2016/10/23/multithread-dangling-pointer/" class="article-date">
@@ -312,7 +538,7 @@ dispatch_sync(dq, ^{
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/10/23/multithread-dangling-pointer/" data-id="ciuml8fnj000782i1oi7wex5j" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/10/23/multithread-dangling-pointer/" data-id="cixna4yw900071gi1lk2kqigg" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
@@ -446,7 +672,7 @@ dispatch_sync(dq, ^{
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/09/17/uiwindow-iOS/" data-id="ciuml8fn1000382i1h5pqjqla" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/09/17/uiwindow-iOS/" data-id="cixna4yvu00031gi1d12syxa9" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
@@ -584,7 +810,7 @@ OSSpinUnlock(&amp;_lock)<span class="comment">;</span>
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/07/10/immutable-thread/" data-id="ciuml8fnn000982i13cj4076g" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/07/10/immutable-thread/" data-id="cixna4ywc00091gi1pcsqzcv9" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
@@ -686,7 +912,7 @@ OSSpinUnlock(&amp;_lock)<span class="comment">;</span>
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/05/02/Spotify/" data-id="ciuml8fom001082i1bevavnk7" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/05/02/Spotify/" data-id="cixna4yx700101gi18c4g9zlj" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Growth/">Growth</a></li></ul>
@@ -792,7 +1018,7 @@ OSSpinUnlock(&amp;_lock)<span class="comment">;</span>
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/04/26/blank-space-in-html/" data-id="ciuml8fo6000o82i13tik4g58" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/04/26/blank-space-in-html/" data-id="cixna4ywu000o1gi12pwgxjif" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/JavaScript/">JavaScript</a></li></ul>
@@ -1028,7 +1254,7 @@ Elapsed application CPU <span class="keyword">time</span> (seconds): <span class
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/04/11/dispatch-once/" data-id="ciuml8fns000e82i18xdn170e" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/04/11/dispatch-once/" data-id="cixna4ywi000e1gi12l5nxsfm" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
@@ -1223,7 +1449,7 @@ a4.<span class="function"><span class="title">staticInfo</span><span class="para
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/03/22/dispatch-in-swift/" data-id="ciuml8fnv000g82i1tot887ju" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/03/22/dispatch-in-swift/" data-id="cixna4ywk000g1gi18v3uhycp" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Swift/">Swift</a></li></ul>
@@ -1315,7 +1541,7 @@ a4.<span class="function"><span class="title">staticInfo</span><span class="para
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/03/14/RxSwift/" data-id="ciuml8for001682i1hyexua3g" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/03/14/RxSwift/" data-id="cixna4yxb00161gi1owduprrr" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Swift/">Swift</a></li></ul>
@@ -1403,7 +1629,7 @@ val = edx(<span class="literal">true</span>)
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/03/14/SizeUp/" data-id="ciuml8fop001382i1zefmvakn" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/03/14/SizeUp/" data-id="cixna4yx900131gi1j2w0wsu1" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Reverse-Engineering/">Reverse Engineering</a></li></ul>
@@ -1543,7 +1769,7 @@ val = edx(<span class="literal">true</span>)
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/03/14/DXXcodeConsoleUnicodePlugin/" data-id="ciuml8fq0002182i1vjz6ov7i" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/03/14/DXXcodeConsoleUnicodePlugin/" data-id="cixna4yyh00231gi1qenjgthi" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
@@ -1620,7 +1846,7 @@ fi
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/02/27/check-manifest/" data-id="ciuml8fo0000l82i1sspcgm5j" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/02/27/check-manifest/" data-id="cixna4ywp000l1gi1eolsy84e" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/shell/">shell</a></li></ul>
@@ -1730,7 +1956,7 @@ fi
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/02/27/pod-install-plugin/" data-id="ciuml8fnf000582i10jbkthiq" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/02/27/pod-install-plugin/" data-id="cixna4yw600051gi1tzvkipli" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
@@ -1986,7 +2212,7 @@ fi
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/02/27/FBKVOController/" data-id="ciuml8fpt001x82i158dfinrb" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/02/27/FBKVOController/" data-id="cixna4yyb001z1gi1j9m3od44" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
@@ -2100,7 +2326,7 @@ selectedTitleLabelsContentView<span class="class">.layer</span><span class="clas
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/02/05/DGRunKeeperSwitch/" data-id="ciuml8fq2002382i10teb25zc" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/02/05/DGRunKeeperSwitch/" data-id="cixna4yyi00251gi1ndy48lq2" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
@@ -2356,7 +2582,7 @@ NSLayoutConstraint *constraint = [NSLayoutConstraint <span class="string">constr
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/02/05/PureLayout/" data-id="ciuml8foz001d82i16u8zvcil" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/02/05/PureLayout/" data-id="cixna4yxh001d1gi16qmjgdr4" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
@@ -2682,7 +2908,7 @@ extension Task {
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/12/30/Refactor-Mega-ViewController/" data-id="ciuml8fow001b82i11hnvhkiy" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/12/30/Refactor-Mega-ViewController/" data-id="cixna4yxf001b1gi1kdg5nyvy" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
@@ -2833,7 +3059,7 @@ extension Task {
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/12/20/Learn-R-2/" data-id="ciuml8fp6001h82i1b3at0kgd" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/12/20/Learn-R-2/" data-id="cixna4yxo001h1gi10euvvpw8" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/R/">R</a></li></ul>
@@ -2887,7 +3113,7 @@ extension Task {
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/12/15/Regression-Model-1/" data-id="ciuml8fou001882i1zu5xp32q" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/12/15/Regression-Model-1/" data-id="cixna4yxd00181gi1w28xscoy" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Math/">Math</a></li></ul>
@@ -3030,116 +3256,10 @@ $foo
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/12/13/Learn-R-1/" data-id="ciuml8fp9001k82i1veiclew2" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/12/13/Learn-R-1/" data-id="cixna4yxs001k1gi1hapl9s2z" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/R/">R</a></li></ul>
-
-    </footer>
-  </div>
-  
-</article>
-
-
-  
-    <article id="post-LLDB-1" class="article article-type-post" itemscope itemprop="blogPost">
-  <div class="article-meta">
-    <a href="/2015/12/11/LLDB-1/" class="article-date">
-  <time datetime="2015-12-11T08:50:04.000Z" itemprop="datePublished">2015-12-11</time>
-</a>
-    
-  </div>
-  <div class="article-inner">
-    
-    
-      <header class="article-header">
-        
-  
-    <h1 itemprop="name">
-      <a class="article-title" href="/2015/12/11/LLDB-1/">浅入浅出LLDB（1）</a>
-    </h1>
-  
-
-      </header>
-    
-    <div class="article-entry" itemprop="articleBody">
-      
-        <p>这周开始好好钻研一下LLDB相关的知识，这是一系列的文章。有些初级知识可能大家都有所涉猎，嘿嘿，懂得自然懂，看我的博客，什么时候会收获小。</p>
-<h3 id="基础语法">基础语法</h3><p>1.<code>help</code> 有啥不会，就直接输入help，你会得到如下的一系列信息，</p>
-<pre><code>command           -- A <span class="keyword">set</span> <span class="keyword">of</span> commands <span class="keyword">for</span> managing <span class="keyword">or</span> customizing the
-                   debugger commands.
-disassemble       -- Disassemble bytes <span class="keyword">in</span> the current <span class="keyword">function</span>, <span class="keyword">or</span> elsewhere
-                   <span class="keyword">in</span> the executable program <span class="keyword">as</span> specified <span class="keyword">by</span> the user.
-</code></pre><p>2.<code>print</code> 输出变量值<br>比如，对于如下的程序语句 <code>let haha = 5;</code> 你只要在LLDB里面输入 <code>print haha</code> 就可以得到如下输出结果。</p>
-<pre><code>(lldb) p haha
-(Int) <span class="variable">$R0</span> = <span class="number">5</span>
-</code></pre><p><strong>请注意</strong>，在<a href="http://objccn.io/issue-19-2/" target="_blank" rel="external">与调试器共舞- LLDB 的华尔兹</a>一文中曾经提出会输出类似于 <code>$0 = 5</code>，并指出<strong>$0是当前的输出值</strong>。这个说话其实是不严谨的，正确的说法是，应该是<strong>当前的haha的值5存在了R0寄存器里。</strong></p>
-<p>比如，当我们构建如下的程序语句时，</p>
-<pre><code><span class="keyword">let</span> haha = <span class="number">5</span>;
-<span class="keyword">let</span> <span class="keyword">object</span> = <span class="string">"jkjksdjf"</span>;
-</code></pre><p>我们在分别<code>print haha</code>以及    <code>print object</code>就会分别得到<code>(Int) $R0 = 5</code>和<code>(String) $R1 = &quot;jkjksdjf&quot;</code></p>
-<p>这说明haha的值和object的值分别以int型和string型存在了R0和R1寄存器之中。</p>
-<p><strong>当然，图快速的话</strong>，可以像我上面一样将print简写成p。</p>
-<p>3.<code>po</code><br>输出变量值  </p>
-<p>哎，有人奇怪了，po也是输出变量值，那和p有啥区别啊？本质上没啥区别，如果真要说，就是<strong>po = e -O –</strong>，具体我们后续再说啦。</p>
-<p>4.<code>breakpoubt l</code> 输出所有的断点，可以得到如下的结果</p>
-<pre><code>Current breakpoints:
-<span class="number">1</span>: file = <span class="string">'xxx/ViewController.swift'</span>, line = <span class="number">19</span>, locations = <span class="number">1</span>, resolved = <span class="number">1</span>, hit count = <span class="number">1</span>
-
-<span class="number">1.1</span>: where = xxx<span class="class">.ViewController</span><span class="class">.viewDidLoad</span> (xxx.ViewController)() -&gt; () + <span class="number">131</span> at ViewController<span class="class">.swift</span>:<span class="number">19</span>, <span class="tag">address</span> = <span class="number">0</span>x0000000108d0a443, resolved, hit count = <span class="number">1</span> 
-</code></pre><p>其中 <strong>1: file</strong>的这个1就是ID号。<br>那这里的1.1是什么鬼？<strong>嘿嘿，当里使用Symbolic Breakpoint的时候，你一个断点很有可能截获了多个地方，比如AViewController和BViewController的viewDidLoad都被加上了断点，这个时候就需要靠诸如1.1和1.2之类的细分ID来进行区别了。</strong></p>
-<p>当然，有人会问，输出这个断点有什么用啊。嘿嘿，当你使用<strong>Xcode Symbolic Breakpoint</strong>的时候，你就会发现究竟在多少个地方下了断点了。</p>
-<p><strong>同样的</strong>，你可以将breakpoint简写成br。</p>
-<p>5.<code>br delete ID</code> 这里的ID就是之前的断点的ID号<br>通过这个命令，可以删除ID对应的断点</p>
-<p>6.<code>br e ID</code> 启用一个ID号对应的断点</p>
-<p>7.<code>br di ID</code> 禁用一个ID号对应的断点</p>
-<p>8.<code>b xxx.swift:lineY</code> 在xxx文件的第lineY行设置一个断点<br>如 <code>b ViewController.swift:10</code> 就是在ViewController的第10号下了一个断点。</p>
-<p><strong>需要注意的是，</strong>通过b命令设置的断点，无法直观的在Xcode界面上显示出来，而<code>br delete</code>删除一个断点可以直接在Xcode上看出效果。</p>
-<p>9.<code>br set -n functionName</code> 对functionName设置Symbolic Breakpoint<br>如<code>br set -n viewDidLoad</code> 就是对所有的viewDidLoad设置了Symboloc Breakpoint</p>
-<p>10.<code>br mod -C &quot;Condition&quot; ID</code> 对ID号对应的breakpoint添加条件触发<br>假设我们有下面这样的一段代码</p>
-<pre><code><span class="number">1.</span> <span class="comment">//ViewController.swift</span>
-<span class="number">2.</span> <span class="keyword">for</span> var value in money {
-<span class="number">3.</span>     totalValue += value
-<span class="number">4.</span> }
-</code></pre><p>我们首先先使用<code>b ViewController.swift:3</code>设置一个断点，然后使用<code>br l</code>查询到对应的ID为3。<br>然后我们使用<code>br mod -C &quot;totalValue &gt; 50&quot; 3</code>对这个断点设置条件触发，条件为<strong>当totalValue 大于50时候才触发</strong>。</p>
-<p>当然，可能有些人会问，如果我不想删除断点，只是想移除条件触发怎么办？很简单，只要输入<code>br mod -C &quot;&quot; ID</code>，将其中的Condition部分设置为空即可。</p>
-<p>11.<code>continue</code> 继续运行程序<br>12.<code>n</code>        step over单步调试<br>13.<code>s</code>        step in进行函数<br>14.<code>finish</code>   step out退出函数</p>
-<h3 id="大杀器">大杀器</h3><p>上面的命令是不是很多，一个个敲实在是太麻烦，那如果我想对一个断点执行多条语句怎么办？<br>嘿嘿，大杀器来了。</p>
-<p><code>br com add ID</code> 对ID对应的断点进入交互式指定。如：</p>
-<pre><code><span class="keyword">br</span> <span class="keyword">com</span> <span class="built_in">add</span> <span class="number">2</span>
-&gt; bt
-&gt; <span class="keyword">continue</span>
-&gt; DONE
-</code></pre><p> 上面的语句指的是，对2号断点进行交互式指定，当这个断点触发的时候，首先执行<code>bt</code>(具体bt命令的意思我们后续再说，粗略理解就是backtrace输出调用栈，可以简单看下面的例子)，然后执行<code>continue</code>，最后通过关键字<strong>Done</strong>退出指定，这里的Done类似于shell里面的exit。</p>
-<pre><code>frame <span class="preprocessor">#<span class="number">0</span>: xxx`xxx.ViewController.viewDidLoad (self=<span class="number">0x00007faf52439c20</span>)() -&gt; () + <span class="number">470</span> at ViewController.swift:<span class="number">27</span></span>
-frame <span class="preprocessor">#<span class="number">1</span>: xxx`@objc xxx.ViewController.viewDidLoad (xxx.ViewController)() -&gt; () + <span class="number">34</span> at ViewController.swift:<span class="number">0</span></span>
-frame <span class="preprocessor">#<span class="number">2</span>: UIKit`-[UIViewController loadViewIfRequired] + <span class="number">1198</span></span>
-frame <span class="preprocessor">#<span class="number">3</span>: UIKit`-[UIViewController view] + <span class="number">27</span></span>
-frame <span class="preprocessor">#<span class="number">4</span>: UIKit`-[UIWindow addRootViewControllerViewIfPossible] + <span class="number">61</span></span>
-frame <span class="preprocessor">#<span class="number">5</span>: UIKit`-[UIWindow _setHidden:forced:] + <span class="number">282</span></span>
-frame <span class="preprocessor">#<span class="number">6</span>: UIKit`-[UIWindow makeKeyAndVisible] + <span class="number">42</span></span>
-frame <span class="preprocessor">#<span class="number">7</span>: UIKit`-[UIApplication _callInitializationDelegatesForMainScene:transitionContext:] + <span class="number">4131</span></span>
-frame <span class="preprocessor">#<span class="number">8</span>: UIKit`-[UIApplication _runWithMainScene:transitionContext:completion:] + <span class="number">1760</span></span>
-frame <span class="preprocessor">#<span class="number">9</span>: UIKit`-[UIApplication workspaceDidEndTransaction:] + <span class="number">188</span></span>
-frame <span class="preprocessor">#<span class="number">10</span>: FrontBoardServices`-[FBSSerialQueue _performNext] + <span class="number">192</span></span>
-frame <span class="preprocessor">#<span class="number">11</span>: FrontBoardServices`-[FBSSerialQueue _performNextFromRunLoopSource] + <span class="number">45</span></span>
-frame <span class="preprocessor">#<span class="number">12</span>: CoreFoundation`__CFRUNLOOP_IS_CALLING_OUT_TO_A_SOURCE0_PERFORM_FUNCTION__ + <span class="number">17</span></span>
-frame <span class="preprocessor">#<span class="number">13</span>: CoreFoundation`__CFRunLoopDoSources0 + <span class="number">556</span></span>
-frame <span class="preprocessor">#<span class="number">14</span>: CoreFoundation`__CFRunLoopRun + <span class="number">867</span></span>
-frame <span class="preprocessor">#<span class="number">15</span>: CoreFoundation`CFRunLoopRunSpecific + <span class="number">488</span></span>
-frame <span class="preprocessor">#<span class="number">16</span>: UIKit`-[UIApplication _run] + <span class="number">402</span></span>
-frame <span class="preprocessor">#<span class="number">17</span>: UIKit`UIApplicationMain + <span class="number">171</span></span>
-frame <span class="preprocessor">#<span class="number">18</span>: xxx`main + <span class="number">109</span> at AppDelegate.swift:<span class="number">12</span></span>
-frame <span class="preprocessor">#<span class="number">19</span>: libdyld.dylib`start + <span class="number">1</span></span>
-frame <span class="preprocessor">#<span class="number">20</span>: libdyld.dylib`start + <span class="number">1</span></span>
-</code></pre>
-      
-    </div>
-    <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/12/11/LLDB-1/" data-id="ciuml8fpg001p82i1bgyi74iz" class="article-share-link">Share</a>
-      
-      
-  <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
 
     </footer>
   </div>
@@ -3163,7 +3283,7 @@ frame <span class="preprocessor">#<span class="number">20</span>: libdyld.dylib`
   <div class="widget-wrap">
     <h3 class="widget-title">Tags</h3>
     <div class="widget">
-      <ul class="tag-list"><li class="tag-list-item"><a class="tag-list-link" href="/tags/Android/">Android</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Growth/">Growth</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/JavaScript/">JavaScript</a><span class="tag-list-count">3</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Math/">Math</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/R/">R</a><span class="tag-list-count">2</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Reverse-Engineering/">Reverse Engineering</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Swift/">Swift</a><span class="tag-list-count">6</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/iOS/">iOS</a><span class="tag-list-count">18</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/shell/">shell</a><span class="tag-list-count">1</span></li></ul>
+      <ul class="tag-list"><li class="tag-list-item"><a class="tag-list-link" href="/tags/Android/">Android</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Growth/">Growth</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/JavaScript/">JavaScript</a><span class="tag-list-count">3</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Math/">Math</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/R/">R</a><span class="tag-list-count">2</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Reverse-Engineering/">Reverse Engineering</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Swift/">Swift</a><span class="tag-list-count">6</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/iOS/">iOS</a><span class="tag-list-count">19</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/shell/">shell</a><span class="tag-list-count">1</span></li></ul>
     </div>
   </div>
 
@@ -3181,7 +3301,7 @@ frame <span class="preprocessor">#<span class="number">20</span>: libdyld.dylib`
   <div class="widget-wrap">
     <h3 class="widget-title">Archives</h3>
     <div class="widget">
-      <ul class="archive-list"><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/10/">October 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/09/">September 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/07/">July 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/05/">May 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/04/">April 2016</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/03/">March 2016</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/02/">February 2016</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/12/">December 2015</a><span class="archive-list-count">6</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/11/">November 2015</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/10/">October 2015</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/09/">September 2015</a><span class="archive-list-count">4</span></li></ul>
+      <ul class="archive-list"><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/01/">January 2017</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/10/">October 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/09/">September 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/07/">July 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/05/">May 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/04/">April 2016</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/03/">March 2016</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/02/">February 2016</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/12/">December 2015</a><span class="archive-list-count">6</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/11/">November 2015</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/10/">October 2015</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/09/">September 2015</a><span class="archive-list-count">4</span></li></ul>
     </div>
   </div>
 
@@ -3191,6 +3311,10 @@ frame <span class="preprocessor">#<span class="number">20</span>: libdyld.dylib`
     <h3 class="widget-title">Recents</h3>
     <div class="widget">
       <ul>
+        
+          <li>
+            <a href="/2017/01/07/JSONRPCKit/">JSONRPCKit源码解析</a>
+          </li>
         
           <li>
             <a href="/2016/10/23/multithread-dangling-pointer/">浅谈一种解决多线程野指针的新思路</a>
@@ -3208,10 +3332,6 @@ frame <span class="preprocessor">#<span class="number">20</span>: libdyld.dylib`
             <a href="/2016/05/02/Spotify/">为什么Spotify的付费用户转化率惊人的高？</a>
           </li>
         
-          <li>
-            <a href="/2016/04/26/blank-space-in-html/">HTML中的“空白符”，你真的懂了吗？</a>
-          </li>
-        
       </ul>
     </div>
   </div>
@@ -3224,7 +3344,7 @@ frame <span class="preprocessor">#<span class="number">20</span>: libdyld.dylib`
   
   <div class="outer">
     <div id="footer-info" class="inner">
-      &copy; 2016 John Doe<br>
+      &copy; 2017 John Doe<br>
       Powered by <a href="http://hexo.io/" target="_blank">Hexo</a>
     </div>
   </div>
