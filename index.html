@@ -62,6 +62,174 @@
       <div class="outer">
         <section id="main">
   
+    <article id="post-DispatchGroupCrash" class="article article-type-post" itemscope itemprop="blogPost">
+  <div class="article-meta">
+    <a href="/2017/01/07/DispatchGroupCrash/" class="article-date">
+  <time datetime="2017-01-07T13:44:39.000Z" itemprop="datePublished">2017-01-07</time>
+</a>
+    
+  </div>
+  <div class="article-inner">
+    
+    
+      <header class="article-header">
+        
+  
+    <h1 itemprop="name">
+      <a class="article-title" href="/2017/01/07/DispatchGroupCrash/">iOS疑难问题排查之深入探究dispatch_group crash</a>
+    </h1>
+  
+
+      </header>
+    
+    <div class="article-entry" itemprop="articleBody">
+      
+        <h3 id="起因">起因</h3><p>昨天其他部门的同事突然反馈一起相对来说比较严重的Crash问题（占比达到了yyyy左右，并且从Crash堆栈上可以发现很多情况下是一启动就Crash了）。去掉隐私数据大致堆栈如下：</p>
+<pre><code>Thread <span class="number">0</span> Crashed:
+<span class="number">0</span>   libdispatch.dylib               <span class="number">0x000000018953e828</span> _dispatch_group_leave :<span class="number">76</span> (in libdispatch.dylib)
+<span class="number">1</span>   libdispatch.dylib               <span class="number">0x000000018954b084</span> __dispatch_barrier_sync_f_slow_invoke :<span class="number">320</span> (in libdispatch.dylib)
+<span class="number">2</span>   libdispatch.dylib               <span class="number">0x000000018953a1bc</span> __dispatch_client_callout :<span class="number">16</span> (in libdispatch.dylib)
+<span class="number">3</span>   libdispatch.dylib               <span class="number">0x000000018953ed68</span> __dispatch_main_queue_callback_4CF :<span class="number">1000</span> (in libdispatch.dylib)
+<span class="number">4</span>   CoreFoundation                  <span class="number">0x000000018a65e810</span> ___CFRUNLOOP_IS_SERVICING_THE_MAIN_DISPATCH_QUEUE__ :<span class="number">12</span> (in CoreFoundation)
+<span class="number">5</span>   CoreFoundation                  <span class="number">0x000000018a65c3fc</span> ___CFRunLoopRun :<span class="number">1660</span> (in CoreFoundation)
+<span class="number">6</span>   CoreFoundation                  <span class="number">0x000000018a58a2b8</span> _CFRunLoopRunSpecific :<span class="number">444</span> (in CoreFoundation)
+<span class="number">7</span>   GraphicsServices                <span class="number">0x000000018c03e198</span> _GSEventRunModal :<span class="number">180</span> (in GraphicsServices)
+<span class="number">8</span>   UIKit                           <span class="number">0x00000001905d17fc</span> -[UIApplication _run] :<span class="number">684</span> (in UIKit)
+<span class="number">9</span>   UIKit                           <span class="number">0x00000001905cc534</span> _UIApplicationMain :<span class="number">208</span> (in UIKit)
+<span class="number">10</span>  xxxiPhone                       <span class="number">0x0000000100041a98</span> main main.m:<span class="number">26</span> (in xxxiPhone)
+<span class="number">11</span>  libdyld.dylib                   <span class="number">0x000000018956d5b8</span> _start :<span class="number">4</span> (in libdyld.dylib)
+</code></pre><p>一看到这种堆栈，头就大了，除了<strong>Thread 0 的第10行是和程序本身二进制相关的</strong>堆栈，其余的调用栈全部是系统库里面的，并且唯一一行程序本身二进制的代码还是一个完全没作用的<code>main</code>函数。</p>
+<p>好吧，只能重新找找其余的线索。从堆栈上来反推当时的场景应该是如下场景：</p>
+<pre><code>启动 -&gt; main函数 -&gt; main_queue 执行 -&gt; dispatch_group_leave -&gt; <span class="constant">Crash</span>
+</code></pre><p>于是，我们的线索就从最后的<code>_dispatch_group_leave</code>来进行。  </p>
+<p>首先先来最简单的方法：下符号断点：<code>dispatch_group_leave</code>。</p>
+<p>当然事情没有这么简单，尝试重复多次也没有断到我们想要的符号断点上，于是这条路暂时考虑放弃（结合Crash率也可以发现这并非必现的Crash场景）。</p>
+<p>这条路不通，我们先尝试全局搜索<code>dispatch_group_leave</code>，结果发现有如下几条线索：</p>
+<ul>
+<li>外部开源库</li>
+<li>自身工程代码</li>
+</ul>
+<p>结合Crash出现的版本以及以上上述各库最后升级时间来判断，我们基本确定出在问题出现在自身工程中的代码里，如下：</p>
+<pre><code>dispatch_group_t serviceGroup = dispatch_group_create();
+dispatch_group_notify(serviceGroup, dispatch_get_main_queue(), ^{
+    <span class="built_in">NSLog</span>(<span class="string">@"ttttttt:%@"</span>,t);
+});
+
+<span class="comment">// t 是一个包含一堆字符串的数组 </span>
+[t enumerateObjectsUsingBlock:^(<span class="keyword">id</span>  _Nonnull obj, <span class="built_in">NSUInteger</span> idx, <span class="built_in">BOOL</span> * _Nonnull stop) {
+    dispatch_group_enter(serviceGroup);
+    SDWebImageCompletionWithFinishedBlock completion =
+    ^(<span class="built_in">UIImage</span> *image, <span class="built_in">NSError</span> *error, SDImageCacheType cacheType, <span class="built_in">BOOL</span> finished, <span class="built_in">NSURL</span> *imageURL) {
+        dispatch_group_leave(serviceGroup);
+        <span class="built_in">NSLog</span>(<span class="string">@"idx:%zd"</span>,idx);
+    };
+    [[SDWebImageManager sharedManager] downloadImageWithURL:[<span class="built_in">NSURL</span> URLWithString:t[idx]]
+                                                    options:SDWebImageLowPriority
+                                                   progress:<span class="literal">nil</span>
+                                                  completed:completion];
+}];
+</code></pre><p>这段代码逻辑非常简单吧：给你一个数组，里面是一堆图片地址。你使用多线程进行并发下载，直到所有图片都下载完成（可以失败）进行回调，其中图片下载使用的是<code>SDWebImage</code>。</p>
+<p>这段代码里面的的确确出现了可疑的<code>dispatch_group_leave</code>，但是这段代码太常见了。和同事认认真真检查了许久，同时也和天猫、手淘中使用<code>dispatch_group_t</code>的地方进行了对比，没发现任何问题。</p>
+<p>好吧，问题一下子陷入了僵局，只好上终极调试大法：<strong>汇编分析法</strong>。</p>
+<p>通过文章开头的堆栈我们查找<code>libdispatch.dylib</code>中对应的Crash位置，然后通过汇编解析查看相关指令，结果如下：</p>
+<p><img src="https://github.com/SatanWoo/BeeHive/blob/master/hopper.png?raw=true" alt=""></p>
+<p>从上图看出，指令挂掉的原因是因为执行了<code>brk</code> （brk可以理解为跳转指令特殊的一种，一旦执行，就会进入某种Exception模式，导致Crash）。</p>
+<p>为什么执行<code>dispatch_group_leave</code>会挂？从上述图中汇编不难发现，<code>dispatch_group_leave</code>具有两条分支：比较x9寄存器和0之间的关系，如果是less equal，就跳转到0x180502808(即会crash的逻辑分支)；反之则正确执行ret返回。</p>
+<p>那么x9寄存器是什么？我们继续往上看指令<code>ldxr x9, [x10]</code>，x9中的值是以x10寄存器中的内容作为地址，取64位放入x9寄存器中。继续，那么x10中的内存是什么？x10中的内容是指令<code>add x10, x0, #0x30</code>。也就是x10 = x0 + 48(0x30的10进制表示)。那么，函数调用的时候x0是self，也即是一个类或者结构体的首地址。所以这两句指令加起来的含义就是<strong><b style="color:red">取结构体地址偏移48位置的某个成员变量的值。</b></strong></p>
+<p>除此之外，汇编解析还完整保留了Crash的字符串提示： <strong>“BUG IN CLIENT OF LIBDISPATCH: Unbalanced call to dispatch_group_leave()”</strong></p>
+<p>结合这两点，我们查看<code>libdispatch</code>的源码，代码如下：</p>
+<pre><code><span class="function"><span class="keyword">void</span>
+<span class="title">dispatch_group_leave</span>(<span class="params">dispatch_group_t dg</span>)
+</span>{
+    dispatch_semaphore_t dsema = (dispatch_semaphore_t)dg;
+    dispatch_atomic_release_barrier();
+    <span class="keyword">long</span> <span class="keyword">value</span> = dispatch_atomic_inc2o(dsema, dsema_value);
+    <span class="keyword">if</span> (slowpath(<span class="keyword">value</span> == LONG_MIN)) {
+        DISPATCH_CLIENT_CRASH(<span class="string">"Unbalanced call to dispatch_group_leave()"</span>);
+    }
+    <span class="keyword">if</span> (slowpath(<span class="keyword">value</span> == dsema-&gt;dsema_orig)) {
+        (<span class="keyword">void</span>)_dispatch_group_wake(dsema);
+    }
+}
+</code></pre><p><em>注：苹果开发的libdispatch源码经过了各种变形修改，不是真正运行的代码，仅供参考。</em></p>
+<p>果不其然，这段代码完整复现了我们之前汇编分析的结果：如果<code>dg</code>信号量中的字段<code>dsema_value</code>原子性自加一后等于LONGMIN，就会<strong>CRASH</strong>。为什么会Crash呢？</p>
+<p>我们需要关注下LONG_MIN这个数字，<code>LONG_MIN = -LONG_MAX - 1</code>。理解起来很简单，就是可以表征的(该类型合法范围)最大数和最小数。</p>
+<p>搜索下LONGMAX，我们发现在<code>dispatch_group_create</code>里面发现了它的踪影：</p>
+<pre><code><span class="keyword">dispatch_group_t</span>
+dispatch_group_create(<span class="keyword">void</span>)
+{
+    <span class="keyword">dispatch_group_t</span> dg = _dispatch_alloc(DISPATCH_VTABLE(group),
+            <span class="keyword">sizeof</span>(<span class="keyword">struct</span> dispatch_semaphore_s));
+    _dispatch_semaphore_init(LONG_MAX, dg);
+    <span class="keyword">return</span> dg;
+}
+</code></pre><p>好了， 这下豁然开朗。这两段代码的结合告诉了我们一个事实：当<code>dq</code>这个信号量加一导致<strong><b style="color:red">溢出</b></strong>后，<code>dispatch_group_leave</code>就会Crash。</p>
+<p>最简单的复现代码如下：</p>
+<pre><code>- (<span class="keyword">void</span>)viewDidLoad 
+{
+    [<span class="keyword">super</span> viewDidLoad];
+    dispatch_group_t <span class="keyword">group</span> = dispatch_group_create();
+    dispatch_group_leave(<span class="keyword">group</span>);
+    <span class="comment">// Do any additional setup after loading the view, typically from a nib.</span>
+}
+</code></pre><p><img src="https://github.com/SatanWoo/BeeHive/blob/master/symbol.png?raw=true" alt=""></p>
+<p>当然，上述代码相当直白简单，我们一般都不会犯这样低级的错误。</p>
+<h3 id="代码究竟出错在哪？">代码究竟出错在哪？</h3><p>了解了<code>dispatch_group_leave</code>的出错原因后，我们再回到我们刚刚认为没问题的代码，一定是哪个地方我们欠考虑了。</p>
+<p>上述代码执行流程还是非常简单的，我们用模型简述一遍：</p>
+<p><strong>遍历数组，对每个URL进行<code>dispatch_group_enter</code>，然后将其丢入一个下载block交由SDWebImage进行并发下载，下载回调（无论失败或者成功）后执行<code>dispatch_group_leave</code>。</strong></p>
+<p>我们举个简单的例子，假设我们有一个包含5个URL的数组：</p>
+<ol>
+<li>遍历的时候，对信号量<code>dq</code> enter了5次，简单理解信号量减去5次。</li>
+<li>SDWebImage下载回调的时候，对信号量<code>dq</code> leave了5次，于是信号量增加了5次。</li>
+<li>执行完毕，整个group执行完成。</li>
+</ol>
+<p><strong><b style="color:red">但是，由于SDWebImage的下载是异步且无法保证时间的，如果在整个group没有执行完毕期间，上述函数整体又被执行到了，会怎么样？</b></strong></p>
+<p>我们再用上述的例子来走遍流程。</p>
+<ol>
+<li>第一次遍历，我们创建了信号量<code>dq1</code>，enter了5次，dq1 现在 = -5。</li>
+<li>SDWebImage的下载回调捕捉了<code>dq1</code>，准备留待回调后加回来，我们将这次遍历生成的下载回调block统称为b10, b12, b13, b14, b15。</li>
+<li><strong>但是，在第一次SDWebImage下载回调还没执行的时候，第二次函数遍历来了。</strong></li>
+<li>第二次遍历，我们创建了信号量<code>dq2</code>，enter了5次，dq2 现在 = -5。</li>
+<li>创建第二次遍历对应的回调block，称为b20，b21, b22, b23, b24。</li>
+</ol>
+<p>通过查阅<a href="https://github.com/rs/SDWebImage/blob/master/SDWebImage/SDWebImageDownloader.m" target="_blank" rel="external">SDWebImageDownloader.m</a>源码我们发现：</p>
+<pre><code><span class="function_or_atom">dispatch_barrier_sync</span>(<span class="function_or_atom">self</span>.<span class="function_or_atom">barrierQueue</span>, ^{
+    <span class="variable">SDWebImageDownloaderOperation</span> *<span class="function_or_atom">operation</span> = <span class="function_or_atom">self</span>.<span class="variable">URLOperations</span>[<span class="function_or_atom">url</span>];
+    <span class="function_or_atom">if</span> (<span class="exclamation_mark">!</span><span class="function_or_atom">operation</span>) {
+    <span class="function_or_atom">operation</span> = <span class="function_or_atom">createCallback</span>();
+
+    // <span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span>特别注意这行<span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span>
+    <span class="function_or_atom">self</span>.<span class="variable">URLOperations</span>[<span class="function_or_atom">url</span>] = <span class="function_or_atom">operation</span>;
+
+    __weak <span class="variable">SDWebImageDownloaderOperation</span> *<span class="function_or_atom">woperation</span> = <span class="function_or_atom">operation</span>;
+    <span class="function_or_atom">operation</span>.<span class="function_or_atom">completionBlock</span> = ^{
+      <span class="variable">SDWebImageDownloaderOperation</span> *<span class="function_or_atom">soperation</span> = <span class="function_or_atom">woperation</span>;
+      <span class="function_or_atom">if</span> (<span class="exclamation_mark">!</span><span class="function_or_atom">soperation</span>) <span class="function_or_atom">return</span>;
+      <span class="function_or_atom">if</span> (<span class="function_or_atom">self</span>.<span class="variable">URLOperations</span>[<span class="function_or_atom">url</span>] == <span class="function_or_atom">soperation</span>) {
+          [<span class="function_or_atom">self</span>.<span class="variable">URLOperations</span> <span class="function_or_atom">removeObjectForKey:url</span>];
+      };
+    };
+}
+</code></pre><p>SDWebImage的下载器会<strong>根据URL做下载任务对应NSOperation映射，也即之前创建的下载回调Block。</strong></p>
+<p>好，就是这行导致Crash的发生。为什么呢？</p>
+<p>我们设想下，假设在第二次遍历中包含了第一次遍历中的图片URL，比如b20对应的图片URL和b10对应的图片URL一样，那么在SDWebImage的处理回调里，b20就会替换掉b10。<b style="color:red">于是，在第一次遍历创建的5个下载任务回调中，b10回调的时候实际已经执行的是b20，也就是<code>dq2 + 1</code>；而在后续第二次遍历执行下载任务回调的时候，又分别执行了b20-b24的5个任务，导致<code>dq2 + 5</code>。这从导致<code>dq2</code>实际上leave的次数比enter的次数多了1 (6比5)，导致了dq2信号量的数值溢出，从而进入了Crash分支。</b></p>
+<h3 id="最后">最后</h3><p>看起来很简单、清晰易懂的代码，没想到也会造成巨大的问题。所以，写代码一定要谨慎谨慎再谨慎。</p>
+
+      
+    </div>
+    <footer class="article-footer">
+      <a data-url="http://satanwoo.github.io/2017/01/07/DispatchGroupCrash/" data-id="cixnarttz002193i1psxwfxdz" class="article-share-link">Share</a>
+      
+      
+  <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS-Reverse-Engineering/">iOS Reverse Engineering</a></li></ul>
+
+    </footer>
+  </div>
+  
+</article>
+
+
+  
     <article id="post-JSONRPCKit" class="article article-type-post" itemscope itemprop="blogPost">
   <div class="article-meta">
     <a href="/2017/01/07/JSONRPCKit/" class="article-date">
@@ -276,7 +444,7 @@ func <span class="function"><span class="title">resultFromBatchObjects</span><sp
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2017/01/07/JSONRPCKit/" data-id="cixna4yy1001r1gi1mee8h694" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2017/01/07/JSONRPCKit/" data-id="cixnarttl001r93i1jbzpg5sd" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
@@ -538,7 +706,7 @@ dispatch_sync(dq, ^{
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/10/23/multithread-dangling-pointer/" data-id="cixna4yw900071gi1lk2kqigg" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/10/23/multithread-dangling-pointer/" data-id="cixnartrt000793i16j791gq7" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
@@ -672,7 +840,7 @@ dispatch_sync(dq, ^{
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/09/17/uiwindow-iOS/" data-id="cixna4yvu00031gi1d12syxa9" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/09/17/uiwindow-iOS/" data-id="cixnartr9000393i16ottgmz6" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
@@ -810,7 +978,7 @@ OSSpinUnlock(&amp;_lock)<span class="comment">;</span>
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/07/10/immutable-thread/" data-id="cixna4ywc00091gi1pcsqzcv9" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/07/10/immutable-thread/" data-id="cixnartrv000993i1yr2l7f9c" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
@@ -912,7 +1080,7 @@ OSSpinUnlock(&amp;_lock)<span class="comment">;</span>
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/05/02/Spotify/" data-id="cixna4yx700101gi18c4g9zlj" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/05/02/Spotify/" data-id="cixnartsr001093i1demke6hg" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Growth/">Growth</a></li></ul>
@@ -1018,7 +1186,7 @@ OSSpinUnlock(&amp;_lock)<span class="comment">;</span>
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/04/26/blank-space-in-html/" data-id="cixna4ywu000o1gi12pwgxjif" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/04/26/blank-space-in-html/" data-id="cixnartsd000o93i165ukgx5p" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/JavaScript/">JavaScript</a></li></ul>
@@ -1254,7 +1422,7 @@ Elapsed application CPU <span class="keyword">time</span> (seconds): <span class
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/04/11/dispatch-once/" data-id="cixna4ywi000e1gi12l5nxsfm" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/04/11/dispatch-once/" data-id="cixnarts0000e93i12i7guwrs" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
@@ -1449,7 +1617,7 @@ a4.<span class="function"><span class="title">staticInfo</span><span class="para
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/03/22/dispatch-in-swift/" data-id="cixna4ywk000g1gi18v3uhycp" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/03/22/dispatch-in-swift/" data-id="cixnarts3000g93i12hi5chi7" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Swift/">Swift</a></li></ul>
@@ -1541,7 +1709,7 @@ a4.<span class="function"><span class="title">staticInfo</span><span class="para
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/03/14/RxSwift/" data-id="cixna4yxb00161gi1owduprrr" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/03/14/RxSwift/" data-id="cixnartsw001693i1kuwikgm3" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Swift/">Swift</a></li></ul>
@@ -1629,7 +1797,7 @@ val = edx(<span class="literal">true</span>)
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/03/14/SizeUp/" data-id="cixna4yx900131gi1j2w0wsu1" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/03/14/SizeUp/" data-id="cixnartst001393i19ntptild" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Reverse-Engineering/">Reverse Engineering</a></li></ul>
@@ -1769,7 +1937,7 @@ val = edx(<span class="literal">true</span>)
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/03/14/DXXcodeConsoleUnicodePlugin/" data-id="cixna4yyh00231gi1qenjgthi" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/03/14/DXXcodeConsoleUnicodePlugin/" data-id="cixnartu5002693i1etpnu8sn" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
@@ -1846,7 +2014,7 @@ fi
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/02/27/check-manifest/" data-id="cixna4ywp000l1gi1eolsy84e" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/02/27/check-manifest/" data-id="cixnarts9000l93i1r6ya4ytx" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/shell/">shell</a></li></ul>
@@ -1956,7 +2124,7 @@ fi
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/02/27/pod-install-plugin/" data-id="cixna4yw600051gi1tzvkipli" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/02/27/pod-install-plugin/" data-id="cixnartrn000593i1nvz0w30r" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
@@ -2212,7 +2380,7 @@ fi
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/02/27/FBKVOController/" data-id="cixna4yyb001z1gi1j9m3od44" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/02/27/FBKVOController/" data-id="cixnarttw001z93i15cxt22i6" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
@@ -2326,7 +2494,7 @@ selectedTitleLabelsContentView<span class="class">.layer</span><span class="clas
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/02/05/DGRunKeeperSwitch/" data-id="cixna4yyi00251gi1ndy48lq2" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/02/05/DGRunKeeperSwitch/" data-id="cixnartu7002893i1o6mxihdy" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
@@ -2582,7 +2750,7 @@ NSLayoutConstraint *constraint = [NSLayoutConstraint <span class="string">constr
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/02/05/PureLayout/" data-id="cixna4yxh001d1gi16qmjgdr4" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/02/05/PureLayout/" data-id="cixnartt2001d93i1v1ri4ad2" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
@@ -2908,7 +3076,7 @@ extension Task {
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/12/30/Refactor-Mega-ViewController/" data-id="cixna4yxf001b1gi1kdg5nyvy" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/12/30/Refactor-Mega-ViewController/" data-id="cixnartt0001b93i1o0mxt3ao" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
@@ -3059,7 +3227,7 @@ extension Task {
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/12/20/Learn-R-2/" data-id="cixna4yxo001h1gi10euvvpw8" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/12/20/Learn-R-2/" data-id="cixnartt7001h93i1qb1ocitk" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/R/">R</a></li></ul>
@@ -3113,153 +3281,10 @@ extension Task {
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/12/15/Regression-Model-1/" data-id="cixna4yxd00181gi1w28xscoy" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/12/15/Regression-Model-1/" data-id="cixnartsy001893i1n2y88jjx" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Math/">Math</a></li></ul>
-
-    </footer>
-  </div>
-  
-</article>
-
-
-  
-    <article id="post-Learn-R-1" class="article article-type-post" itemscope itemprop="blogPost">
-  <div class="article-meta">
-    <a href="/2015/12/13/Learn-R-1/" class="article-date">
-  <time datetime="2015-12-13T07:03:36.000Z" itemprop="datePublished">2015-12-13</time>
-</a>
-    
-  </div>
-  <div class="article-inner">
-    
-    
-      <header class="article-header">
-        
-  
-    <h1 itemprop="name">
-      <a class="article-title" href="/2015/12/13/Learn-R-1/">一步步学R（1）</a>
-    </h1>
-  
-
-      </header>
-    
-    <div class="article-entry" itemprop="articleBody">
-      
-        <h3 id="系列连载">系列连载</h3><p><a href="http://satanwoo.github.io/2015/12/13/Learn-R-1/">一步步学R（1）</a><br><a href="http://satanwoo.github.io/2015/12/20/Learn-R-2/">一步步学R（2）</a></p>
-<p>嘿嘿，作为一名天才，当然要掌握一定的数据分析能力啦，所以从今天起，我们来一步步学习R这门有意思的语言。</p>
-<p>这一系列的文章的开发环境都是基于Mac的。</p>
-<h3 id="安装">安装</h3><ol>
-<li>首先你要安装R语言的环境 <a href="https://cran.r-project.org/" target="_blank" rel="external">安装点我</a></li>
-<li>可选：安装RStudio（类似于Matlab），安装之前必须已经安装了R <a href="https://www.rstudio.com/" target="_blank" rel="external">安装点我</a></li>
-</ol>
-<h3 id="基础知识">基础知识</h3><h4 id="R里面的基础类型">R里面的基础类型</h4><ul>
-<li>Character，如 “a”，”haha”</li>
-<li>Number（实数），如 5， 5.5</li>
-<li><p>Integer（整数），如 5，6</p>
-<p>  <strong>要注意的是，默认情况，所有的整数类型都为实数，如果要特定为整数，需要加L，如5L</strong></p>
-</li>
-<li><p>Logical，如TRUE, FALSE</p>
-<p>  <strong>FALSE = 0，TRUE为一切非0数，可以简写为F/T</strong></p>
-</li>
-<li><p>Complex（复数），如 5 + 7i</p>
-</li>
-</ul>
-<h4 id="操作">操作</h4><p><code>x &lt;- 5</code> 表示将5赋值给x<br><code>x</code>      表示输出x，效果等同于<code>print(x)</code></p>
-<h4 id="向量">向量</h4><p>虽然向量不是一个基本类型，但是却是R语言中非常关键的一种数据结构</p>
-<p><code>x &lt;- 5</code> 这句语句虽然表面上看起来是定义了一个<strong>Number</strong>类型的x，值为5。但是实质上却是构建了一个大小为1的向量，通过<code>x</code>语句我们可以得到一下结果：</p>
-<pre><code>&gt; x
-[<span class="number">1</span>] <span class="number">5</span>
-</code></pre><p>所以<code>x</code> 等同于语句 <code>x[1]</code>，会输出5。</p>
-<p><strong>注意：R语言里面的数据索引从1开始</strong></p>
-<p>除了默认构造的向量以外，我们可以通过<code>vector(class, size)</code>来构建指定类型和大小的向量，如：</p>
-<pre><code>&gt; k &lt;- <span class="function"><span class="title">vector</span><span class="params">(<span class="string">'logical'</span>, <span class="number">5</span>L)</span></span>
-&gt; z &lt;- <span class="function"><span class="title">vector</span><span class="params">(<span class="string">"complex"</span>, <span class="number">7</span>)</span></span>
-</code></pre><p>以上两句我们分别构建了一个名为k的logical向量，大小5以及一个复数向量，大小为7。</p>
-<p><strong>注意：在R的向量里，同一个向量只能包含相同类型的对象，如果包含了不相同，会进行隐式转换，如果不能转换就会报错。</strong></p>
-<p>如：</p>
-<pre><code>&gt; k &lt;- <span class="function"><span class="title">c</span><span class="params">(T, <span class="string">"a"</span>)</span></span>
-&gt; k
-[<span class="number">1</span>] <span class="string">"TRUE"</span> <span class="string">"a"</span> 
-</code></pre><p>当然也可以强制转换：</p>
-<p><code>as.character</code>， <code>as.logical</code>， <code>as.numeric</code>，<code>as.complex</code>，<code>as.integer</code></p>
-<h4 id="list">list</h4><p>list是一种可以同时保存多个类型对象的数据结构，通过<code>list(a, b, c, d)</code>进行构建。</p>
-<h4 id="Matrix">Matrix</h4><p>matrix就是多维向量，通过函数<code>matrix(data, nrows, ncols)</code> 构建，默认是按列排列数据，可以通过更改byrow=T来按照行来构建。</p>
-<h4 id="Factor">Factor</h4><p>简单理解，就是分类定义的数组，比如，<code>x &lt;- factor(c(&#39;yes&#39;, &#39;no&#39;, &#39;yes&#39;, &#39;no&#39;, &#39;yes&#39;))</code>  ，虽然看起来构建了一个和Character类型的向量差不多，但是实质上，我们可以通过</p>
-<pre><code>&gt; x &lt;- <span class="function"><span class="title">factor</span><span class="params">(c(<span class="string">'yes'</span>, <span class="string">'no'</span>, <span class="string">'yes'</span>)</span></span>)
-&gt; <span class="function"><span class="title">levels</span><span class="params">(x)</span></span>
-[<span class="number">1</span>] <span class="string">"no"</span>  <span class="string">"yes"</span>
-</code></pre><p>这个向量代表了几种分类。</p>
-<h4 id="Missing_Values">Missing Values</h4><p>Na和NaN, <strong>NaN仅代表数值计算的不存在，而Na是代表一切的不存在，即Na包含NaN</strong><br>我们可以通过<code>is.Na</code>和<code>is.NaN</code>来进行判断。</p>
-<h4 id="Data_Frames">Data Frames</h4><p>Data Frames简单理解就是一个表格，但是与Matrix不同的是，她可以包含不同类型的data，也就是说，<strong>DataFrames的每一列都是一个list</strong>。</p>
-<pre><code>&gt; k &lt;- data.<span class="function"><span class="title">frame</span><span class="params">(foo = <span class="number">1</span>:<span class="number">3</span>, w = c(T, F, F)</span></span>, row<span class="class">.names</span> = <span class="function"><span class="title">c</span><span class="params">(<span class="string">'1'</span>, <span class="string">'a'</span>, <span class="string">'k'</span>)</span></span>)
-&gt; k
-  foo     w
-<span class="number">1</span>   <span class="number">1</span>  TRUE
-<span class="tag">a</span>   <span class="number">2</span> FALSE
-k   <span class="number">3</span> FALSE
-</code></pre><p><strong>需要注意的是，每一个list的长度，都必须完全一样</strong>。</p>
-<h4 id="Names（别名）">Names（别名）</h4><p>对于一个向量、list或者matrix等等，我们都可以为里面的元素加上别名，如:</p>
-<pre><code>&gt; x &lt;- <span class="number">1</span>:<span class="number">3</span>
-&gt; <span class="function"><span class="title">names</span><span class="params">(x)</span></span> &lt;- <span class="function"><span class="title">c</span><span class="params">(T, F, <span class="string">"ha"</span>)</span></span>
-&gt; x
- TRUE FALSE    ha 
-    <span class="number">1</span>     <span class="number">2</span>     <span class="number">3</span> 
-</code></pre><p>其中，这些别名都会以字符串的形式存在，因此，你可以通过x[“TRUE”]来访问元素1。</p>
-<hr>
-<h3 id="进阶的R_哈哈哈">进阶的R 哈哈哈</h3><h4 id="Partical_Matching">Partical Matching</h4><p>R里面有个很酷的特性叫做Partial Matching。比如你定义了如下的list：<code>x &lt;- list(caonikljslkdfj = 5)</code>，每次都要输入<code>caonikljslkdfj</code>势必很麻烦，因此你可以使用<strong>$</strong>来获取，如<code>x$c</code> 即可以得到5了。</p>
-<h4 id="Subset">Subset</h4><p>在R里面，获取数据或者构建数据简直就是a piece of cake。(哈哈哈，英语好就是屌啊)</p>
-<p>比如有这样一个向量<code>x &lt;- c(1, 2, 3, 4, 5)</code>，</p>
-<p>你可以<code>x[1]</code> 来获取元素1，也可以通过<code>x[1:3]</code>来获取元素1到元素3。同样，你也可以通过<code>x[x &gt; 2]</code> 来获取元素中值比2大的元素。</p>
-<p>你也可以通过logical来构建另外的向量，如：</p>
-<pre><code>&gt; u &lt;- x &gt; <span class="number">2</span>
-&gt; u
-[<span class="number">1</span>] <span class="literal">FALSE</span> <span class="literal">FALSE</span>  <span class="literal">TRUE</span>  <span class="literal">TRUE</span>  <span class="literal">TRUE</span>
-</code></pre><p>而对于Matrix类型来说，<code>c &lt;- matrix(1:3, nrows = 3, ncols = 1)</code>，你可以使用<code>c[1, ]</code>来获取第一行所有列的数据，或者<code>c[,1]</code>来获取第一列所有行的数据。</p>
-<h4 id="[]_vs_[[]]_vs_$">[] vs [[]] vs $</h4><p>首先，这三个符号都可以获取元素，但是区别在于：</p>
-<ul>
-<li>[]返回的是和变量本身类型相同的东西，如果对list使用[]，那么返回的就是list，如果对向量使用，返回的就是向量，无关取出的元素本身的类型。</li>
-<li>[]可以获取多个元素，而[[]]和$不行。</li>
-<li>$可以模糊匹配（Partial Matching），而[[]]不行，如果要启用模糊匹配，得使用[[name, exact = F]]</li>
-<li>$不可以使用计算值，[[]]可以</li>
-</ul>
-<p>是不是很拗口？让我们来看几个例子，在看例子之前强调一点，</p>
-<p><strong>元素并非特指一个，而是一个基本的数据结构，比如对于向量 <code>x &lt;- 1:5</code>来说，里面的元素1到元素5分别都是一个元素。而对于<code>c&lt;- list(foo = 1:3, bar = 0.5)</code>来说，foo和bar都分别是一个元素，尽管foo本身仍然是个向量。</strong></p>
-<h5 id="例子">例子</h5><p>对于<code>c &lt;- list(foo = 1:3, bar = 0.6)</code>定义的一个list，我们分别使用：</p>
-<pre><code>&gt; c[<span class="string">"foo"</span>]
-$foo
-[<span class="number">1</span>] <span class="number">1</span> <span class="number">2</span> <span class="number">3</span>
-
-&gt; c[[<span class="string">"foo"</span>]]
-[<span class="number">1</span>] <span class="number">1</span> <span class="number">2</span> <span class="number">3</span>
-&gt; c$foo
-[<span class="number">1</span>] <span class="number">1</span> <span class="number">2</span> <span class="number">3</span>
-</code></pre><p>可以看到，通过［］取出的foo元素仍然是list，而[[]]和$取出的都是向量元素本身了。</p>
-<p>再比如计算变量的差别：</p>
-<pre><code>&gt; name &lt;- <span class="string">"foo"</span>
-&gt; c[[name]]
-[<span class="number">1</span>] <span class="number">1</span> <span class="number">2</span> <span class="number">3</span>
-&gt; c$name
-<span class="literal">NULL</span>
-</code></pre><p>可以看到，[[]]可以使用计算变量，而$不可以。<strong>这点其实和JavaScript里面的dot和[]操作符很类似的</strong></p>
-<p>模糊匹配差别：</p>
-<pre><code>&gt; c$f
-[<span class="number">1</span>] <span class="number">1</span> <span class="number">2</span> <span class="number">3</span>
-&gt; c[[<span class="string">"f"</span>]]
-<span class="literal">NULL</span>
-&gt; c[[<span class="string">"f"</span>, exact = F]]
-[<span class="number">1</span>] <span class="number">1</span> <span class="number">2</span> <span class="number">3</span>
-</code></pre><h4 id="向量化操作">向量化操作</h4><p><strong>R里面的所有计算操作都是并行的</strong>。</p>
-<p>因此，如果要计算两个Matrix的乘积，需要使用<code>%*%</code>，否则如果直接使用<code>*</code>就是对应位置的元素相乘而已。</p>
-
-      
-    </div>
-    <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/12/13/Learn-R-1/" data-id="cixna4yxs001k1gi1hapl9s2z" class="article-share-link">Share</a>
-      
-      
-  <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/R/">R</a></li></ul>
 
     </footer>
   </div>
@@ -3283,7 +3308,7 @@ $foo
   <div class="widget-wrap">
     <h3 class="widget-title">Tags</h3>
     <div class="widget">
-      <ul class="tag-list"><li class="tag-list-item"><a class="tag-list-link" href="/tags/Android/">Android</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Growth/">Growth</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/JavaScript/">JavaScript</a><span class="tag-list-count">3</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Math/">Math</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/R/">R</a><span class="tag-list-count">2</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Reverse-Engineering/">Reverse Engineering</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Swift/">Swift</a><span class="tag-list-count">6</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/iOS/">iOS</a><span class="tag-list-count">19</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/shell/">shell</a><span class="tag-list-count">1</span></li></ul>
+      <ul class="tag-list"><li class="tag-list-item"><a class="tag-list-link" href="/tags/Android/">Android</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Growth/">Growth</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/JavaScript/">JavaScript</a><span class="tag-list-count">3</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Math/">Math</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/R/">R</a><span class="tag-list-count">2</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Reverse-Engineering/">Reverse Engineering</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Swift/">Swift</a><span class="tag-list-count">6</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/iOS/">iOS</a><span class="tag-list-count">19</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/iOS-Reverse-Engineering/">iOS Reverse Engineering</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/shell/">shell</a><span class="tag-list-count">1</span></li></ul>
     </div>
   </div>
 
@@ -3292,7 +3317,7 @@ $foo
   <div class="widget-wrap">
     <h3 class="widget-title">Tag Cloud</h3>
     <div class="widget tagcloud">
-      <a href="/tags/Android/" style="font-size: 10px;">Android</a> <a href="/tags/Growth/" style="font-size: 10px;">Growth</a> <a href="/tags/JavaScript/" style="font-size: 15px;">JavaScript</a> <a href="/tags/Math/" style="font-size: 10px;">Math</a> <a href="/tags/R/" style="font-size: 12.5px;">R</a> <a href="/tags/Reverse-Engineering/" style="font-size: 10px;">Reverse Engineering</a> <a href="/tags/Swift/" style="font-size: 17.5px;">Swift</a> <a href="/tags/iOS/" style="font-size: 20px;">iOS</a> <a href="/tags/shell/" style="font-size: 10px;">shell</a>
+      <a href="/tags/Android/" style="font-size: 10px;">Android</a> <a href="/tags/Growth/" style="font-size: 10px;">Growth</a> <a href="/tags/JavaScript/" style="font-size: 15px;">JavaScript</a> <a href="/tags/Math/" style="font-size: 10px;">Math</a> <a href="/tags/R/" style="font-size: 12.5px;">R</a> <a href="/tags/Reverse-Engineering/" style="font-size: 10px;">Reverse Engineering</a> <a href="/tags/Swift/" style="font-size: 17.5px;">Swift</a> <a href="/tags/iOS/" style="font-size: 20px;">iOS</a> <a href="/tags/iOS-Reverse-Engineering/" style="font-size: 10px;">iOS Reverse Engineering</a> <a href="/tags/shell/" style="font-size: 10px;">shell</a>
     </div>
   </div>
 
@@ -3301,7 +3326,7 @@ $foo
   <div class="widget-wrap">
     <h3 class="widget-title">Archives</h3>
     <div class="widget">
-      <ul class="archive-list"><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/01/">January 2017</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/10/">October 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/09/">September 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/07/">July 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/05/">May 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/04/">April 2016</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/03/">March 2016</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/02/">February 2016</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/12/">December 2015</a><span class="archive-list-count">6</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/11/">November 2015</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/10/">October 2015</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/09/">September 2015</a><span class="archive-list-count">4</span></li></ul>
+      <ul class="archive-list"><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/01/">January 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/10/">October 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/09/">September 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/07/">July 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/05/">May 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/04/">April 2016</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/03/">March 2016</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/02/">February 2016</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/12/">December 2015</a><span class="archive-list-count">6</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/11/">November 2015</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/10/">October 2015</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/09/">September 2015</a><span class="archive-list-count">4</span></li></ul>
     </div>
   </div>
 
@@ -3311,6 +3336,10 @@ $foo
     <h3 class="widget-title">Recents</h3>
     <div class="widget">
       <ul>
+        
+          <li>
+            <a href="/2017/01/07/DispatchGroupCrash/">iOS疑难问题排查之深入探究dispatch_group crash</a>
+          </li>
         
           <li>
             <a href="/2017/01/07/JSONRPCKit/">JSONRPCKit源码解析</a>
@@ -3326,10 +3355,6 @@ $foo
         
           <li>
             <a href="/2016/07/10/immutable-thread/">从Immutable来谈谈对于线程安全的理解误区</a>
-          </li>
-        
-          <li>
-            <a href="/2016/05/02/Spotify/">为什么Spotify的付费用户转化率惊人的高？</a>
           </li>
         
       </ul>

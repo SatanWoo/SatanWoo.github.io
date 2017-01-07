@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  
+  <title>iOS疑难问题排查之深入探究dispatch_group crash | Hexo</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+  <meta name="description" content="起因昨天其他部门的同事突然反馈一起相对来说比较严重的Crash问题（占比达到了yyyy左右，并且从Crash堆栈上可以发现很多情况下是一启动就Crash了）。去掉隐私数据大致堆栈如下：
+Thread 0 Crashed:
+0   libdispatch.dylib               0x000000018953e828 _dispatch_group_leave :76 (in libd">
+<meta property="og:type" content="article">
+<meta property="og:title" content="iOS疑难问题排查之深入探究dispatch_group crash">
+<meta property="og:url" content="http://satanwoo.github.io/2017/01/07/DispatchGroupCrash/index.html">
+<meta property="og:site_name" content="Hexo">
+<meta property="og:description" content="起因昨天其他部门的同事突然反馈一起相对来说比较严重的Crash问题（占比达到了yyyy左右，并且从Crash堆栈上可以发现很多情况下是一启动就Crash了）。去掉隐私数据大致堆栈如下：
+Thread 0 Crashed:
+0   libdispatch.dylib               0x000000018953e828 _dispatch_group_leave :76 (in libd">
+<meta property="og:image" content="https://github.com/SatanWoo/BeeHive/blob/master/hopper.png?raw=true">
+<meta property="og:image" content="https://github.com/SatanWoo/BeeHive/blob/master/symbol.png?raw=true">
+<meta property="og:updated_time" content="2017-01-07T13:59:31.000Z">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="iOS疑难问题排查之深入探究dispatch_group crash">
+<meta name="twitter:description" content="起因昨天其他部门的同事突然反馈一起相对来说比较严重的Crash问题（占比达到了yyyy左右，并且从Crash堆栈上可以发现很多情况下是一启动就Crash了）。去掉隐私数据大致堆栈如下：
+Thread 0 Crashed:
+0   libdispatch.dylib               0x000000018953e828 _dispatch_group_leave :76 (in libd">
+  
+    <link rel="alternative" href="/atom.xml" title="Hexo" type="application/atom+xml">
+  
+  
+    <link rel="icon" href="/favicon.png">
+  
+  <link rel="stylesheet" href="/css/style.css" type="text/css">
+  
+
+</head>
+<body>
+  <div id="container">
+    <div id="wrap">
+      <header id="header">
+  <div id="banner"></div>
+  <div id="header-outer" class="outer">
+    <div id="header-title" class="inner">
+      <h1 id="logo-wrap">
+        <a href="/" id="logo">Hexo</a>
+      </h1>
+      
+    </div>
+    <div id="header-inner" class="inner">
+      <nav id="main-nav">
+        <a id="main-nav-toggle" class="nav-icon"></a>
+        
+          <a class="main-nav-link" href="/">Home</a>
+        
+          <a class="main-nav-link" href="/archives">Archives</a>
+        
+          <a class="main-nav-link" href="/sitemap.xml">map</a>
+        
+      </nav>
+      <nav id="sub-nav">
+        
+          <a id="nav-rss-link" class="nav-icon" href="/atom.xml" title="RSS Feed"></a>
+        
+        <a id="nav-search-btn" class="nav-icon" title="Search"></a>
+      </nav>
+      <div id="search-form-wrap">
+        <form action="//google.com/search" method="get" accept-charset="UTF-8" class="search-form"><input type="search" name="q" results="0" class="search-form-input" placeholder="Search"><button type="submit" class="search-form-submit">&#xF002;</button><input type="hidden" name="sitesearch" value="http://satanwoo.github.io"></form>
+      </div>
+    </div>
+  </div>
+</header>
+      <div class="outer">
+        <section id="main"><article id="post-DispatchGroupCrash" class="article article-type-post" itemscope itemprop="blogPost">
+  <div class="article-meta">
+    <a href="/2017/01/07/DispatchGroupCrash/" class="article-date">
+  <time datetime="2017-01-07T13:44:39.000Z" itemprop="datePublished">2017-01-07</time>
+</a>
+    
+  </div>
+  <div class="article-inner">
+    
+    
+      <header class="article-header">
+        
+  
+    <h1 class="article-title" itemprop="name">
+      iOS疑难问题排查之深入探究dispatch_group crash
+    </h1>
+  
+
+      </header>
+    
+    <div class="article-entry" itemprop="articleBody">
+      
+        <h3 id="起因">起因</h3><p>昨天其他部门的同事突然反馈一起相对来说比较严重的Crash问题（占比达到了yyyy左右，并且从Crash堆栈上可以发现很多情况下是一启动就Crash了）。去掉隐私数据大致堆栈如下：</p>
+<pre><code>Thread <span class="number">0</span> Crashed:
+<span class="number">0</span>   libdispatch.dylib               <span class="number">0x000000018953e828</span> _dispatch_group_leave :<span class="number">76</span> (in libdispatch.dylib)
+<span class="number">1</span>   libdispatch.dylib               <span class="number">0x000000018954b084</span> __dispatch_barrier_sync_f_slow_invoke :<span class="number">320</span> (in libdispatch.dylib)
+<span class="number">2</span>   libdispatch.dylib               <span class="number">0x000000018953a1bc</span> __dispatch_client_callout :<span class="number">16</span> (in libdispatch.dylib)
+<span class="number">3</span>   libdispatch.dylib               <span class="number">0x000000018953ed68</span> __dispatch_main_queue_callback_4CF :<span class="number">1000</span> (in libdispatch.dylib)
+<span class="number">4</span>   CoreFoundation                  <span class="number">0x000000018a65e810</span> ___CFRUNLOOP_IS_SERVICING_THE_MAIN_DISPATCH_QUEUE__ :<span class="number">12</span> (in CoreFoundation)
+<span class="number">5</span>   CoreFoundation                  <span class="number">0x000000018a65c3fc</span> ___CFRunLoopRun :<span class="number">1660</span> (in CoreFoundation)
+<span class="number">6</span>   CoreFoundation                  <span class="number">0x000000018a58a2b8</span> _CFRunLoopRunSpecific :<span class="number">444</span> (in CoreFoundation)
+<span class="number">7</span>   GraphicsServices                <span class="number">0x000000018c03e198</span> _GSEventRunModal :<span class="number">180</span> (in GraphicsServices)
+<span class="number">8</span>   UIKit                           <span class="number">0x00000001905d17fc</span> -[UIApplication _run] :<span class="number">684</span> (in UIKit)
+<span class="number">9</span>   UIKit                           <span class="number">0x00000001905cc534</span> _UIApplicationMain :<span class="number">208</span> (in UIKit)
+<span class="number">10</span>  xxxiPhone                       <span class="number">0x0000000100041a98</span> main main.m:<span class="number">26</span> (in xxxiPhone)
+<span class="number">11</span>  libdyld.dylib                   <span class="number">0x000000018956d5b8</span> _start :<span class="number">4</span> (in libdyld.dylib)
+</code></pre><p>一看到这种堆栈，头就大了，除了<strong>Thread 0 的第10行是和程序本身二进制相关的</strong>堆栈，其余的调用栈全部是系统库里面的，并且唯一一行程序本身二进制的代码还是一个完全没作用的<code>main</code>函数。</p>
+<p>好吧，只能重新找找其余的线索。从堆栈上来反推当时的场景应该是如下场景：</p>
+<pre><code>启动 -&gt; main函数 -&gt; main_queue 执行 -&gt; dispatch_group_leave -&gt; <span class="constant">Crash</span>
+</code></pre><p>于是，我们的线索就从最后的<code>_dispatch_group_leave</code>来进行。  </p>
+<p>首先先来最简单的方法：下符号断点：<code>dispatch_group_leave</code>。</p>
+<p>当然事情没有这么简单，尝试重复多次也没有断到我们想要的符号断点上，于是这条路暂时考虑放弃（结合Crash率也可以发现这并非必现的Crash场景）。</p>
+<p>这条路不通，我们先尝试全局搜索<code>dispatch_group_leave</code>，结果发现有如下几条线索：</p>
+<ul>
+<li>外部开源库</li>
+<li>自身工程代码</li>
+</ul>
+<p>结合Crash出现的版本以及以上上述各库最后升级时间来判断，我们基本确定出在问题出现在自身工程中的代码里，如下：</p>
+<pre><code>dispatch_group_t serviceGroup = dispatch_group_create();
+dispatch_group_notify(serviceGroup, dispatch_get_main_queue(), ^{
+    <span class="built_in">NSLog</span>(<span class="string">@"ttttttt:%@"</span>,t);
+});
+
+<span class="comment">// t 是一个包含一堆字符串的数组 </span>
+[t enumerateObjectsUsingBlock:^(<span class="keyword">id</span>  _Nonnull obj, <span class="built_in">NSUInteger</span> idx, <span class="built_in">BOOL</span> * _Nonnull stop) {
+    dispatch_group_enter(serviceGroup);
+    SDWebImageCompletionWithFinishedBlock completion =
+    ^(<span class="built_in">UIImage</span> *image, <span class="built_in">NSError</span> *error, SDImageCacheType cacheType, <span class="built_in">BOOL</span> finished, <span class="built_in">NSURL</span> *imageURL) {
+        dispatch_group_leave(serviceGroup);
+        <span class="built_in">NSLog</span>(<span class="string">@"idx:%zd"</span>,idx);
+    };
+    [[SDWebImageManager sharedManager] downloadImageWithURL:[<span class="built_in">NSURL</span> URLWithString:t[idx]]
+                                                    options:SDWebImageLowPriority
+                                                   progress:<span class="literal">nil</span>
+                                                  completed:completion];
+}];
+</code></pre><p>这段代码逻辑非常简单吧：给你一个数组，里面是一堆图片地址。你使用多线程进行并发下载，直到所有图片都下载完成（可以失败）进行回调，其中图片下载使用的是<code>SDWebImage</code>。</p>
+<p>这段代码里面的的确确出现了可疑的<code>dispatch_group_leave</code>，但是这段代码太常见了。和同事认认真真检查了许久，同时也和天猫、手淘中使用<code>dispatch_group_t</code>的地方进行了对比，没发现任何问题。</p>
+<p>好吧，问题一下子陷入了僵局，只好上终极调试大法：<strong>汇编分析法</strong>。</p>
+<p>通过文章开头的堆栈我们查找<code>libdispatch.dylib</code>中对应的Crash位置，然后通过汇编解析查看相关指令，结果如下：</p>
+<p><img src="https://github.com/SatanWoo/BeeHive/blob/master/hopper.png?raw=true" alt=""></p>
+<p>从上图看出，指令挂掉的原因是因为执行了<code>brk</code> （brk可以理解为跳转指令特殊的一种，一旦执行，就会进入某种Exception模式，导致Crash）。</p>
+<p>为什么执行<code>dispatch_group_leave</code>会挂？从上述图中汇编不难发现，<code>dispatch_group_leave</code>具有两条分支：比较x9寄存器和0之间的关系，如果是less equal，就跳转到0x180502808(即会crash的逻辑分支)；反之则正确执行ret返回。</p>
+<p>那么x9寄存器是什么？我们继续往上看指令<code>ldxr x9, [x10]</code>，x9中的值是以x10寄存器中的内容作为地址，取64位放入x9寄存器中。继续，那么x10中的内存是什么？x10中的内容是指令<code>add x10, x0, #0x30</code>。也就是x10 = x0 + 48(0x30的10进制表示)。那么，函数调用的时候x0是self，也即是一个类或者结构体的首地址。所以这两句指令加起来的含义就是<strong><b style="color:red">取结构体地址偏移48位置的某个成员变量的值。</b></strong></p>
+<p>除此之外，汇编解析还完整保留了Crash的字符串提示： <strong>“BUG IN CLIENT OF LIBDISPATCH: Unbalanced call to dispatch_group_leave()”</strong></p>
+<p>结合这两点，我们查看<code>libdispatch</code>的源码，代码如下：</p>
+<pre><code><span class="function"><span class="keyword">void</span>
+<span class="title">dispatch_group_leave</span>(<span class="params">dispatch_group_t dg</span>)
+</span>{
+    dispatch_semaphore_t dsema = (dispatch_semaphore_t)dg;
+    dispatch_atomic_release_barrier();
+    <span class="keyword">long</span> <span class="keyword">value</span> = dispatch_atomic_inc2o(dsema, dsema_value);
+    <span class="keyword">if</span> (slowpath(<span class="keyword">value</span> == LONG_MIN)) {
+        DISPATCH_CLIENT_CRASH(<span class="string">"Unbalanced call to dispatch_group_leave()"</span>);
+    }
+    <span class="keyword">if</span> (slowpath(<span class="keyword">value</span> == dsema-&gt;dsema_orig)) {
+        (<span class="keyword">void</span>)_dispatch_group_wake(dsema);
+    }
+}
+</code></pre><p><em>注：苹果开发的libdispatch源码经过了各种变形修改，不是真正运行的代码，仅供参考。</em></p>
+<p>果不其然，这段代码完整复现了我们之前汇编分析的结果：如果<code>dg</code>信号量中的字段<code>dsema_value</code>原子性自加一后等于LONGMIN，就会<strong>CRASH</strong>。为什么会Crash呢？</p>
+<p>我们需要关注下LONG_MIN这个数字，<code>LONG_MIN = -LONG_MAX - 1</code>。理解起来很简单，就是可以表征的(该类型合法范围)最大数和最小数。</p>
+<p>搜索下LONGMAX，我们发现在<code>dispatch_group_create</code>里面发现了它的踪影：</p>
+<pre><code><span class="keyword">dispatch_group_t</span>
+dispatch_group_create(<span class="keyword">void</span>)
+{
+    <span class="keyword">dispatch_group_t</span> dg = _dispatch_alloc(DISPATCH_VTABLE(group),
+            <span class="keyword">sizeof</span>(<span class="keyword">struct</span> dispatch_semaphore_s));
+    _dispatch_semaphore_init(LONG_MAX, dg);
+    <span class="keyword">return</span> dg;
+}
+</code></pre><p>好了， 这下豁然开朗。这两段代码的结合告诉了我们一个事实：当<code>dq</code>这个信号量加一导致<strong><b style="color:red">溢出</b></strong>后，<code>dispatch_group_leave</code>就会Crash。</p>
+<p>最简单的复现代码如下：</p>
+<pre><code>- (<span class="keyword">void</span>)viewDidLoad 
+{
+    [<span class="keyword">super</span> viewDidLoad];
+    dispatch_group_t <span class="keyword">group</span> = dispatch_group_create();
+    dispatch_group_leave(<span class="keyword">group</span>);
+    <span class="comment">// Do any additional setup after loading the view, typically from a nib.</span>
+}
+</code></pre><p><img src="https://github.com/SatanWoo/BeeHive/blob/master/symbol.png?raw=true" alt=""></p>
+<p>当然，上述代码相当直白简单，我们一般都不会犯这样低级的错误。</p>
+<h3 id="代码究竟出错在哪？">代码究竟出错在哪？</h3><p>了解了<code>dispatch_group_leave</code>的出错原因后，我们再回到我们刚刚认为没问题的代码，一定是哪个地方我们欠考虑了。</p>
+<p>上述代码执行流程还是非常简单的，我们用模型简述一遍：</p>
+<p><strong>遍历数组，对每个URL进行<code>dispatch_group_enter</code>，然后将其丢入一个下载block交由SDWebImage进行并发下载，下载回调（无论失败或者成功）后执行<code>dispatch_group_leave</code>。</strong></p>
+<p>我们举个简单的例子，假设我们有一个包含5个URL的数组：</p>
+<ol>
+<li>遍历的时候，对信号量<code>dq</code> enter了5次，简单理解信号量减去5次。</li>
+<li>SDWebImage下载回调的时候，对信号量<code>dq</code> leave了5次，于是信号量增加了5次。</li>
+<li>执行完毕，整个group执行完成。</li>
+</ol>
+<p><strong><b style="color:red">但是，由于SDWebImage的下载是异步且无法保证时间的，如果在整个group没有执行完毕期间，上述函数整体又被执行到了，会怎么样？</b></strong></p>
+<p>我们再用上述的例子来走遍流程。</p>
+<ol>
+<li>第一次遍历，我们创建了信号量<code>dq1</code>，enter了5次，dq1 现在 = -5。</li>
+<li>SDWebImage的下载回调捕捉了<code>dq1</code>，准备留待回调后加回来，我们将这次遍历生成的下载回调block统称为b10, b12, b13, b14, b15。</li>
+<li><strong>但是，在第一次SDWebImage下载回调还没执行的时候，第二次函数遍历来了。</strong></li>
+<li>第二次遍历，我们创建了信号量<code>dq2</code>，enter了5次，dq2 现在 = -5。</li>
+<li>创建第二次遍历对应的回调block，称为b20，b21, b22, b23, b24。</li>
+</ol>
+<p>通过查阅<a href="https://github.com/rs/SDWebImage/blob/master/SDWebImage/SDWebImageDownloader.m" target="_blank" rel="external">SDWebImageDownloader.m</a>源码我们发现：</p>
+<pre><code><span class="function_or_atom">dispatch_barrier_sync</span>(<span class="function_or_atom">self</span>.<span class="function_or_atom">barrierQueue</span>, ^{
+    <span class="variable">SDWebImageDownloaderOperation</span> *<span class="function_or_atom">operation</span> = <span class="function_or_atom">self</span>.<span class="variable">URLOperations</span>[<span class="function_or_atom">url</span>];
+    <span class="function_or_atom">if</span> (<span class="exclamation_mark">!</span><span class="function_or_atom">operation</span>) {
+    <span class="function_or_atom">operation</span> = <span class="function_or_atom">createCallback</span>();
+
+    // <span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span>特别注意这行<span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span>
+    <span class="function_or_atom">self</span>.<span class="variable">URLOperations</span>[<span class="function_or_atom">url</span>] = <span class="function_or_atom">operation</span>;
+
+    __weak <span class="variable">SDWebImageDownloaderOperation</span> *<span class="function_or_atom">woperation</span> = <span class="function_or_atom">operation</span>;
+    <span class="function_or_atom">operation</span>.<span class="function_or_atom">completionBlock</span> = ^{
+      <span class="variable">SDWebImageDownloaderOperation</span> *<span class="function_or_atom">soperation</span> = <span class="function_or_atom">woperation</span>;
+      <span class="function_or_atom">if</span> (<span class="exclamation_mark">!</span><span class="function_or_atom">soperation</span>) <span class="function_or_atom">return</span>;
+      <span class="function_or_atom">if</span> (<span class="function_or_atom">self</span>.<span class="variable">URLOperations</span>[<span class="function_or_atom">url</span>] == <span class="function_or_atom">soperation</span>) {
+          [<span class="function_or_atom">self</span>.<span class="variable">URLOperations</span> <span class="function_or_atom">removeObjectForKey:url</span>];
+      };
+    };
+}
+</code></pre><p>SDWebImage的下载器会<strong>根据URL做下载任务对应NSOperation映射，也即之前创建的下载回调Block。</strong></p>
+<p>好，就是这行导致Crash的发生。为什么呢？</p>
+<p>我们设想下，假设在第二次遍历中包含了第一次遍历中的图片URL，比如b20对应的图片URL和b10对应的图片URL一样，那么在SDWebImage的处理回调里，b20就会替换掉b10。<b style="color:red">于是，在第一次遍历创建的5个下载任务回调中，b10回调的时候实际已经执行的是b20，也就是<code>dq2 + 1</code>；而在后续第二次遍历执行下载任务回调的时候，又分别执行了b20-b24的5个任务，导致<code>dq2 + 5</code>。这从导致<code>dq2</code>实际上leave的次数比enter的次数多了1 (6比5)，导致了dq2信号量的数值溢出，从而进入了Crash分支。</b></p>
+<h3 id="最后">最后</h3><p>看起来很简单、清晰易懂的代码，没想到也会造成巨大的问题。所以，写代码一定要谨慎谨慎再谨慎。</p>
+
+      
+    </div>
+    <footer class="article-footer">
+      <a data-url="http://satanwoo.github.io/2017/01/07/DispatchGroupCrash/" data-id="cixnarttz002193i1psxwfxdz" class="article-share-link">Share</a>
+      
+      
+  <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS-Reverse-Engineering/">iOS Reverse Engineering</a></li></ul>
+
+    </footer>
+  </div>
+  
+    
+<nav id="article-nav">
+  
+  
+    <a href="/2017/01/07/JSONRPCKit/" id="article-nav-older" class="article-nav-link-wrap">
+      <strong class="article-nav-caption">Older</strong>
+      <div class="article-nav-title">JSONRPCKit源码解析</div>
+    </a>
+  
+</nav>
+
+  
+</article>
+
+
+<section id="comments">
+  <!-- 多说评论框 start -->
+  <div class="ds-thread" data-thread-key="post-DispatchGroupCrash" data-title="iOS疑难问题排查之深入探究dispatch_group crash" data-url="http://satanwoo.github.io/2017/01/07/DispatchGroupCrash/"></div>
+  <!-- 多说评论框 end -->
+  <!-- 多说公共JS代码 start (一个网页只需插入一次) -->
+  <script type="text/javascript">
+  var duoshuoQuery = {short_name:'satanwoo'};
+    (function() {
+      var ds = document.createElement('script');
+      ds.type = 'text/javascript';ds.async = true;
+      ds.src = (document.location.protocol == 'https:' ? 'https:' : 'http:') + '//static.duoshuo.com/embed.js';
+      ds.charset = 'UTF-8';
+      (document.getElementsByTagName('head')[0] 
+       || document.getElementsByTagName('body')[0]).appendChild(ds);
+    })();
+    </script>
+  <!-- 多说公共JS代码 end -->
+</section>
+</section>
+        
+          <aside id="sidebar">
+  
+    
+  
+    
+  <div class="widget-wrap">
+    <h3 class="widget-title">Tags</h3>
+    <div class="widget">
+      <ul class="tag-list"><li class="tag-list-item"><a class="tag-list-link" href="/tags/Android/">Android</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Growth/">Growth</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/JavaScript/">JavaScript</a><span class="tag-list-count">3</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Math/">Math</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/R/">R</a><span class="tag-list-count">2</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Reverse-Engineering/">Reverse Engineering</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Swift/">Swift</a><span class="tag-list-count">6</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/iOS/">iOS</a><span class="tag-list-count">19</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/iOS-Reverse-Engineering/">iOS Reverse Engineering</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/shell/">shell</a><span class="tag-list-count">1</span></li></ul>
+    </div>
+  </div>
+
+  
+    
+  <div class="widget-wrap">
+    <h3 class="widget-title">Tag Cloud</h3>
+    <div class="widget tagcloud">
+      <a href="/tags/Android/" style="font-size: 10px;">Android</a> <a href="/tags/Growth/" style="font-size: 10px;">Growth</a> <a href="/tags/JavaScript/" style="font-size: 15px;">JavaScript</a> <a href="/tags/Math/" style="font-size: 10px;">Math</a> <a href="/tags/R/" style="font-size: 12.5px;">R</a> <a href="/tags/Reverse-Engineering/" style="font-size: 10px;">Reverse Engineering</a> <a href="/tags/Swift/" style="font-size: 17.5px;">Swift</a> <a href="/tags/iOS/" style="font-size: 20px;">iOS</a> <a href="/tags/iOS-Reverse-Engineering/" style="font-size: 10px;">iOS Reverse Engineering</a> <a href="/tags/shell/" style="font-size: 10px;">shell</a>
+    </div>
+  </div>
+
+  
+    
+  <div class="widget-wrap">
+    <h3 class="widget-title">Archives</h3>
+    <div class="widget">
+      <ul class="archive-list"><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/01/">January 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/10/">October 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/09/">September 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/07/">July 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/05/">May 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/04/">April 2016</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/03/">March 2016</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/02/">February 2016</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/12/">December 2015</a><span class="archive-list-count">6</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/11/">November 2015</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/10/">October 2015</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/09/">September 2015</a><span class="archive-list-count">4</span></li></ul>
+    </div>
+  </div>
+
+  
+    
+  <div class="widget-wrap">
+    <h3 class="widget-title">Recents</h3>
+    <div class="widget">
+      <ul>
+        
+          <li>
+            <a href="/2017/01/07/DispatchGroupCrash/">iOS疑难问题排查之深入探究dispatch_group crash</a>
+          </li>
+        
+          <li>
+            <a href="/2017/01/07/JSONRPCKit/">JSONRPCKit源码解析</a>
+          </li>
+        
+          <li>
+            <a href="/2016/10/23/multithread-dangling-pointer/">浅谈一种解决多线程野指针的新思路</a>
+          </li>
+        
+          <li>
+            <a href="/2016/09/17/uiwindow-iOS/">浅谈iOS的多Window处理</a>
+          </li>
+        
+          <li>
+            <a href="/2016/07/10/immutable-thread/">从Immutable来谈谈对于线程安全的理解误区</a>
+          </li>
+        
+      </ul>
+    </div>
+  </div>
+
+  
+</aside>
+        
+      </div>
+      <footer id="footer">
+  
+  <div class="outer">
+    <div id="footer-info" class="inner">
+      &copy; 2017 John Doe<br>
+      Powered by <a href="http://hexo.io/" target="_blank">Hexo</a>
+    </div>
+  </div>
+</footer>
+    </div>
+    <nav id="mobile-nav">
+  
+    <a href="/" class="mobile-nav-link">Home</a>
+  
+    <a href="/archives" class="mobile-nav-link">Archives</a>
+  
+    <a href="/sitemap.xml" class="mobile-nav-link">map</a>
+  
+</nav>
+    
+
+
+  <link rel="stylesheet" href="/fancybox/jquery.fancybox.css" type="text/css">
+  <script src="/fancybox/jquery.fancybox.pack.js" type="text/javascript"></script>
+
+
+<script src="/js/script.js" type="text/javascript"></script>
+
+  </div>
+</body>
+</html>
