@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  
+  <title>快速计算两组数据源的变化的方法 - Doppelganger 源码剖析 | Hexo</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+  <meta name="description" content="Doppelganger 源码剖析性能优化系列一：如何快速的计算UITableView的数据量变换。
+今天要介绍的是一个比较精简但是很实用的库：Doppelganger。平时我们经常会和UITableView或者UICollectionView打交道，所以数据源（dataSource）及其变化就非常重要。
+如何高效的求解两次数据源之间的删除、增加以及移动（交换位置）就成为了一个可以显著加速的地方。">
+<meta property="og:type" content="article">
+<meta property="og:title" content="快速计算两组数据源的变化的方法 - Doppelganger 源码剖析">
+<meta property="og:url" content="http://satanwoo.github.io/2017/04/18/CalculateTwoArrayDiff/index.html">
+<meta property="og:site_name" content="Hexo">
+<meta property="og:description" content="Doppelganger 源码剖析性能优化系列一：如何快速的计算UITableView的数据量变换。
+今天要介绍的是一个比较精简但是很实用的库：Doppelganger。平时我们经常会和UITableView或者UICollectionView打交道，所以数据源（dataSource）及其变化就非常重要。
+如何高效的求解两次数据源之间的删除、增加以及移动（交换位置）就成为了一个可以显著加速的地方。">
+<meta property="og:image" content="https://github.com/SatanWoo/BeeHive/blob/master/%E5%B1%8F%E5%B9%95%E5%BF%AB%E7%85%A7%202017-03-25%20%E4%B8%8A%E5%8D%881.22.02.png?raw=true">
+<meta property="og:updated_time" content="2017-04-17T17:24:33.000Z">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="快速计算两组数据源的变化的方法 - Doppelganger 源码剖析">
+<meta name="twitter:description" content="Doppelganger 源码剖析性能优化系列一：如何快速的计算UITableView的数据量变换。
+今天要介绍的是一个比较精简但是很实用的库：Doppelganger。平时我们经常会和UITableView或者UICollectionView打交道，所以数据源（dataSource）及其变化就非常重要。
+如何高效的求解两次数据源之间的删除、增加以及移动（交换位置）就成为了一个可以显著加速的地方。">
+  
+    <link rel="alternative" href="/atom.xml" title="Hexo" type="application/atom+xml">
+  
+  
+    <link rel="icon" href="/favicon.png">
+  
+  <link rel="stylesheet" href="/css/style.css" type="text/css">
+  
+
+</head>
+<body>
+  <div id="container">
+    <div id="wrap">
+      <header id="header">
+  <div id="banner"></div>
+  <div id="header-outer" class="outer">
+    <div id="header-title" class="inner">
+      <h1 id="logo-wrap">
+        <a href="/" id="logo">Hexo</a>
+      </h1>
+      
+    </div>
+    <div id="header-inner" class="inner">
+      <nav id="main-nav">
+        <a id="main-nav-toggle" class="nav-icon"></a>
+        
+          <a class="main-nav-link" href="/">Home</a>
+        
+          <a class="main-nav-link" href="/archives">Archives</a>
+        
+          <a class="main-nav-link" href="/sitemap.xml">map</a>
+        
+      </nav>
+      <nav id="sub-nav">
+        
+          <a id="nav-rss-link" class="nav-icon" href="/atom.xml" title="RSS Feed"></a>
+        
+        <a id="nav-search-btn" class="nav-icon" title="Search"></a>
+      </nav>
+      <div id="search-form-wrap">
+        <form action="//google.com/search" method="get" accept-charset="UTF-8" class="search-form"><input type="search" name="q" results="0" class="search-form-input" placeholder="Search"><button type="submit" class="search-form-submit">&#xF002;</button><input type="hidden" name="sitesearch" value="http://satanwoo.github.io"></form>
+      </div>
+    </div>
+  </div>
+</header>
+      <div class="outer">
+        <section id="main"><article id="post-CalculateTwoArrayDiff" class="article article-type-post" itemscope itemprop="blogPost">
+  <div class="article-meta">
+    <a href="/2017/04/18/CalculateTwoArrayDiff/" class="article-date">
+  <time datetime="2017-04-17T17:15:40.000Z" itemprop="datePublished">2017-04-18</time>
+</a>
+    
+  </div>
+  <div class="article-inner">
+    
+    
+      <header class="article-header">
+        
+  
+    <h1 class="article-title" itemprop="name">
+      快速计算两组数据源的变化的方法 - Doppelganger 源码剖析
+    </h1>
+  
+
+      </header>
+    
+    <div class="article-entry" itemprop="articleBody">
+      
+        <h3 id="Doppelganger_源码剖析">Doppelganger 源码剖析</h3><p>性能优化系列一：如何快速的计算UITableView的数据量变换。</p>
+<p>今天要介绍的是一个比较精简但是很实用的库：Doppelganger。平时我们经常会和<code>UITableView</code>或者<code>UICollectionView</code>打交道，所以数据源（dataSource）及其变化就非常重要。</p>
+<p>如何高效的求解两次数据源之间的删除、增加以及移动（交换位置）就成为了一个可以显著加速的地方。</p>
+<blockquote>
+<p>备注：这里指的是将一定量的数据计算放在客户端来进行，而不是通过多次发送网络请求获取数据然后整体重新刷新。有人会问，什么情况下会有这样的需求呢？比如，你有个用户选项，可以支持按照倒序或者正序的方式进行布局，那这个时候，你直接在本地进行计算并展示差量布局计算，就要比从网络请求多次拉取整体重新刷新的效果赞很多。</p>
+</blockquote>
+<p>本文提到的<code>Doppelganger</code>其实就是一种对于上述需求的封装，提供了及其简化的数据源更新机制。抛开其性能不谈，我们先来看看其实现。</p>
+<h4 id="数据结构">数据结构</h4><p>从需求不难看出，我们的数据结构需要支持如下潜在数据记录：</p>
+<ul>
+<li>改动类型：增加、删除、移动</li>
+<li>改动索引：增加的话，是插入到哪行、删除的话是删除哪行、移动的话是从哪行移动到哪行。</li>
+</ul>
+<p>基于此，数据结构的定义就很显而易见了：</p>
+<pre><code><span class="keyword">typedef</span> <span class="built_in">NS_ENUM</span>(<span class="built_in">NSInteger</span>, WMLArrayDiffType) {
+    WMLArrayDiffTypeMove,
+    WMLArrayDiffTypeInsert,
+    WMLArrayDiffTypeDelete
+};
+
+<span class="class"><span class="keyword">@interface</span> <span class="title">WMLArrayDiff</span> : <span class="title">NSObject</span></span>
+
+<span class="keyword">@property</span> (<span class="keyword">nonatomic</span>, <span class="keyword">readonly</span>) WMLArrayDiffType type;
+
+<span class="keyword">@property</span> (<span class="keyword">nonatomic</span>, <span class="keyword">readonly</span>) <span class="built_in">NSUInteger</span> previousIndex;
+
+<span class="keyword">@property</span> (<span class="keyword">nonatomic</span>, <span class="keyword">readonly</span>) <span class="built_in">NSUInteger</span> currentIndex;
+
+<span class="keyword">@end</span>
+</code></pre><p>其中，有些字段在某些类型下可以为空。</p>
+<h4 id="计算变动">计算变动</h4><p>我们先简化下我们的模型，我们就是两个数组A和B，里面各自一堆不重复的数字，分别代表之前的数据源和现在的数据源。现在我们需要求得这两个数组之前提到的三种变化。</p>
+<p><strong>首先是删除的计算，非常简单，只要计算在A中不在B中就可以：</strong></p>
+<pre><code>NSSet *deletedObject = ({
+    NSMutableSet *<span class="keyword">set</span> = [previousSet mutableCopy];
+    [<span class="keyword">set</span> minusSet:currentSet];
+    [<span class="keyword">set</span> <span class="keyword">copy</span>];
+});
+</code></pre><p><strong>然后是增加的计算，同样简单，只要计算在B中不在A中的：</strong></p>
+<pre><code>NSSet *insertedObjects = ({
+    NSMutableSet *<span class="keyword">set</span> = [currentSet mutableCopy];
+    [<span class="keyword">set</span> minusSet:previousSet];
+    [<span class="keyword">set</span> <span class="keyword">copy</span>];
+});
+</code></pre><p><strong>最后就是计算那些即在A中又在B中的改变，对于这种计算，我们要得到在A中的原索引和现在的新索引。</strong></p>
+<pre><code>- (<span class="type">NSArray</span> *)_moveDiffsWithDeletedObjects:(<span class="type">NSSet</span> *)deletedObjects insertedObjects:(<span class="type">NSSet</span> *)insertedObjects {    
+    // <span class="type">TODO</span>: <span class="type">Improve</span> on O(n^<span class="number">2</span>)
+    __block <span class="type">NSInteger</span> delta = <span class="number">0</span>;
+    <span class="type">NSMutableArray</span> *<span class="literal">result</span> = [<span class="type">NSMutableArray</span> <span class="type">array</span>];
+    [self.previousArray enumerateObjectsUsingBlock:^(id leftObj, <span class="type">NSUInteger</span> leftIdx, <span class="type">BOOL</span> *stop) {
+        <span class="keyword">if</span> ([deletedObjects containsObject:leftObj]) {
+            delta++;
+            <span class="keyword">return</span>; 
+        }
+        <span class="type">NSUInteger</span> localDelta = delta;
+        <span class="keyword">for</span> (<span class="type">NSUInteger</span> rightIdx = <span class="number">0</span>; rightIdx &lt; self.currentArray.count; ++rightIdx) {
+            id rightObj = self.currentArray[rightIdx];
+            <span class="keyword">if</span> ([insertedObjects containsObject:rightObj]) {
+                localDelta--;
+                <span class="keyword">continue</span>;
+            }
+
+            <span class="keyword">if</span> (![rightObj isEqual:leftObj]) {
+                <span class="keyword">continue</span>;
+            }
+
+             //  注意点：          
+            <span class="type">NSInteger</span> adjustedRightIdx = rightIdx + localDelta;
+            // 首先如果前后索引一致，没有变化的区别，没有必要做diff变化
+            // 或者如果你前面删除了一条，自身索引是<span class="number">1</span>，然后这边是<span class="number">0</span>，那也没必要做move变化。
+            <span class="keyword">if</span> (leftIdx != rightIdx &amp;&amp; adjustedRightIdx != leftIdx) {
+                [<span class="literal">result</span> addObject:[<span class="type">WMLArrayDiff</span> arrayDiffForMoveFromIndex:leftIdx toIndex:rightIdx]];
+            }
+            <span class="keyword">return</span>;
+        }
+    }];
+    <span class="keyword">return</span> [<span class="literal">result</span> copy];
+}
+</code></pre><p>上述代码一开始我看了也是懵逼了，我觉得直接二重遍历计算同样数在不同两组数据源中的索引区别不就行了？在读了代码一遍以后确定了，作者的思路是这样的：</p>
+<ol>
+<li><p>如果在旧数组中和新数组中的数据源一样，那就不更新了，也即<code>leftIdx != rightIdx</code>的判断。</p>
+</li>
+<li><p>如果在旧数组中，索引为1，但是之前的0索引位置的数据删除了；然后这个索引为1的数据在新数据中位置为索引0，那么也不需要改了，因为之前计算删除变化的时候已经做了这个相同的效果。</p>
+</li>
+</ol>
+<h4 id="时间复杂度">时间复杂度</h4><p>虽然不知道苹果内部的数据结构代码实现是如何的，但是我们可以进行数据模拟，同时也可以看看<a href="http://devstreaming.apple.com/videos/wwdc/2013/224xcx5x1y1yx8ra5jbmfyhf/224/224.pdf" target="_blank" rel="external">苹果WWDC的文章</a> 来进行时间复杂度估算。</p>
+<p>而从上面实现的计算变动源代码来看，整个库的实现时间复杂度还是有所欠缺的，到达了O(mn) + O(n) ≈ O(mn)的级别，因此我们可以进行一些优化。</p>
+<blockquote>
+<p>备注：O(mn)就是二重循环遍历的问题。其中m是数据源A的数据个数，n是数据源b的数据个数。简单来看就是O(n^2)级别的运算耗时。</p>
+</blockquote>
+<p>怎么优化呢，答案很简单，就是利用动态规划思想来求解最小编辑距离。</p>
+<p>我们举个简单的例子，还是没有重复数组的数组，<code>A = [1, 3, 5, 6, 8]</code>以及<code>B = [1, 5, 6, 9, 2]</code>。</p>
+<p>怎么样最小变化才能从A变成B呢？</p>
+<p>我们列一个二维的矩阵先，如下图：</p>
+<p><img src="https://github.com/SatanWoo/BeeHive/blob/master/%E5%B1%8F%E5%B9%95%E5%BF%AB%E7%85%A7%202017-03-25%20%E4%B8%8A%E5%8D%881.22.02.png?raw=true" alt=""></p>
+<blockquote>
+<p>备注：蓝色为原数据，绿色为新数据，黄色的为最小变化的开销。</p>
+</blockquote>
+<p>不难看出，这个算法的时间复杂度就是填满整张表的O(mn)。</p>
+<p>看到这，有人会问，你的Big(O) 复杂度都是O(mn)啊，这你优化在什么地方啊。</p>
+<p>从时间复杂度分析上看，最大数值都是O(mn)没错，但是在大数量的情况下，还是会有比较大的区别。</p>
+<p>究竟原因在于作者的算法做了很多重复性的劳动，而利用动态规划的特征可以合理的储存状态，避免重复性的劳动。</p>
+<h4 id="一些细节">一些细节</h4><p>在查看源码的时候，查看过一个代码，</p>
+<pre><code>NSSet *deletedObject = ({
+    NSMutableSet *<span class="keyword">set</span> = [previousSet mutableCopy];
+    [<span class="keyword">set</span> minusSet:currentSet];
+    [<span class="keyword">set</span> <span class="keyword">copy</span>];
+});
+</code></pre><p>这里非常有意思，利用了<a href="http://gcc.gnu.org/onlinedocs/gcc/Statement-Exprs.html" target="_blank" rel="external">Statements and Declarations in Expressions</a>，具体不多说了，非常巧妙，大开眼界。</p>
+<blockquote>
+<p>The last thing in the compound statement should be an expression followed by a semicolon; the value of this subexpression serves as the value of the entire construct</p>
+</blockquote>
+<p>啥意思呢？就是说这种符合表达式的最后一句必须是一个用分号结尾的表达式，并且这个表达式必须有返回值。而这个返回值就作为整个符号表达式的返回值。</p>
+
+      
+    </div>
+    <footer class="article-footer">
+      <a data-url="http://satanwoo.github.io/2017/04/18/CalculateTwoArrayDiff/" data-id="cj1me6ue7002at1i1rehgzb39" class="article-share-link">Share</a>
+      
+      
+  <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Performance/">Performance</a></li><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
+
+    </footer>
+  </div>
+  
+    
+<nav id="article-nav">
+  
+  
+    <a href="/2017/01/07/DispatchGroupCrash/" id="article-nav-older" class="article-nav-link-wrap">
+      <strong class="article-nav-caption">Older</strong>
+      <div class="article-nav-title">iOS疑难问题排查之深入探究dispatch_group crash</div>
+    </a>
+  
+</nav>
+
+  
+</article>
+
+
+<section id="comments">
+  <!-- 多说评论框 start -->
+  <div class="ds-thread" data-thread-key="post-CalculateTwoArrayDiff" data-title="快速计算两组数据源的变化的方法 - Doppelganger 源码剖析" data-url="http://satanwoo.github.io/2017/04/18/CalculateTwoArrayDiff/"></div>
+  <!-- 多说评论框 end -->
+  <!-- 多说公共JS代码 start (一个网页只需插入一次) -->
+  <script type="text/javascript">
+  var duoshuoQuery = {short_name:'satanwoo'};
+    (function() {
+      var ds = document.createElement('script');
+      ds.type = 'text/javascript';ds.async = true;
+      ds.src = (document.location.protocol == 'https:' ? 'https:' : 'http:') + '//static.duoshuo.com/embed.js';
+      ds.charset = 'UTF-8';
+      (document.getElementsByTagName('head')[0] 
+       || document.getElementsByTagName('body')[0]).appendChild(ds);
+    })();
+    </script>
+  <!-- 多说公共JS代码 end -->
+</section>
+</section>
+        
+          <aside id="sidebar">
+  
+    
+  
+    
+  <div class="widget-wrap">
+    <h3 class="widget-title">Tags</h3>
+    <div class="widget">
+      <ul class="tag-list"><li class="tag-list-item"><a class="tag-list-link" href="/tags/Android/">Android</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Growth/">Growth</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/JavaScript/">JavaScript</a><span class="tag-list-count">3</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Math/">Math</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Performance/">Performance</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/R/">R</a><span class="tag-list-count">2</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Reverse-Engineering/">Reverse Engineering</a><span class="tag-list-count">2</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Swift/">Swift</a><span class="tag-list-count">6</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/iOS/">iOS</a><span class="tag-list-count">21</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/shell/">shell</a><span class="tag-list-count">1</span></li></ul>
+    </div>
+  </div>
+
+  
+    
+  <div class="widget-wrap">
+    <h3 class="widget-title">Tag Cloud</h3>
+    <div class="widget tagcloud">
+      <a href="/tags/Android/" style="font-size: 10px;">Android</a> <a href="/tags/Growth/" style="font-size: 10px;">Growth</a> <a href="/tags/JavaScript/" style="font-size: 15px;">JavaScript</a> <a href="/tags/Math/" style="font-size: 10px;">Math</a> <a href="/tags/Performance/" style="font-size: 10px;">Performance</a> <a href="/tags/R/" style="font-size: 12.5px;">R</a> <a href="/tags/Reverse-Engineering/" style="font-size: 12.5px;">Reverse Engineering</a> <a href="/tags/Swift/" style="font-size: 17.5px;">Swift</a> <a href="/tags/iOS/" style="font-size: 20px;">iOS</a> <a href="/tags/shell/" style="font-size: 10px;">shell</a>
+    </div>
+  </div>
+
+  
+    
+  <div class="widget-wrap">
+    <h3 class="widget-title">Archives</h3>
+    <div class="widget">
+      <ul class="archive-list"><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/04/">April 2017</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/01/">January 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/10/">October 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/09/">September 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/07/">July 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/05/">May 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/04/">April 2016</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/03/">March 2016</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/02/">February 2016</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/12/">December 2015</a><span class="archive-list-count">6</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/11/">November 2015</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/10/">October 2015</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/09/">September 2015</a><span class="archive-list-count">4</span></li></ul>
+    </div>
+  </div>
+
+  
+    
+  <div class="widget-wrap">
+    <h3 class="widget-title">Recents</h3>
+    <div class="widget">
+      <ul>
+        
+          <li>
+            <a href="/2017/04/18/CalculateTwoArrayDiff/">快速计算两组数据源的变化的方法 - Doppelganger 源码剖析</a>
+          </li>
+        
+          <li>
+            <a href="/2017/01/07/DispatchGroupCrash/">iOS疑难问题排查之深入探究dispatch_group crash</a>
+          </li>
+        
+          <li>
+            <a href="/2017/01/07/JSONRPCKit/">JSONRPCKit源码解析</a>
+          </li>
+        
+          <li>
+            <a href="/2016/10/23/multithread-dangling-pointer/">浅谈一种解决多线程野指针的新思路</a>
+          </li>
+        
+          <li>
+            <a href="/2016/09/17/uiwindow-iOS/">浅谈iOS的多Window处理</a>
+          </li>
+        
+      </ul>
+    </div>
+  </div>
+
+  
+</aside>
+        
+      </div>
+      <footer id="footer">
+  
+  <div class="outer">
+    <div id="footer-info" class="inner">
+      &copy; 2017 John Doe<br>
+      Powered by <a href="http://hexo.io/" target="_blank">Hexo</a>
+    </div>
+  </div>
+</footer>
+    </div>
+    <nav id="mobile-nav">
+  
+    <a href="/" class="mobile-nav-link">Home</a>
+  
+    <a href="/archives" class="mobile-nav-link">Archives</a>
+  
+    <a href="/sitemap.xml" class="mobile-nav-link">map</a>
+  
+</nav>
+    
+
+
+  <link rel="stylesheet" href="/fancybox/jquery.fancybox.css" type="text/css">
+  <script src="/fancybox/jquery.fancybox.pack.js" type="text/javascript"></script>
+
+
+<script src="/js/script.js" type="text/javascript"></script>
+
+  </div>
+</body>
+</html>
