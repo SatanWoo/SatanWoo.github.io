@@ -62,6 +62,124 @@
       <div class="outer">
         <section id="main">
   
+    <article id="post-ARM64IndirectReturn" class="article article-type-post" itemscope itemprop="blogPost">
+  <div class="article-meta">
+    <a href="/2017/04/23/ARM64IndirectReturn/" class="article-date">
+  <time datetime="2017-04-22T19:00:36.000Z" itemprop="datePublished">2017-04-23</time>
+</a>
+    
+  </div>
+  <div class="article-inner">
+    
+    
+      <header class="article-header">
+        
+  
+    <h1 itemprop="name">
+      <a class="article-title" href="/2017/04/23/ARM64IndirectReturn/">ARM64下Indirect Result Location摸索</a>
+    </h1>
+  
+
+      </header>
+    
+    <div class="article-entry" itemprop="articleBody">
+      
+        <h3 id="ARM64下Indirect_Result_Location摸索">ARM64下Indirect Result Location摸索</h3><p>之前学习汇编的时候，大概了解了一些ARM64下寄存器的用途，比如<code>x0 - x7</code>作为函数传递使用。同时，<code>x0</code>也可以作为函数返回值时候的寄存器。</p>
+<p>但是，今天在研究一些跟返回结构体相关的时候，发现返回值并不是放在<code>X0</code>寄存器中。上网搜索了一下资料，发现在<strong>ARM64下，当一个<code>Callee</code>函数返回的内容大于16bytes的时候，该内容会被存到一个内存地址当中，然后这个内存地址的值会存入寄存器<code>x8</code>。后续<code>Caller</code>函数在使用该返回值的时候，会从<code>X8</code>寄存器中取出内存地址，并从内存地址取出内容的值</strong></p>
+<p>是不是有点绕，还是让我们来看个例子吧。</p>
+<h3 id="原理">原理</h3><p>首先我根据<strong>大于16 bytes</strong>的要求定义了如下结构体：</p>
+<pre><code><span class="keyword">typedef</span> <span class="keyword">struct</span> {
+    <span class="keyword">int64_t</span> i;
+    <span class="keyword">int64_t</span> j;
+    <span class="keyword">int64_t</span> k;
+} MYStruct;
+</code></pre><p>在ARM64下，该结构体默认按<code>4 bytes</code>对齐，每个<code>int64</code>占用<code>8 bytes</code>，因此结构体大小<code>24 bytes</code></p>
+<p>我们定义如下函数，用于返回一个该结构体：</p>
+<pre><code>- (MYStruct)testIndirectResultLocation:(int64_t)i1 second:(int64_t)i2 th:(int64_t)i3
+{
+    MYStruct s<span class="comment">;</span>
+    s.i = i1<span class="comment">;</span>
+    s.j = i2<span class="comment">;</span>
+    s.k = i3<span class="comment">;</span>
+    return s<span class="comment">;</span>
+}
+</code></pre><p>这个函数很简单，传入三个值。然后构造个局部变量<code>MYStruct s</code>，将其对应的成员变量按照刚刚的传入参数赋值，最后返回该结构体。</p>
+<p>该函数调用<strong>在未优化的前提下</strong>的汇编结果如下：</p>
+<pre><code>IndirectResultLocation`-[ViewController testIndirectResultLocation:second:th:]:
+    <span class="comment">// 预留空间</span>
+    &lt;+<span class="number">0</span>&gt;:  sub    sp, sp, <span class="preprocessor">#<span class="number">0x40</span>             ; =<span class="number">0x40</span> </span>
+
+    <span class="comment">// 存参</span>
+    &lt;+<span class="number">4</span>&gt;:  str    x0, [sp, <span class="preprocessor">#<span class="number">0x38</span>]</span>
+    &lt;+<span class="number">8</span>&gt;:  str    x1, [sp, <span class="preprocessor">#<span class="number">0x30</span>]</span>
+    &lt;+<span class="number">12</span>&gt;: str    x2, [sp, <span class="preprocessor">#<span class="number">0x28</span>]</span>
+    &lt;+<span class="number">16</span>&gt;: str    x3, [sp, <span class="preprocessor">#<span class="number">0x20</span>]</span>
+    &lt;+<span class="number">20</span>&gt;: str    x4, [sp, <span class="preprocessor">#<span class="number">0x18</span>]</span>
+
+    <span class="comment">// 赋值</span>
+-&gt;  &lt;+<span class="number">24</span>&gt;: ldr    x0, [sp, <span class="preprocessor">#<span class="number">0x28</span>]</span>
+    &lt;+<span class="number">28</span>&gt;: str    x0, [sp]
+    &lt;+<span class="number">32</span>&gt;: ldr    x0, [sp, <span class="preprocessor">#<span class="number">0x20</span>]</span>
+    &lt;+<span class="number">36</span>&gt;: str    x0, [sp, <span class="preprocessor">#<span class="number">0x8</span>]</span>
+    &lt;+<span class="number">40</span>&gt;: ldr    x0, [sp, <span class="preprocessor">#<span class="number">0x18</span>]</span>
+    &lt;+<span class="number">44</span>&gt;: str    x0, [sp, <span class="preprocessor">#<span class="number">0x10</span>]</span>
+
+    <span class="comment">// 将结构体存到x8寄存器的值代表的地址去</span>
+    &lt;+<span class="number">48</span>&gt;: ldr    x0, [sp]
+    &lt;+<span class="number">52</span>&gt;: str    x0, [x8]
+    &lt;+<span class="number">56</span>&gt;: ldr    x0, [sp, <span class="preprocessor">#<span class="number">0x8</span>]</span>
+    &lt;+<span class="number">60</span>&gt;: str    x0, [x8, <span class="preprocessor">#<span class="number">0x8</span>]</span>
+    &lt;+<span class="number">64</span>&gt;: ldr    x0, [sp, <span class="preprocessor">#<span class="number">0x10</span>]</span>
+    &lt;+<span class="number">68</span>&gt;: str    x0, [x8, <span class="preprocessor">#<span class="number">0x10</span>]</span>
+
+    <span class="comment">// 释放空间</span>
+    &lt;+<span class="number">72</span>&gt;: add    sp, sp, <span class="preprocessor">#<span class="number">0x40</span>             ; =<span class="number">0x40</span> </span>
+    &lt;+<span class="number">76</span>&gt;: ret    
+</code></pre><p>第一行：SP即<code>Stack Pointer</code>，向下减<code>0x40（64 bytes）</code>的大小，预先分配出函数需要用的栈空间。为什么要预留这么多的大小呢？首先按照<strong>Objective-C的函数调用规定，前两个参数必须是<code>self</code>和<code>selector</code>，也即会使用到寄存器<code>X0</code>和<code>X1</code>。然后该函数有三个形参，使用了<code>X2-X4</code>的寄存器</strong>。<br>上述这五个，大小占用了<strong>self(8 bytes) + selector(8 bytes) + 三个参数(24 bytes) = 40 bytes</strong>。那么还有<code>24 bytes</code>去干嘛了呢？</p>
+<p>别忘了，我们在函数中可以声明了一个局部变量<code>MYStruct s</code>，该结构体大小是24 bytes。而在函数调用中使用到的变量，基本上都在栈区中开辟对应的空间进行暂存。</p>
+<p>后续第二行到第六行非常简单易懂，就是把上述5个参数存到实际的栈区中去使用。按照这个存法以后，内存布局如下（注意高地址在上，低地址在下，ARM下的栈是向下增长）：</p>
+<p><img src="https://github.com/SatanWoo/WZRecyclePhotoStackView/blob/master/%E5%B1%8F%E5%B9%95%E5%BF%AB%E7%85%A7%202017-04-23%20%E4%B8%8A%E5%8D%882.48.35.png?raw=true" alt=""></p>
+<p>将参数都存入到栈以后，我们就要对结构体进行赋值了，这些操作在第七行到第十二行之间。<br>将<strong>1赋值给[SP]，2赋值给[SP + #0x8]，3赋值给[SP + #0x10]</strong>。如果不理解啥意思的话，可以看下我自己转化的伪代码：</p>
+<pre><code><span class="keyword">void</span> *address = &amp;s;
+*(<span class="keyword">int64_t</span> *)(address) = <span class="number">1</span>;
+*(<span class="keyword">int64_t</span> *)(address + <span class="number">8</span>) = <span class="number">2</span>;
+*(<span class="keyword">int64_t</span> *)(address + <span class="number">16</span>) = <span class="number">3</span>;
+</code></pre><p>赋值完以后，我们可以通过内存分布看下数据是否正确：</p>
+<p><img src="https://github.com/SatanWoo/WZRecyclePhotoStackView/blob/master/%E5%B1%8F%E5%B9%95%E5%BF%AB%E7%85%A7%202017-04-23%20%E4%B8%8A%E5%8D%882.30.06.png?raw=true" alt=""></p>
+<p><img src="https://github.com/SatanWoo/WZRecyclePhotoStackView/blob/master/%E5%B1%8F%E5%B9%95%E5%BF%AB%E7%85%A7%202017-04-23%20%E4%B8%8A%E5%8D%882.29.53.png?raw=true" alt=""></p>
+<p>当赋值完成后，就要进行结构体的返回了。这里不是简单的<code>mov x0, sp</code>之类的操作，而是一串和<code>X8</code>寄存器相关操作。</p>
+<p>其实原理差不多，转化成伪代码的话，基本上是这样：</p>
+<pre><code>void <span class="keyword">*</span>toSaveAddress = [x8];
+void <span class="keyword">*</span>valueNowAddress = [sp];
+
+<span class="keyword">*</span>(int64_t <span class="keyword">*</span>)(toSaveAddress) = <span class="keyword">*</span>valueNowAddress;
+<span class="keyword">*</span>(int64_t <span class="keyword">*</span>)(toSaveAddress + 8) = <span class="keyword">*</span>(valueNowAddress + 8);
+<span class="keyword">*</span>(int64_t <span class="keyword">*</span>)(toSaveAddress + 16) = <span class="keyword">*</span>(valueNowAddress + 16);
+</code></pre><p>操作完成后，释放空间即可。</p>
+<h3 id="补充">补充</h3><p>其实ARM64在汇编层面实现的这么复杂， 我们在编程层面只要按照如下方式理解即可：</p>
+<pre><code><span class="function">some_struct <span class="title">foo</span><span class="params">(<span class="keyword">int</span> arg1, <span class="keyword">int</span> arg2)</span></span>;
+some_struct s = foo(<span class="number">1</span>, <span class="number">2</span>);
+</code></pre><p>会被编译成：</p>
+<pre><code><span class="function">some_struct* <span class="title">foo</span><span class="params">(some_struct* ret_val, <span class="keyword">int</span> arg1, <span class="keyword">int</span> arg2)</span></span>;
+some_struct s; 
+foo(&amp;s, <span class="number">1</span>, <span class="number">2</span>);
+</code></pre><h3 id="后续">后续</h3><p>从本文中我们不难看出，ARM64针对不同大小的返回值都有着对应的<strong>Calling Convention</strong>。下次我准备来摸索下，处于<code>8 bytes - 16 bytes</code>之间的返回值究竟是怎么处理的。</p>
+
+      
+    </div>
+    <footer class="article-footer">
+      <a data-url="http://satanwoo.github.io/2017/04/23/ARM64IndirectReturn/" data-id="cj1tnebvt002ebui1ul7u9qrn" class="article-share-link">Share</a>
+      
+      
+  <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Reverse-Engineering/">Reverse Engineering</a></li><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
+
+    </footer>
+  </div>
+  
+</article>
+
+
+  
     <article id="post-CalculateTwoArrayDiff" class="article article-type-post" itemscope itemprop="blogPost">
   <div class="article-meta">
     <a href="/2017/04/18/CalculateTwoArrayDiff/" class="article-date">
@@ -199,7 +317,7 @@
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2017/04/18/CalculateTwoArrayDiff/" data-id="cj1mecn8t002az3i1c6rw3dxc" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2017/04/18/CalculateTwoArrayDiff/" data-id="cj1tnebvr002abui1bfsqwunf" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Performance/">Performance</a></li><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
@@ -367,7 +485,7 @@ dispatch_group_create(<span class="keyword">void</span>)
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2017/01/07/DispatchGroupCrash/" data-id="cj1mecn8k0021z3i1vdfmsp6c" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2017/01/07/DispatchGroupCrash/" data-id="cj1tnebvl0021bui17zr13lwe" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Reverse-Engineering/">Reverse Engineering</a></li><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
@@ -593,7 +711,7 @@ func <span class="function"><span class="title">resultFromBatchObjects</span><sp
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2017/01/07/JSONRPCKit/" data-id="cj1mecn85001rz3i1f714ggym" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2017/01/07/JSONRPCKit/" data-id="cj1tnebv8001rbui1x6bjeeas" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
@@ -855,7 +973,7 @@ dispatch_sync(dq, ^{
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/10/23/multithread-dangling-pointer/" data-id="cj1mecn6b0007z3i1n6boee6h" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/10/23/multithread-dangling-pointer/" data-id="cj1tnebte0007bui16udpelju" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
@@ -989,7 +1107,7 @@ dispatch_sync(dq, ^{
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/09/17/uiwindow-iOS/" data-id="cj1mecn640003z3i17eujbkff" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/09/17/uiwindow-iOS/" data-id="cj1tnebt80003bui1q5l4dhu3" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
@@ -1127,7 +1245,7 @@ OSSpinUnlock(&amp;_lock)<span class="comment">;</span>
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/07/10/immutable-thread/" data-id="cj1mecn6d0009z3i1hxi172ld" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/07/10/immutable-thread/" data-id="cj1tnebtg0009bui1477yl9o1" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
@@ -1229,7 +1347,7 @@ OSSpinUnlock(&amp;_lock)<span class="comment">;</span>
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/05/02/Spotify/" data-id="cj1mecn7a0010z3i1pj1aor9q" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/05/02/Spotify/" data-id="cj1tnebud0010bui1gjm40qkz" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Growth/">Growth</a></li></ul>
@@ -1335,7 +1453,7 @@ OSSpinUnlock(&amp;_lock)<span class="comment">;</span>
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/04/26/blank-space-in-html/" data-id="cj1mecn6t000oz3i1p48otwps" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/04/26/blank-space-in-html/" data-id="cj1tnebtz000obui1zk9l1gs6" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/JavaScript/">JavaScript</a></li></ul>
@@ -1571,7 +1689,7 @@ Elapsed application CPU <span class="keyword">time</span> (seconds): <span class
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/04/11/dispatch-once/" data-id="cj1mecn6i000ez3i1yzd4bjew" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/04/11/dispatch-once/" data-id="cj1tnebtm000ebui1s6htkcy5" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
@@ -1766,7 +1884,7 @@ a4.<span class="function"><span class="title">staticInfo</span><span class="para
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/03/22/dispatch-in-swift/" data-id="cj1mecn6j000gz3i1fvcpu37k" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/03/22/dispatch-in-swift/" data-id="cj1tnebto000gbui1pxq14yal" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Swift/">Swift</a></li></ul>
@@ -1858,7 +1976,7 @@ a4.<span class="function"><span class="title">staticInfo</span><span class="para
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/03/14/RxSwift/" data-id="cj1mecn7e0016z3i1254duptd" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/03/14/RxSwift/" data-id="cj1tnebui0016bui1svklf36b" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Swift/">Swift</a></li></ul>
@@ -1946,7 +2064,7 @@ val = edx(<span class="literal">true</span>)
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/03/14/SizeUp/" data-id="cj1mecn7b0013z3i1tguwnhp0" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/03/14/SizeUp/" data-id="cj1tnebug0013bui1cp0y3lmo" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Reverse-Engineering/">Reverse Engineering</a></li></ul>
@@ -2086,7 +2204,7 @@ val = edx(<span class="literal">true</span>)
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/03/14/DXXcodeConsoleUnicodePlugin/" data-id="cj1mecn8p0026z3i1n9y2l5af" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/03/14/DXXcodeConsoleUnicodePlugin/" data-id="cj1tnebvp0026bui1al3qyy72" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
@@ -2163,7 +2281,7 @@ fi
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/02/27/check-manifest/" data-id="cj1mecn6o000lz3i12mp8fj79" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/02/27/check-manifest/" data-id="cj1tnebtt000lbui16xo5kr0h" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/shell/">shell</a></li></ul>
@@ -2273,7 +2391,7 @@ fi
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/02/27/pod-install-plugin/" data-id="cj1mecn680005z3i1z8rz8i08" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/02/27/pod-install-plugin/" data-id="cj1tnebtc0005bui1w1l9owce" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
@@ -2529,7 +2647,7 @@ fi
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/02/27/FBKVOController/" data-id="cj1mecn8g001zz3i133y3bkct" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/02/27/FBKVOController/" data-id="cj1tnebvh001zbui1jbrunzg2" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
@@ -2643,7 +2761,7 @@ selectedTitleLabelsContentView<span class="class">.layer</span><span class="clas
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/02/05/DGRunKeeperSwitch/" data-id="cj1mecn8q0028z3i1xrw2polb" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/02/05/DGRunKeeperSwitch/" data-id="cj1tnebvq0028bui18r42xybb" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
@@ -2899,7 +3017,7 @@ NSLayoutConstraint *constraint = [NSLayoutConstraint <span class="string">constr
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/02/05/PureLayout/" data-id="cj1mecn7k001dz3i1000c504l" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/02/05/PureLayout/" data-id="cj1tnebuo001dbui1jvxj9cne" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
@@ -3225,7 +3343,7 @@ extension Task {
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/12/30/Refactor-Mega-ViewController/" data-id="cj1mecn7i001bz3i1ofr4ao4f" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/12/30/Refactor-Mega-ViewController/" data-id="cj1tnebum001bbui1xfvqcyns" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
@@ -3376,7 +3494,7 @@ extension Task {
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/12/20/Learn-R-2/" data-id="cj1mecn7q001hz3i1rrjeqfi8" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/12/20/Learn-R-2/" data-id="cj1tnebuu001hbui1z1z6nb1v" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/R/">R</a></li></ul>
@@ -3430,7 +3548,7 @@ extension Task {
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/12/15/Regression-Model-1/" data-id="cj1mecn7g0018z3i1gjq2qxhz" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/12/15/Regression-Model-1/" data-id="cj1tnebuk0018bui11f7pi4se" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Math/">Math</a></li></ul>
@@ -3573,7 +3691,7 @@ $foo
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/12/13/Learn-R-1/" data-id="cj1mecn7u001kz3i1opqm5j9k" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/12/13/Learn-R-1/" data-id="cj1tnebux001kbui1yvq5mu27" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/R/">R</a></li></ul>
@@ -3679,7 +3797,7 @@ frame <span class="preprocessor">#<span class="number">20</span>: libdyld.dylib`
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/12/11/LLDB-1/" data-id="cj1mecn81001pz3i1imaia5jz" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/12/11/LLDB-1/" data-id="cj1tnebv3001pbui1e9sctknb" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
@@ -3978,7 +4096,7 @@ TBBoundingBox TBBoundingBoxMake(<span class="built_in">double</span> x0, <span c
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/12/11/TBAnnotationClustering/" data-id="cj1mecn6z000sz3i176j8rwas" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/12/11/TBAnnotationClustering/" data-id="cj1tnebu4000sbui149od6xcm" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
@@ -4203,7 +4321,7 @@ BOOL success = class_addMethod(<span class="keyword">class</span>, originalSelec
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/11/26/FDFullScreenPopGesture-Source-Code/" data-id="cj1mecn8e001xz3i1ryfxmw1m" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/11/26/FDFullScreenPopGesture-Source-Code/" data-id="cj1tnebvg001xbui1nbidhcm4" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
@@ -4313,7 +4431,7 @@ replicationLayer.instanceDelay = <span class="number">0.3</span>
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/11/17/Fun-of-CAReplicationLayer/" data-id="cj1mecn8b001vz3i1pt743b42" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/11/17/Fun-of-CAReplicationLayer/" data-id="cj1tnebvd001vbui1rznlsl5v" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Swift/">Swift</a></li></ul>
@@ -4519,7 +4637,7 @@ modalVC<span class="class">.modalPresentationStyle</span> = <span class="class">
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/11/12/Swift-UITransition-iOS8/" data-id="cj1mecn71000uz3i1sfzoty9m" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/11/12/Swift-UITransition-iOS8/" data-id="cj1tnebu6000ubui1scjor1i7" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Swift/">Swift</a></li></ul>
@@ -4679,7 +4797,7 @@ modalVC<span class="class">.modalPresentationStyle</span> = <span class="class">
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/11/05/Understand-Viper/" data-id="cj1mecn6v000qz3i19vhgq5i7" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/11/05/Understand-Viper/" data-id="cj1tnebu1000qbui1lkvn6k5h" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
@@ -4908,73 +5026,10 @@ objectPath.<span class="keyword">get</span>(obj, <span class="string">'a.\u1200'
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/11/05/Object-Path-Source-Code/" data-id="cj1mecn7m001fz3i1gb9m25la" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/11/05/Object-Path-Source-Code/" data-id="cj1tnebur001fbui1mk1y3me4" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/JavaScript/">JavaScript</a></li></ul>
-
-    </footer>
-  </div>
-  
-</article>
-
-
-  
-    <article id="post-Learn-Android-Day-by-Day" class="article article-type-post" itemscope itemprop="blogPost">
-  <div class="article-meta">
-    <a href="/2015/10/29/Learn-Android-Day-by-Day/" class="article-date">
-  <time datetime="2015-10-29T11:52:44.000Z" itemprop="datePublished">2015-10-29</time>
-</a>
-    
-  </div>
-  <div class="article-inner">
-    
-    
-      <header class="article-header">
-        
-  
-    <h1 itemprop="name">
-      <a class="article-title" href="/2015/10/29/Learn-Android-Day-by-Day/">大菜比学安卓</a>
-    </h1>
-  
-
-      </header>
-    
-    <div class="article-entry" itemprop="articleBody">
-      
-        <p>本人新手，学习安卓，这里用来记录一下阅读《第一行代码》的笔试和体会。</p>
-<ol>
-<li>在XML引入一个id，就使用@id/id_name，如果要添加一个id，就使用@+id/id_name</li>
-<li>给主活动指定的Label不仅会成为标题栏中的内容，还会成为Launcher中应用程序显示的名称。</li>
-<li>Intent 调用StartActivityForResult用来给上一层Activity返回数据</li>
-<li>活动的生存期</li>
-</ol>
-<ul>
-<li>运行状态，当一个活动处于返回栈的栈顶时，就处于运行状态，系统最不愿意回收的就是处于运行状态的活动。</li>
-<li>暂停状态，当一个活动不处于栈顶位置，但是仍然可见的时候，就进入了暂停状态（因为有些活动，如对话框等，就不会占据整个屏幕，因此其他活动仍然可见）</li>
-<li>停止状态，当一个活动不再处于栈顶位置，并且完全不可见的时候，就进入了停止状态。</li>
-<li>销毁状态，当一个活动从返回栈中被移除后，就进入了销毁状态。</li>
-</ul>
-<ol>
-<li>活动生命周期回调函数</li>
-</ol>
-<ul>
-<li>onCreate在活动第一次创建的时候调用</li>
-<li>onStart在活动由不可见变成可见的时候调用</li>
-<li>onResume在活动准备好和用户进行交互的时候调用，此时的活动一定位于栈的栈顶，且处于运行状态。</li>
-<li>onPause在系统准备去启动或者恢复另一个活动的时候调用。</li>
-<li>onStop在活动完全不可见的时候调用。</li>
-<li>onDestory在活动被销毁之前调用，之后的活动变为销毁状态。</li>
-<li>onRestart在活动由停止状态变为运行状态之前调用，也就是活动被重新启动了。</li>
-</ul>
-
-      
-    </div>
-    <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/10/29/Learn-Android-Day-by-Day/" data-id="cj1mecn7x001mz3i1zw7b7v6h" class="article-share-link">Share</a>
-      
-      
-  <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Android/">Android</a></li></ul>
 
     </footer>
   </div>
@@ -4998,7 +5053,7 @@ objectPath.<span class="keyword">get</span>(obj, <span class="string">'a.\u1200'
   <div class="widget-wrap">
     <h3 class="widget-title">Tags</h3>
     <div class="widget">
-      <ul class="tag-list"><li class="tag-list-item"><a class="tag-list-link" href="/tags/Android/">Android</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Growth/">Growth</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/JavaScript/">JavaScript</a><span class="tag-list-count">3</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Math/">Math</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Performance/">Performance</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/R/">R</a><span class="tag-list-count">2</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Reverse-Engineering/">Reverse Engineering</a><span class="tag-list-count">2</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Swift/">Swift</a><span class="tag-list-count">6</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/iOS/">iOS</a><span class="tag-list-count">21</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/shell/">shell</a><span class="tag-list-count">1</span></li></ul>
+      <ul class="tag-list"><li class="tag-list-item"><a class="tag-list-link" href="/tags/Android/">Android</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Growth/">Growth</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/JavaScript/">JavaScript</a><span class="tag-list-count">3</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Math/">Math</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Performance/">Performance</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/R/">R</a><span class="tag-list-count">2</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Reverse-Engineering/">Reverse Engineering</a><span class="tag-list-count">3</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Swift/">Swift</a><span class="tag-list-count">6</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/iOS/">iOS</a><span class="tag-list-count">22</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/shell/">shell</a><span class="tag-list-count">1</span></li></ul>
     </div>
   </div>
 
@@ -5007,7 +5062,7 @@ objectPath.<span class="keyword">get</span>(obj, <span class="string">'a.\u1200'
   <div class="widget-wrap">
     <h3 class="widget-title">Tag Cloud</h3>
     <div class="widget tagcloud">
-      <a href="/tags/Android/" style="font-size: 10px;">Android</a> <a href="/tags/Growth/" style="font-size: 10px;">Growth</a> <a href="/tags/JavaScript/" style="font-size: 15px;">JavaScript</a> <a href="/tags/Math/" style="font-size: 10px;">Math</a> <a href="/tags/Performance/" style="font-size: 10px;">Performance</a> <a href="/tags/R/" style="font-size: 12.5px;">R</a> <a href="/tags/Reverse-Engineering/" style="font-size: 12.5px;">Reverse Engineering</a> <a href="/tags/Swift/" style="font-size: 17.5px;">Swift</a> <a href="/tags/iOS/" style="font-size: 20px;">iOS</a> <a href="/tags/shell/" style="font-size: 10px;">shell</a>
+      <a href="/tags/Android/" style="font-size: 10px;">Android</a> <a href="/tags/Growth/" style="font-size: 10px;">Growth</a> <a href="/tags/JavaScript/" style="font-size: 15px;">JavaScript</a> <a href="/tags/Math/" style="font-size: 10px;">Math</a> <a href="/tags/Performance/" style="font-size: 10px;">Performance</a> <a href="/tags/R/" style="font-size: 12.5px;">R</a> <a href="/tags/Reverse-Engineering/" style="font-size: 15px;">Reverse Engineering</a> <a href="/tags/Swift/" style="font-size: 17.5px;">Swift</a> <a href="/tags/iOS/" style="font-size: 20px;">iOS</a> <a href="/tags/shell/" style="font-size: 10px;">shell</a>
     </div>
   </div>
 
@@ -5016,7 +5071,7 @@ objectPath.<span class="keyword">get</span>(obj, <span class="string">'a.\u1200'
   <div class="widget-wrap">
     <h3 class="widget-title">Archives</h3>
     <div class="widget">
-      <ul class="archive-list"><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/04/">April 2017</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/01/">January 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/10/">October 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/09/">September 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/07/">July 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/05/">May 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/04/">April 2016</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/03/">March 2016</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/02/">February 2016</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/12/">December 2015</a><span class="archive-list-count">6</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/11/">November 2015</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/10/">October 2015</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/09/">September 2015</a><span class="archive-list-count">4</span></li></ul>
+      <ul class="archive-list"><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/04/">April 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/01/">January 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/10/">October 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/09/">September 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/07/">July 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/05/">May 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/04/">April 2016</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/03/">March 2016</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/02/">February 2016</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/12/">December 2015</a><span class="archive-list-count">6</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/11/">November 2015</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/10/">October 2015</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/09/">September 2015</a><span class="archive-list-count">4</span></li></ul>
     </div>
   </div>
 
@@ -5026,6 +5081,10 @@ objectPath.<span class="keyword">get</span>(obj, <span class="string">'a.\u1200'
     <h3 class="widget-title">Recents</h3>
     <div class="widget">
       <ul>
+        
+          <li>
+            <a href="/2017/04/23/ARM64IndirectReturn/">ARM64下Indirect Result Location摸索</a>
+          </li>
         
           <li>
             <a href="/2017/04/18/CalculateTwoArrayDiff/">快速计算两组数据源的变化的方法 - Doppelganger 源码剖析</a>
@@ -5041,10 +5100,6 @@ objectPath.<span class="keyword">get</span>(obj, <span class="string">'a.\u1200'
         
           <li>
             <a href="/2016/10/23/multithread-dangling-pointer/">浅谈一种解决多线程野指针的新思路</a>
-          </li>
-        
-          <li>
-            <a href="/2016/09/17/uiwindow-iOS/">浅谈iOS的多Window处理</a>
           </li>
         
       </ul>
