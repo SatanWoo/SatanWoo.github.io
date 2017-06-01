@@ -62,6 +62,268 @@
       <div class="outer">
         <section id="main">
   
+    <article id="post-FBTweak" class="article article-type-post" itemscope itemprop="blogPost">
+  <div class="article-meta">
+    <a href="/2017/06/01/FBTweak/" class="article-date">
+  <time datetime="2017-06-01T15:43:05.000Z" itemprop="datePublished">2017-06-01</time>
+</a>
+    
+  </div>
+  <div class="article-inner">
+    
+    
+      <header class="article-header">
+        
+  
+    <h1 itemprop="name">
+      <a class="article-title" href="/2017/06/01/FBTweak/">从FBTweak 源码剖析一些中阶知识</a>
+    </h1>
+  
+
+      </header>
+    
+    <div class="article-entry" itemprop="articleBody">
+      
+        <p>在开发的过程中，我们进场要做一些类似于参数调整之类的琐碎问题。如果每次都通过<code>CMD + R</code>来编译运行查看效果，浪费的时间真是得不偿失。因此，在看到了<code>FBTweak</code>这个项目以后，就感觉比较有意思，让我们来对这个项目一探究竟。</p>
+<h3 id="晕头转向的宏定义">晕头转向的宏定义</h3><p>打开项目，整个项目非常简单，抛去UI部分，主要使用的主API就是在<code>FBTweakInline.h</code>中的4个宏定义：</p>
+<pre><code><span class="hexcolor">#def</span>ine <span class="function"><span class="title">FBTweakInline</span><span class="params">(category_, collection_, name_, ...)</span></span> _FBTweakInline(category_, collection_, name_, __VA_ARGS__)
+
+<span class="hexcolor">#def</span>ine <span class="function"><span class="title">FBTweakValue</span><span class="params">(category_, collection_, name_, ...)</span></span> _FBTweakValue(category_, collection_, name_, __VA_ARGS__)
+
+<span class="hexcolor">#def</span>ine <span class="function"><span class="title">FBTweakBind</span><span class="params">(object_, property_, category_, collection_, name_, ...)</span></span> _FBTweakBind(object_, property_, category_, collection_, name_, __VA_ARGS__)
+
+<span class="hexcolor">#def</span>ine <span class="function"><span class="title">FBTweakAction</span><span class="params">(category_, collection_, name_, ...)</span></span> _FBTweakAction(category_, collection_, name_, __VA_ARGS__)
+</code></pre><p>看起来很简单，但是随便点一个深入进去看，就会发现如下这些令人头昏脑胀的宏定义。熟悉Facebook开源项目的人可能都知道，它们就好这口。所以在进行整个项目的介绍前，我们先大致分析下各个宏的作用。</p>
+<pre><code>#define __FBTweakConcat_<span class="list">(<span class="keyword">X</span>, Y)</span> X ## Y
+#define __FBTweakConcat<span class="list">(<span class="keyword">X</span>, Y)</span> __FBTweakConcat_<span class="list">(<span class="keyword">X</span>, Y)</span>
+
+#define __FBTweakIndex<span class="list">(<span class="keyword">_1</span>, _2, _3, value, ...)</span> value
+#define __FBTweakIndexCount<span class="list">(...)</span> __FBTweakIndex<span class="list">(<span class="keyword">__VA_ARGS__</span>, <span class="number">3</span>, <span class="number">2</span>, <span class="number">1</span>)</span>
+
+#define __FBTweakDispatch1<span class="list">(<span class="keyword">__withoutRange</span>, __withRange, __withPossible, ...)</span> __withoutRange
+#define __FBTweakDispatch2<span class="list">(<span class="keyword">__withoutRange</span>, __withRange, __withPossible, ...)</span> __withPossible
+#define __FBTweakDispatch3<span class="list">(<span class="keyword">__withoutRange</span>, __withRange, __withPossible, ...)</span> __withRange
+#define _FBTweakDispatch<span class="list">(<span class="keyword">__withoutRange</span>, __withRange, __withPossible, ...)</span> __FBTweakConcat<span class="list">(<span class="keyword">__FBTweakDispatch</span>, __FBTweakIndexCount<span class="list">(<span class="keyword">__VA_ARGS__</span>)</span>)</span><span class="list">(<span class="keyword">__withoutRange</span>, __withRange, __withPossible)</span>
+</code></pre><h4 id="_FBTweakBind">_FBTweakBind</h4><p>我们以<code>_FBTweakBind</code>作为突破口，来进行深入分析。</p>
+<pre><code><span class="hexcolor">#def</span>ine <span class="function"><span class="title">FBTweakBind</span><span class="params">(object_, property_, category_, collection_, name_, ...)</span></span> _FBTweakBind(object_, property_, category_, collection_, name_, __VA_ARGS__)
+</code></pre><p>这个宏包了层皮，就是接受至少5个参数的可变参数，并将参数传递给<code>_FBTweakBind</code>这个宏。在这层定义中，我们看到了<code>...</code>和<code>__VA_ARGS__</code>。</p>
+<p><code>...</code>对于一个宏/函数来说，意味着接受可变参数。这个参数的形参（换句话说，你要使用或者传递给其他函数的载体）就是<code>__VA_ARGS__</code>。</p>
+<p>好，接下来我们看下<code>_FBTweakBind</code>，其定义如下：</p>
+<pre><code><span class="hexcolor">#def</span>ine _FBTweakBind(object_, property_, category_, collection_, name_, ...) _FBTweakDispatch(_FBTweakBindWithoutRange, _FBTweakBindWithRange, _FBTweakBindWithPossible, __VA_ARGS__)(object_, property_, category_, collection_, name_, __VA_ARGS__)
+</code></pre><p>卧槽，一开始看的时候，头大了，怎么两个括号呢？仔细一看，<code>_FBTweakBindWithoutRange</code>，<code>_FBTweakBindWithRange</code>， <code>_FBTweakBindWithPossible</code> 都是不同的宏定义。那么整个<code>_FBTweakBind</code>的作用就是根据可变参数，传递给<code>_FBTweakDispatch</code>，从上述三个宏定义中选择出一个对应的，然后继续调用宏展开。</p>
+<p>好，再看<code>__FBTweakDispatch</code>，如下：</p>
+<pre><code><span class="hexcolor">#def</span>ine _FBTweakDispatch(__withoutRange, __withRange, __withPossible, ...) __FBTweakConcat(__FBTweakDispatch, __FBTweakIndexCount(__VA_ARGS__))(__withoutRange, __withRange, __withPossible)
+</code></pre><p>这个也比较绕，我们继续抽丝剥茧，可以发现，核心的本质就变成：</p>
+<ul>
+<li><code>__FBTweakIndexCount(args)</code> 返回一个具体数字（1、2、3）</li>
+<li><code>__FBTweakConcat(__FBTweakDispatch, 数字)</code> 生成具体的宏定义Token，比如<code>__FBTweakDispatch1</code>，<code>__FBTweakDispatch2</code>之类的。</li>
+<li>利用刚刚的token继续做函数展开。</li>
+</ul>
+<p><b>到这里，整体思路都没啥特别困难的，但是让我有点诧异的如下两个宏定义：</b></p>
+<pre><code><span class="hexcolor">#def</span>ine __FBTweakIndex(_1, _2, _3, value, ...) value
+<span class="hexcolor">#def</span>ine __FBTweakIndexCount(...) __FBTweakIndex(__VA_ARGS__, <span class="number">3</span>, <span class="number">2</span>, <span class="number">1</span>)
+</code></pre><p>我们刚刚提到，<code>__FBTweakIndexCount</code>会根据参数返回具体的数字，那它本质上是依靠<code>__FBTweakIndex</code>去返回第4个参数。（<code>_1, _2, _3</code>就是普通的宏展开占位符，别被骗了，和x, y, z没区别）。</p>
+<p><b>好，这个<code>__FBTweakIndex</code>按定义来说，至少需要<span style="color:red">4个</span>参数，但是我在试了<code>__FBTweakIndexCount()</code>，他竟然也能给返回<span style="color:red">1</span></b>，这就让我懵逼了。</p>
+<p>按照我的理解，当我传递参数为空的时候，<code>__VA_ARGS__</code>就是空，那么宏定义展开的时候，这个应该是不作数的，就导致缺少了一个参数啊？？？</p>
+<p><b style="color:red">后来，我发现我思考错了，我从语法分析的角度去分析了这个宏，但是实际上，宏就是简单的“token”展开！！！</b></p>
+<p>我们再来看看<code>__FBTweakIndex的定义</code>，展开后其实就是要了第4个参数，前面的都没啥用。</p>
+<p>也就是说，我直接写</p>
+<pre><code>__FBTweakIndex(..., <span class="number">1</span>, <span class="number">2</span>, <span class="number">3</span>)<span class="comment">;</span>
+__FBTweakIndex(,, <span class="number">1</span>, <span class="number">2</span>, <span class="number">3</span>)<span class="comment">;</span>
+__FBTweakIndex(, <span class="number">1</span>, <span class="number">2</span>, <span class="number">3</span>)<span class="comment">;</span>
+</code></pre><p>这种虽然没意义的、甚至是直觉上觉得都不能编译通过的代码，都是<strong>合理正确的</strong>。</p>
+<p>是不是有点懵逼，休息一下，消化一下。</p>
+<p>好，我们假设我们获取了数字1，因此，新的宏展开为<code>_FBTweakBindWithoutRange</code>，定义如下：</p>
+<pre><code><span class="number">#def</span>ine <span class="number">_</span>FBTweakBindWithoutRange(<span class="keyword">object</span><span class="number">_</span>, property<span class="number">_</span>, category<span class="number">_</span>, collection<span class="number">_</span>, name<span class="number">_</span>, <span class="annotation">default</span><span class="number">_</span>) \
+((^{ \
+  FBTweak *<span class="number">__</span>bind<span class="number">_</span>tweak = <span class="number">_</span>FBTweakInlineWithoutRange(category<span class="number">_</span>, collection<span class="number">_</span>, name<span class="number">_</span>, <span class="annotation">default</span><span class="number">_</span>); \
+  <span class="number">_</span>FBTweakBindInternal(<span class="keyword">object</span><span class="number">_</span>, property<span class="number">_</span>, category<span class="number">_</span>, collection<span class="number">_</span>, name<span class="number">_</span>, <span class="annotation">default</span><span class="number">_</span>, <span class="number">__</span>bind<span class="number">_</span>tweak); \
+})())
+</code></pre><p>这写法，也是醉了，我以前只是在JavaScript中看到过这样匿名函数自调用的写法，Facebook太强了。</p>
+<p>整个过程继续抽丝剥茧，<code>_FBTweakInlineWithoutRange</code>会调用到如下函数：</p>
+<pre><code><span class="comment">#define _FBTweakInlineWithPossibleInternal(category_, collection_, name_, default_, possible_) \</span>
+((^{ <span class="string">\</span>
+  <span class="comment">/* store the tweak data in the binary at compile time. */</span> <span class="string">\</span>
+  __attribute__((used)) static FBTweakLiteralString category__ = category_; <span class="string">\</span>
+  __attribute__((used)) static FBTweakLiteralString collection__ = collection_; <span class="string">\</span>
+  __attribute__((used)) static FBTweakLiteralString name__ = name_; <span class="string">\</span>
+  __attribute__((used)) static <span class="literal">void</span> *default__ = (__bridge <span class="literal">void</span> *) ^{ <span class="keyword">return</span> default_; }; <span class="string">\</span>
+  __attribute__((used)) static <span class="literal">void</span> *possible__ = (__bridge <span class="literal">void</span> *)  ^{ <span class="keyword">return</span> possible_; }; <span class="string">\</span>
+  __attribute__((used)) static char *encoding__ = (char *)<span class="property">@encode</span>(__typeof__(default_)); <span class="string">\</span>
+  __attribute__((used)) __attribute__((section (FBTweakSegmentName <span class="string">","</span> FBTweakSectionName))) static fb_tweak_entry entry = <span class="string">\</span>
+    { &amp;category__, &amp;collection__, &amp;name__, (<span class="literal">void</span> *)&amp;default__, (<span class="literal">void</span> *)&amp;possible__, &amp;encoding__ }; <span class="string">\</span>
+<span class="string">\</span>
+  <span class="comment">/* find the registered tweak with the given identifier. */</span> <span class="string">\</span>
+  FBTweakStore *store = [FBTweakStore sharedInstance]; <span class="string">\</span>
+  FBTweakCategory *category = [store <span class="attribute">tweakCategoryWithName</span>:category__]; <span class="string">\</span>
+  FBTweakCollection *collection = [category <span class="attribute">tweakCollectionWithName</span>:collection__]; <span class="string">\</span>
+<span class="string">\</span>
+  NSString *identifier = _FBTweakIdentifier(&amp;entry); <span class="string">\</span>
+  FBTweak *__inline_tweak = [collection <span class="attribute">tweakWithIdentifier</span>:identifier]; <span class="string">\</span>
+<span class="string">\</span>
+  <span class="keyword">return</span> __inline_tweak; <span class="string">\</span>
+})())
+</code></pre><p>这里相对来说比较复杂，我们逐个知识点进行查看。</p>
+<pre><code>__attribute__<span class="list">(<span class="list">(<span class="keyword">used</span>)</span>)</span> static FBTweakLiteralString category__ = category_<span class="comment">;</span>
+</code></pre><p>这个前面出来了<code>__attribute__((used))</code>，它的作用是告诉编译器，我声明的这个符号是需要保留的。我们在开发iOS的过程中，常常会遇到有时候会报警告<code>xxx unused</code>，在某些优化的情况下，编译器甚至都不报警告，直接将我们进行了剔除，<b>这样在编译后(预处理、编译、汇编)生成的目标文件里就<span style="color:red">不</span>存在我们这个符号。</b></p>
+<p>继续看这行，又出现了我们新的不熟悉的<code>__attribute__((section (FBTweakSegmentName &quot;,&quot; FBTweakSectionName)))</code></p>
+<pre><code>__attribute__((used)) __attribute__((section (FBTweakSegmentName <span class="string">","</span> FBTweakSectionName))) <span class="keyword">static</span> fb_tweak_entry entry = \
+       { &amp;category__, &amp;collection__, &amp;name__, (<span class="keyword">void</span> *)&amp;default__, (<span class="keyword">void</span> *)&amp;possible__, &amp;encoding__ };
+</code></pre><p>我们知道，iOS里面函数代码一般存在于<code>__TEXT</code>段，数据部分一般存在于<code>__DATA</code>段。但是在每个段中，都存在着许多不同作用的节（section）。比如存储常量字符串的<code>__cfstring</code>等等。</p>
+<p>因此，编译器提供了我们一种<code>__attribute__((section(&quot;xxx段，xxx节&quot;)</code>的方式让我们讲一个指定的数据储存到我们需要的节当中。</p>
+<p><b style="color:red">上述基础知识很容易理解，但是我在实际读代码理解整个运行机制的时候，还是有点懵逼。</b></p>
+<h3 id="令人困惑的指针和数据">令人困惑的指针和数据</h3><p>我们将上章节中的代码简单具象一下：</p>
+<pre><code><span class="keyword">static</span> <span class="built_in">NSString</span> *haha = <span class="string">@"Mingyi"</span>;
+_attribute__((section (<span class="string">"__DATA, MinyiSpecific"</span>))) <span class="keyword">static</span> <span class="built_in">NSString</span> ** entry = &amp;haha;
+</code></pre><p>我们看到，我们将<code>&amp;haha</code>所代表这个数据存入了<code>__DATA</code> Segment的<code>MinyiSpecific</code>Section中。</p>
+<p>但是，<code>&amp;haha</code>的类型是一个<code>NSString **</code>，即指向指针的指针。换句话说，这个指针的指针的背后的含义是<code>haha</code>这个变量本身的地址。我们知道，苹果的程序在加载的过程中都会ASLR地址随机化，那我们对一个地址进行存储，有啥用呢？</p>
+<p><b style="color:red">上述的理解，有个最大的误区，就是从运行时来理解了地址，而不是从编译后的目标文件来理解程序，什么意思呢？</b> </p>
+<p>在我们这里，因为声明了常量字符串@”Mingyi”，在编译(而非程序运行)后，它就存在于可执行文件的<code>cfstring</code>这个节中，如下所示：</p>
+<p><img src="https://github.com/SatanWoo/BeeHive/blob/master/%E5%B1%8F%E5%B9%95%E5%BF%AB%E7%85%A7%202017-06-01%20%E4%B8%8A%E5%8D%881.02.43.png?raw=true" alt=""></p>
+<p>这个数据格式的起始地址偏移为<code>00000001 00003068</code>。</p>
+<p>而由于我们使用的是静态变量<code>haha</code>，在编译后，也会生成一个指向刚刚那个常量字符串地址的数据。这个数据存在于<code>__DATA，__data</code>中，如下图：</p>
+<p><img src="https://github.com/SatanWoo/BeeHive/blob/master/%E5%B1%8F%E5%B9%95%E5%BF%AB%E7%85%A7%202017-06-01%20%E4%B8%8A%E5%8D%881.07.50.png?raw=true" alt=""></p>
+<p>而<code>00000001 00003DC0</code>就是在代码中<code>&amp;haha</code>的含义。</p>
+<p>无论是<code>3068</code>抑或是<code>3DC0</code>，它们的含义都是一个地址偏移，在程序加载运行的过程中，都要进行地址<strong>REBASE</strong>，去获得真正正确地址空间中的数据。但是由于我们的</p>
+<pre><code>_attribute__<span class="list">(<span class="list">(<span class="keyword">section</span> <span class="list">(<span class="string">"__DATA, MinyiSpecific"</span>)</span>)</span>)</span> static NSString ** entry = &amp;haha<span class="comment">;</span>
+</code></pre><p>是一个编译期的行为，因此这行语句的行为表征的还是存储没有rebase之前的相对地址偏移，如下图：</p>
+<p><img src="https://github.com/SatanWoo/BeeHive/blob/master/%E5%B1%8F%E5%B9%95%E5%BF%AB%E7%85%A7%202017-06-01%20%E4%B8%8A%E5%8D%881.11.55.png?raw=true" alt=""></p>
+<p>好，至此，我们才将整个数据存入的部分搞懂。</p>
+<p><strong>注意，iOS是小端序，即数据的高位在低地址。</strong></p>
+<h3 id="镜像数据加载">镜像数据加载</h3><p>说完了数据存储，我们再来看看怎么从编译后的执行文件的节中读取出文件，代码如下：</p>
+<pre><code>  <span class="keyword">static</span> <span class="keyword">uint32_t</span> _tweaksLoaded = <span class="number">0</span>;
+  <span class="keyword">if</span> (OSAtomicTestAndSetBarrier(<span class="number">1</span>, &amp;_tweaksLoaded)) {
+    <span class="keyword">return</span>;
+  }
+
+<span class="preprocessor">#<span class="keyword">ifdef</span> __LP64__</span>
+  <span class="keyword">typedef</span> <span class="keyword">uint64_t</span> fb_tweak_value;
+  <span class="keyword">typedef</span> <span class="keyword">struct</span> section_64 fb_tweak_section;
+  <span class="keyword">typedef</span> <span class="keyword">struct</span> mach_header_64 fb_tweak_header;
+<span class="preprocessor">#<span class="keyword">define</span> fb_tweak_getsectbynamefromheader getsectbynamefromheader_64</span>
+<span class="preprocessor">#<span class="keyword">else</span></span>
+  <span class="keyword">typedef</span> <span class="keyword">uint32_t</span> fb_tweak_value;
+  <span class="keyword">typedef</span> <span class="keyword">struct</span> section fb_tweak_section;
+  <span class="keyword">typedef</span> <span class="keyword">struct</span> mach_header fb_tweak_header;
+<span class="preprocessor">#<span class="keyword">define</span> fb_tweak_getsectbynamefromheader getsectbynamefromheader</span>
+<span class="preprocessor">#<span class="keyword">endif</span></span>
+
+
+  FBTweakStore *store = [FBTweakStore sharedInstance];
+
+  <span class="comment">// 1. 注意点</span>
+  <span class="keyword">uint32_t</span> image_count = _dyld_image_count();
+  <span class="keyword">for</span> (<span class="keyword">uint32_t</span> image_index = <span class="number">0</span>; image_index &lt; image_count; image_index++) {
+    <span class="keyword">const</span> fb_tweak_header *mach_header = (<span class="keyword">const</span> fb_tweak_header *)_dyld_get_image_header(image_index);
+
+    <span class="keyword">unsigned</span> <span class="keyword">long</span> size;
+
+    <span class="comment">// 2.注意点</span>
+    fb_tweak_entry *data = (fb_tweak_entry *)getsectiondata(mach_header, FBTweakSegmentName, FBTweakSectionName, &amp;size);
+    <span class="keyword">if</span> (data == <span class="literal">NULL</span>) {
+      <span class="keyword">continue</span>;
+    }
+    <span class="keyword">size_t</span> count = size / <span class="keyword">sizeof</span>(fb_tweak_entry);
+    <span class="keyword">for</span> (<span class="keyword">size_t</span> i = <span class="number">0</span>; i &lt; count; i++) {
+      fb_tweak_entry *entry = &amp;data[i];
+      FBTweakCategory *category = [store tweakCategoryWithName:*entry-&gt;category];
+      <span class="keyword">if</span> (category == nil) {
+        category = [[FBTweakCategory alloc] initWithName:*entry-&gt;category];
+        [store addTweakCategory:category];
+      }
+
+      FBTweakCollection *collection = [category tweakCollectionWithName:*entry-&gt;collection];
+      <span class="keyword">if</span> (collection == nil) {
+        collection = [[FBTweakCollection alloc] initWithName:*entry-&gt;collection];
+        [category addTweakCollection:collection];
+      }
+
+      NSString *identifier = _FBTweakIdentifier(entry);
+      <span class="keyword">if</span> ([collection tweakWithIdentifier:identifier] == nil) {
+        FBTweak *tweak = _FBTweakCreateWithEntry(identifier, entry);
+
+        <span class="keyword">if</span> (tweak != nil) {
+          [collection addTweak:tweak];
+        }
+      }
+    }
+  }
+}
+</code></pre><ul>
+<li>注意点1:通过dyld获取当前程序加载时候的image个数。什么是image个数呢？你的可执行文件就是一个image。那为什么又会存在多个image呢？如果你平时使用的都是静态库，那么在编译连接完成后，静态库这个scope就不存在了，所有的符号都互相匹配完成。但是呢，苹果自身比如<code>UIKIt</code>之类的库又是动态库，因此，你的可执行文件中会存在多个image。</li>
+</ul>
+<p><img src="https://github.com/SatanWoo/BeeHive/blob/master/%E5%B1%8F%E5%B9%95%E5%BF%AB%E7%85%A7%202017-06-01%20%E4%B8%8A%E5%8D%8811.50.09.png?raw=true" alt=""></p>
+<ul>
+<li>注意点2:读取macho文件中对应的段和节中我们自己储存的数据。</li>
+</ul>
+<h3 id="修改同步映射">修改同步映射</h3><p>我们之前看到，在利用<code>FBTweakBind</code>可以将某个对象的属性和操作进行映射，同步修改。这里的机制看起来很复杂，其实非常简单，就是简单的利用了KVO。</p>
+<p><code>FBTweak</code>就是想要修改的属性，其包含了多个<code>Observer</code>。在<code>FBTweak</code>的<code>currentValue</code>更改后，会利用观察者模式对每个<code>Observer</code>发送属性更新通知。而<code>FBTweak</code>的属性值改变则是和UI界面，利用KVO进行联动修改。</p>
+<p>这里就没什么过于复杂的技术含量了，具体看下<code>FBTweak</code>和<code>_FBTweakColorViewController</code>代码就行。</p>
+<h3 id="其余知识点:">其余知识点:</h3><ul>
+<li><p><code>objc_precise_lifetime</code>的作用  </p>
+<pre><code>__attribute__<span class="list">(<span class="list">(<span class="keyword">objc_precise_lifetime</span>)</span>)</span> id strongObject = _object<span class="comment">;</span>
+</code></pre></li>
+</ul>
+<p>这行代码的作用就是确保ARC不会进行特殊的优化，提前将一些本来认为在Scope最后才释放的对象提前释放了。</p>
+<ul>
+<li><p><code>_Generic</code>是一个编译时的<a href="http://en.cppreference.com/w/c/language/generic" target="_blank" rel="external">泛型选择</a>，他能根据变量的类型兼容来输出不同的结果，比如：</p>
+<pre><code><span class="preprocessor">#<span class="keyword">define</span> cbrt(X) _Generic((X), \</span>
+          <span class="keyword">long</span> <span class="keyword">double</span>: cbrtl, \
+              <span class="keyword">default</span>: cbrt,  \
+<span class="comment">/*for clang*/</span> <span class="keyword">const</span> <span class="keyword">float</span>: cbrtf, \
+                <span class="keyword">float</span>: cbrtf  \
+)(X)
+
+<span class="function"><span class="keyword">int</span> <span class="title">main</span>(<span class="params"><span class="keyword">void</span></span>)
+</span>{
+    <span class="keyword">long</span> <span class="keyword">double</span> x = <span class="number">8.0</span>;
+    <span class="keyword">const</span> <span class="keyword">float</span> y = <span class="number">3.375</span>;
+    printf(<span class="string">"cbrt(8.0) = %Lg\n"</span>, cbrt(x)); <span class="comment">// selects the default cbrt</span>
+    printf(<span class="string">"cbrtf(3.375) = %f\n"</span>, cbrt(y)); <span class="comment">// gcc: converts const float to float,</span>
+                                            <span class="comment">// then selects cbrtf</span>
+                                            <span class="comment">// clang: selects cbrtf for const float</span>
+}
+</code></pre></li>
+</ul>
+<p>上述代码就根据编译器的类型声明，选择不同的函数进行执行。</p>
+
+      
+    </div>
+    <footer class="article-footer">
+      <a data-url="http://satanwoo.github.io/2017/06/01/FBTweak/" data-id="cj3elfj6o001z5gi1oviliyaw" class="article-share-link">Share</a>
+      
+        <a href="http://satanwoo.github.io/2017/06/01/FBTweak/#disqus_thread" class="article-comment-link">Comments</a>
+      
+      
+  <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
+
+    </footer>
+  </div>
+  
+</article>
+
+<div id="disqus_thread"></div>
+<script>
+
+/**
+*  RECOMMENDED CONFIGURATION VARIABLES: EDIT AND UNCOMMENT THE SECTION BELOW TO INSERT DYNAMIC VALUES FROM YOUR PLATFORM OR CMS.
+*  LEARN WHY DEFINING THESE VARIABLES IS IMPORTANT: https://disqus.com/admin/universalcode/#configuration-variables*/
+/*
+var disqus_config = function () {
+this.page.url = PAGE_URL;  // Replace PAGE_URL with your page's canonical URL variable
+this.page.identifier = PAGE_IDENTIFIER; // Replace PAGE_IDENTIFIER with your page's unique identifier variable
+};
+*/
+(function() { // DON'T EDIT BELOW THIS LINE
+var d = document, s = d.createElement('script');
+s.src = 'https://satanwoo-2.disqus.com/embed.js';
+s.setAttribute('data-timestamp', +new Date());
+(d.head || d.body).appendChild(s);
+})();
+</script>
+<noscript>Please enable JavaScript to view the <a href="https://disqus.com/?ref_noscript">comments powered by Disqus.</a></noscript>
+                                
+  
     <article id="post-ARM64IndirectReturn" class="article article-type-post" itemscope itemprop="blogPost">
   <div class="article-meta">
     <a href="/2017/04/23/ARM64IndirectReturn/" class="article-date">
@@ -168,7 +430,7 @@ foo(&amp;s, <span class="number">1</span>, <span class="number">2</span>);
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2017/04/23/ARM64IndirectReturn/" data-id="cj2oylq3y002ehoi1gsc9lla2" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2017/04/23/ARM64IndirectReturn/" data-id="cj3elfj73002g5gi1139a4yy5" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2017/04/23/ARM64IndirectReturn/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -339,7 +601,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2017/04/18/CalculateTwoArrayDiff/" data-id="cj2oylq3t002ahoi190ktjsh5" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2017/04/18/CalculateTwoArrayDiff/" data-id="cj3elfj71002c5gi1trzrjeof" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2017/04/18/CalculateTwoArrayDiff/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -529,7 +791,7 @@ dispatch_group_create(<span class="keyword">void</span>)
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2017/01/07/DispatchGroupCrash/" data-id="cj2oylq3e0021hoi1hahe1xqe" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2017/01/07/DispatchGroupCrash/" data-id="cj3elfj6v00235gi1s5ld3rct" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2017/01/07/DispatchGroupCrash/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -777,7 +1039,7 @@ func <span class="function"><span class="title">resultFromBatchObjects</span><sp
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2017/01/07/JSONRPCKit/" data-id="cj2oylq1l001rhoi1ui11wptr" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2017/01/07/JSONRPCKit/" data-id="cj3elfj69001r5gi1a2dog746" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2017/01/07/JSONRPCKit/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -1061,7 +1323,7 @@ dispatch_sync(dq, ^{
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/10/23/multithread-dangling-pointer/" data-id="cj2oylpzg0007hoi1n55br4vt" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/10/23/multithread-dangling-pointer/" data-id="cj3elfj3g00075gi1b2ss8ltk" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/10/23/multithread-dangling-pointer/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -1217,7 +1479,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/09/17/uiwindow-iOS/" data-id="cj2oylpyy0003hoi1nzmosho5" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/09/17/uiwindow-iOS/" data-id="cj3elfj2p00035gi1trsxungl" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/09/17/uiwindow-iOS/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -1377,7 +1639,7 @@ OSSpinUnlock(&amp;_lock)<span class="comment">;</span>
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/07/10/immutable-thread/" data-id="cj2oylpzi0009hoi11t8qse4e" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/07/10/immutable-thread/" data-id="cj3elfj3k00095gi10o8wke8i" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/07/10/immutable-thread/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -1501,7 +1763,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/05/02/Spotify/" data-id="cj2oylq0j0010hoi1z1yfhtjt" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/05/02/Spotify/" data-id="cj3elfj5500105gi1xu6mfyg0" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/05/02/Spotify/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -1629,7 +1891,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/04/26/blank-space-in-html/" data-id="cj2oylq01000ohoi18ysytrxp" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/04/26/blank-space-in-html/" data-id="cj3elfj4h000o5gi1xocb6x8y" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/04/26/blank-space-in-html/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -1887,7 +2149,7 @@ Elapsed application CPU <span class="keyword">time</span> (seconds): <span class
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/04/11/dispatch-once/" data-id="cj2oylpzo000ehoi11ybzb9um" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/04/11/dispatch-once/" data-id="cj3elfj3w000e5gi12qra093f" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/04/11/dispatch-once/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -2104,7 +2366,7 @@ a4.<span class="function"><span class="title">staticInfo</span><span class="para
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/03/22/dispatch-in-swift/" data-id="cj2oylpzq000ghoi15atllya5" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/03/22/dispatch-in-swift/" data-id="cj3elfj3y000g5gi1qxwygvax" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/03/22/dispatch-in-swift/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -2218,7 +2480,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/03/14/RxSwift/" data-id="cj2oylq0p0016hoi1rmo4tvsk" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/03/14/RxSwift/" data-id="cj3elfj5a00165gi13xicp39u" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/03/14/RxSwift/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -2328,7 +2590,7 @@ val = edx(<span class="literal">true</span>)
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/03/14/SizeUp/" data-id="cj2oylq0l0013hoi1adwpuawt" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/03/14/SizeUp/" data-id="cj3elfj5700135gi16qyt2xhu" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/03/14/SizeUp/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -2490,7 +2752,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/03/14/DXXcodeConsoleUnicodePlugin/" data-id="cj2oylq3l0026hoi1qpmtatli" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/03/14/DXXcodeConsoleUnicodePlugin/" data-id="cj3elfj6y00285gi1v9fmyk9f" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/03/14/DXXcodeConsoleUnicodePlugin/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -2589,7 +2851,7 @@ fi
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/02/27/check-manifest/" data-id="cj2oylpzw000lhoi1hfhahy5n" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/02/27/check-manifest/" data-id="cj3elfj4a000l5gi1jl3f9yk0" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/02/27/check-manifest/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -2721,7 +2983,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/02/27/pod-install-plugin/" data-id="cj2oylpzb0005hoi188t7dtwf" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/02/27/pod-install-plugin/" data-id="cj3elfj3c00055gi1u0ll6c2d" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/02/27/pod-install-plugin/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -2999,7 +3261,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/02/27/FBKVOController/" data-id="cj2oylq39001zhoi14hh1iasi" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/02/27/FBKVOController/" data-id="cj3elfj6t00215gi1fr97lkg6" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/02/27/FBKVOController/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -3135,7 +3397,7 @@ selectedTitleLabelsContentView<span class="class">.layer</span><span class="clas
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/02/05/DGRunKeeperSwitch/" data-id="cj2oylq3r0028hoi1cvsg3jzn" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/02/05/DGRunKeeperSwitch/" data-id="cj3elfj6z002a5gi1t5wfafsw" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/02/05/DGRunKeeperSwitch/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -3413,7 +3675,7 @@ NSLayoutConstraint *constraint = [NSLayoutConstraint <span class="string">constr
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/02/05/PureLayout/" data-id="cj2oylq0z001dhoi15kzq3t69" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/02/05/PureLayout/" data-id="cj3elfj5k001d5gi1000f9dtu" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/02/05/PureLayout/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -3761,7 +4023,7 @@ extension Task {
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/12/30/Refactor-Mega-ViewController/" data-id="cj2oylq0w001bhoi1rm6jwzj9" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/12/30/Refactor-Mega-ViewController/" data-id="cj3elfj5f001b5gi1bqyn6r3c" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2015/12/30/Refactor-Mega-ViewController/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -3934,7 +4196,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/12/20/Learn-R-2/" data-id="cj2oylq16001hhoi1obm1ct4k" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/12/20/Learn-R-2/" data-id="cj3elfj5q001h5gi1py2bnm7s" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2015/12/20/Learn-R-2/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -4010,7 +4272,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/12/15/Regression-Model-1/" data-id="cj2oylq0s0018hoi1adee02j5" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/12/15/Regression-Model-1/" data-id="cj3elfj5c00185gi1r9632q7f" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2015/12/15/Regression-Model-1/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -4175,7 +4437,7 @@ $foo
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/12/13/Learn-R-1/" data-id="cj2oylq1a001khoi1x5t57q12" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/12/13/Learn-R-1/" data-id="cj3elfj5v001k5gi1vedksdqx" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2015/12/13/Learn-R-1/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -4303,7 +4565,7 @@ frame <span class="preprocessor">#<span class="number">20</span>: libdyld.dylib`
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/12/11/LLDB-1/" data-id="cj2oylq1h001phoi1vh7pbju7" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/12/11/LLDB-1/" data-id="cj3elfj65001p5gi163h8gwyl" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2015/12/11/LLDB-1/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -4624,7 +4886,7 @@ TBBoundingBox TBBoundingBoxMake(<span class="built_in">double</span> x0, <span c
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/12/11/TBAnnotationClustering/" data-id="cj2oylq07000shoi1ew860q9h" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/12/11/TBAnnotationClustering/" data-id="cj3elfj4p000s5gi1fy4vbjhi" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2015/12/11/TBAnnotationClustering/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -4871,7 +5133,7 @@ BOOL success = class_addMethod(<span class="keyword">class</span>, originalSelec
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/11/26/FDFullScreenPopGesture-Source-Code/" data-id="cj2oylq1u001xhoi1gj0t047j" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/11/26/FDFullScreenPopGesture-Source-Code/" data-id="cj3elfj6l001x5gi1u9f435ex" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2015/11/26/FDFullScreenPopGesture-Source-Code/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -5003,7 +5265,7 @@ replicationLayer.instanceDelay = <span class="number">0.3</span>
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/11/17/Fun-of-CAReplicationLayer/" data-id="cj2oylq1r001vhoi1s6b11iyc" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/11/17/Fun-of-CAReplicationLayer/" data-id="cj3elfj6g001v5gi1mmmxbaju" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2015/11/17/Fun-of-CAReplicationLayer/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -5231,7 +5493,7 @@ modalVC<span class="class">.modalPresentationStyle</span> = <span class="class">
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/11/12/Swift-UITransition-iOS8/" data-id="cj2oylq0a000uhoi1yuqqulbf" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/11/12/Swift-UITransition-iOS8/" data-id="cj3elfj4s000u5gi1g02ri1pf" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2015/11/12/Swift-UITransition-iOS8/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -5413,263 +5675,12 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/11/05/Understand-Viper/" data-id="cj2oylq04000qhoi1l2r0x03p" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/11/05/Understand-Viper/" data-id="cj3elfj4l000q5gi1cngwjshd" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2015/11/05/Understand-Viper/#disqus_thread" class="article-comment-link">Comments</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
-
-    </footer>
-  </div>
-  
-</article>
-
-<div id="disqus_thread"></div>
-<script>
-
-/**
-*  RECOMMENDED CONFIGURATION VARIABLES: EDIT AND UNCOMMENT THE SECTION BELOW TO INSERT DYNAMIC VALUES FROM YOUR PLATFORM OR CMS.
-*  LEARN WHY DEFINING THESE VARIABLES IS IMPORTANT: https://disqus.com/admin/universalcode/#configuration-variables*/
-/*
-var disqus_config = function () {
-this.page.url = PAGE_URL;  // Replace PAGE_URL with your page's canonical URL variable
-this.page.identifier = PAGE_IDENTIFIER; // Replace PAGE_IDENTIFIER with your page's unique identifier variable
-};
-*/
-(function() { // DON'T EDIT BELOW THIS LINE
-var d = document, s = d.createElement('script');
-s.src = 'https://satanwoo-2.disqus.com/embed.js';
-s.setAttribute('data-timestamp', +new Date());
-(d.head || d.body).appendChild(s);
-})();
-</script>
-<noscript>Please enable JavaScript to view the <a href="https://disqus.com/?ref_noscript">comments powered by Disqus.</a></noscript>
-                                
-  
-    <article id="post-Object-Path-Source-Code" class="article article-type-post" itemscope itemprop="blogPost">
-  <div class="article-meta">
-    <a href="/2015/11/05/Object-Path-Source-Code/" class="article-date">
-  <time datetime="2015-11-04T16:18:02.000Z" itemprop="datePublished">2015-11-05</time>
-</a>
-    
-  </div>
-  <div class="article-inner">
-    
-    
-      <header class="article-header">
-        
-  
-    <h1 itemprop="name">
-      <a class="article-title" href="/2015/11/05/Object-Path-Source-Code/">Object-Path 源码解读</a>
-    </h1>
-  
-
-      </header>
-    
-    <div class="article-entry" itemprop="articleBody">
-      
-        <h3 id="Object-Path">Object-Path</h3><p>今天看到了一个非常有意思的JavaScript库，乍一看有点iOS keypath chain的意思，名字叫Object-Path，<a href="https://github.com/mariocasciaro/object-path" target="_blank" rel="external">地址点我</a>，主要的功能包含了：</p>
-<ul>
-<li>Set</li>
-<li>Get</li>
-<li>Del</li>
-<li>Empty </li>
-<li>Insert </li>
-<li>EnsureExist</li>
-<li>Push</li>
-</ul>
-<p>从它的Example中我们可以先一览它的功能：</p>
-<pre><code><span class="keyword">var</span> obj = {
-  a: {
-    b: <span class="string">"d"</span>,
-    c: [<span class="string">"e"</span>, <span class="string">"f"</span>],
-    <span class="string">'\u1200'</span>: <span class="string">'unicode key'</span>,
-    <span class="string">'dot.dot'</span>: <span class="string">'key'</span>
-  }
-};
-
-<span class="keyword">var</span> objectPath = require(<span class="string">"object-path"</span>);
-
-<span class="comment">//get deep property</span>
-objectPath.<span class="keyword">get</span>(obj, <span class="string">"a.b"</span>);  <span class="comment">//returns "d"</span>
-objectPath.<span class="keyword">get</span>(obj, [<span class="string">"a"</span>, <span class="string">"dot.dot"</span>]);  <span class="comment">//returns "key"</span>
-objectPath.<span class="keyword">get</span>(obj, <span class="string">'a.\u1200'</span>);  <span class="comment">//returns "unicode key"</span>
-</code></pre><p>从这个例子中，我们可以发现对于一个Object <strong>obc</strong>，除了默认的直接通过点 <strong>.</strong>方式访问一个属性外， 如obj.a。我们还可以通过点 <strong>.</strong> 来进行<strong>“链式”</strong>访问其属性的属性（如果存在的话），如obj.a.b。这看起来真的和iOS中的keypath coding非常相似，所以，今天就让我们来分析下其实现吧！</p>
-<h3 id="源码解析">源码解析</h3><h4 id="Set方法">Set方法</h4><pre><code>例子：objectPath.<span class="keyword">set</span>(obj, <span class="string">"a.h"</span>, <span class="string">"m"</span>); 
-</code></pre><p>Set方法是用来给obj的某个<strong>“链式”</strong>属性进行赋值的，源码如下：</p>
-<pre><code><span class="function">function <span class="title">set</span><span class="params">(obj, path, value, doNotReplace)</span></span>{
-     <span class="comment">// 1. </span>
-    <span class="keyword">if</span> (isNumber(path)) {
-      path = [path];
-    }
-
-    <span class="comment">// 2.</span>
-    <span class="keyword">if</span> (isEmpty(path)) {
-      <span class="keyword">return</span> obj;
-    }
-
-    <span class="comment">// 3.</span>
-    <span class="keyword">if</span> (isString(path)) {
-      <span class="keyword">return</span> <span class="built_in">set</span>(obj, path.split(<span class="string">'.'</span>).<span class="built_in">map</span>(getKey), value, doNotReplace);
-    }
-
-    <span class="comment">// 4.</span>
-    var currentPath = path[<span class="number">0</span>];
-
-    <span class="keyword">if</span> (path.length === <span class="number">1</span>) {
-      var oldVal = obj[currentPath];
-      <span class="keyword">if</span> (oldVal === <span class="keyword">void</span> <span class="number">0</span> || !doNotReplace) {
-        obj[currentPath] = value;
-      }
-      <span class="keyword">return</span> oldVal;
-    }
-
-     <span class="comment">// 5.</span>
-    <span class="keyword">if</span> (obj[currentPath] === <span class="keyword">void</span> <span class="number">0</span>) {
-      <span class="comment">//check if we assume an array</span>
-      <span class="keyword">if</span>(isNumber(path[<span class="number">1</span>])) {
-        obj[currentPath] = [];
-      } <span class="keyword">else</span> {
-        obj[currentPath] = {};
-      }
-    }
-
-    <span class="keyword">return</span> <span class="built_in">set</span>(obj[currentPath], path.slice(<span class="number">1</span>), value, doNotReplace);
-  }
-</code></pre><ul>
-<li><ol>
-<li>判断传入的path是否是Number类型，如果不是的话，构建一个包含这个pathde数组，这里为什么要这样处理，在下文解释。<strong>注：JavaScript中不存在浮点数、整数等等不同数值类型，统一为Number</strong></li>
-</ol>
-</li>
-<li><ol>
-<li>判断传入的path是不是“空”，空的情况包含：undefined，空数组，没有任何自身属性的对象。下文我们会详细查看<strong>isEmpty</strong>的实现。</li>
-</ol>
-</li>
-<li><ol>
-<li>判断是否是字符串，如果是字符串，就通过<strong>“.”</strong>进行分割，分割完成构建数组，然后进行set方法的重新调用。</li>
-</ol>
-</li>
-<li><ol>
-<li>判断是否当前path深度只为一层，<em>var currentPath = path[0]</em>，如果是一层的话，根据是否要doNotReplace进行值的替换。</li>
-</ol>
-</li>
-</ul>
-<p>这里有个很有意思的实现 <strong>oldVal === void 0</strong>，void 0是什么鬼，我们经常会看见<strong>JavaScript::void(0)代表网页的死链接</strong>，那么oldVal == void 0又是什么意思呢？</p>
-<p><strong>其实，void 0就是undefined！</strong>在现代的浏览器中，它们两已经完全的等同了。而写成void 0的形式，是为了兼容。在过去的浏览器中，undefined不是一个关键字，它是个全局变量。因此，你完全可以徒手改变它的含义，</p>
-<pre><code><span class="keyword">var</span> <span class="literal">undefined</span> = <span class="number">1</span>;
-<span class="built_in">console</span>.log(<span class="literal">undefined</span>);
-</code></pre><p>这样的改变，就会undefined原本的含义错乱。而<strong>由于void是一个操作符，你无法改写它的含义，因此void 0是一种更安全的写法！</strong></p>
-<p>在这里的含义就是，判断<strong>oldVal === void 0</strong>是不是未定义罢了。</p>
-<ul>
-<li><ol>
-<li>如果不是一层深度的path，并且当前的obj[currentPath]是未定义的。那么就需要判断path[1]，也就是path数组中的第二个属性是什么了。<strong>如果是数字，就将obj[currentPath]构建为数组［］，否则构建一个对象｛｝。</strong></li>
-</ol>
-</li>
-</ul>
-<p>为什么要分开处理呢？这里就需要提及JavaScript访问属性的一个特别的地方。对于如下这样一个对象，</p>
-<pre><code><span class="keyword">var</span> obj = <span class="comment">{a:5}</span>
-</code></pre><p>来说，我们实现<strong>obj.a 或者 obj[“a”]</strong>都可以获得正确的结果5，但是对于另一个对象，</p>
-<pre><code>var obj = {<span class="number">1</span>: <span class="number">5</span>}
-</code></pre><p>我们只能使用obj[“1”]的方式来访问结果5，而不能使用obj.1。如果使用obj.1，就能报错误：<div style="color:red">Uncaught SyntaxError: Unexpected number(…)</div></p>
-<p>究其原因，就在于JavaScript在处理对象的key的时候，都是将key当成字符串处理的。</p>
-<p>所以，在这里构建完相对应的下一层级obj[currrentPath]，递归调用set方法即可。</p>
-<h4 id="Del方法">Del方法</h4><pre><code><span class="function">function <span class="title">del</span><span class="params">(obj, path)</span> </span>{
-    <span class="keyword">if</span> (isNumber(path)) {
-     path = [path];
-    }
-
-    <span class="keyword">if</span> (isEmpty(obj)) {
-     <span class="keyword">return</span> <span class="keyword">void</span> <span class="number">0</span>;
-    }
-
-    <span class="keyword">if</span> (isEmpty(path)) {
-     <span class="keyword">return</span> obj;
-    }
-
-    <span class="keyword">if</span>(isString(path)) {
-     <span class="keyword">return</span> del(obj, path.split(<span class="string">'.'</span>));
-    }
-
-    <span class="comment">// 重点</span>
-    var currentPath = getKey(path[<span class="number">0</span>]);
-    var oldVal = obj[currentPath];
-
-    <span class="keyword">if</span>(path.length === <span class="number">1</span>) {
-     <span class="keyword">if</span> (oldVal !== <span class="keyword">void</span> <span class="number">0</span>) {
-       <span class="keyword">if</span> (isArray(obj)) {
-         obj.splice(currentPath, <span class="number">1</span>);
-       } <span class="keyword">else</span> {
-         <span class="keyword">delete</span> obj[currentPath];
-       }
-     }
-    } <span class="keyword">else</span> {
-     <span class="keyword">if</span> (obj[currentPath] !== <span class="keyword">void</span> <span class="number">0</span>) {
-       <span class="keyword">return</span> del(obj[currentPath], path.slice(<span class="number">1</span>));
-     }
-    }
-
-    <span class="keyword">return</span> obj;
-}
-</code></pre><p>让我们再来看看Del方法，这个方法用于“链式”删除一些属性对应的值。由于之前的逻辑和Set类似，我们直接从重点开始看起。</p>
-<ul>
-<li>首先先从path[0]中获取key，然后取出对应的oldVal。</li>
-<li><p>如果path深度为1，并且oldVal不是未定义的话，究进行删除，删除分为两种：</p>
-<p>（1）如果是数组的话,通过splice删除数组中currentPath位置上的属性值<br>（2）如果是object，直接进行删除即可</p>
-</li>
-<li><p>如果深度不为1，并且oldValue不是未定义，递归调用del函数即可。</p>
-</li>
-</ul>
-<p>这里有一点需要注意，我们看到在获取currentPath的过程中，调用了getKey这个函数，让我们赶紧去看看这个getKey的实现。</p>
-<pre><code><span class="function"><span class="keyword">function</span> <span class="title">getKey</span>(<span class="params">key</span>)</span>{
-    <span class="keyword">var</span> intKey = <span class="built_in">parseInt</span>(key);
-    <span class="keyword">if</span> (intKey.toString() === key) {
-      <span class="keyword">return</span> intKey;
-    }
-    <span class="keyword">return</span> key;
-} 
-</code></pre><p>这里的逻辑不难理解，通过parseInt将key转成整型，如果转换后的结果通过toString函数和原有的key一致，就直接返回整形，否则返回原有的key。<strong>通过===(强等于号)不难理解，这里if的满足条件当且仅当key本身是string类型，同时其值是个整数才可以满足，如”5”等，像类似”a.2”, “5.5”就不会满足。</strong></p>
-<p>剩下的诸如Get, Has方法，实现都大同小异，我们就不再一一解读了，大家有兴趣可以自行阅读。</p>
-<h3 id="补充知识：JavaScript类型判断">补充知识：JavaScript类型判断</h3><pre><code><span class="function"><span class="keyword">function</span> <span class="title">isNumber</span><span class="params">(value)</span></span>{
-  <span class="keyword">return</span> <span class="keyword">typeof</span> value === <span class="string">'number'</span> || toString(value) === <span class="string">"[object Number]"</span>;
-}
-
-<span class="function"><span class="keyword">function</span> <span class="title">isString</span><span class="params">(obj)</span></span>{
-  <span class="keyword">return</span> <span class="keyword">typeof</span> obj === <span class="string">'string'</span> || toString(obj) === <span class="string">"[object String]"</span>;
-}
-
-<span class="function"><span class="keyword">function</span> <span class="title">isObject</span><span class="params">(obj)</span></span>{
-  <span class="keyword">return</span> <span class="keyword">typeof</span> obj === <span class="string">'object'</span> &amp;&amp; toString(obj) === <span class="string">"[object Object]"</span>;
-}
-
-<span class="function"><span class="keyword">function</span> <span class="title">isArray</span><span class="params">(obj)</span></span>{
-  <span class="keyword">return</span> <span class="keyword">typeof</span> obj === <span class="string">'object'</span> &amp;&amp; <span class="keyword">typeof</span> obj.length === <span class="string">'number'</span> &amp;&amp; toString(obj) === <span class="string">'[object Array]'</span>;
-}
-
-<span class="function"><span class="keyword">function</span> <span class="title">isBoolean</span><span class="params">(obj)</span></span>{
-  <span class="keyword">return</span> <span class="keyword">typeof</span> obj === <span class="string">'boolean'</span> || toString(obj) === <span class="string">'[object Boolean]'</span>;
-}
-</code></pre><p>在Object-Path的实现中，大量的类型判断工作都是通过如上一些函数来搞定的。有人会问了，判断一个类型为啥要这么麻烦，直接用instanceOf或者typeof不可以吗？</p>
-<ul>
-<li>用instanceOf是肯定错误的，如果被判断的对象不处于同一个页面，那么instanceOf就肯定失效了。</li>
-</ul>
-<blockquote><br>比如，一个页面（父页面）有一个框架，框架中引用了一个页面（子页面），在子页面中声明了一个array，并将其赋值给父页面的一个变量，这时判断该变量是否是array类型，就是失败<br></blockquote>
-
-<ul>
-<li>用typeof的缺陷在于，JavaScript中存在基本类型和包装类型，对于数值5来说，它是基本类型Number，通过typeof可以准备的判断出。但是如果是包装对象<b>var k = new Number(5)</b>，在意义上其仍然应该是属于数值类型，但是通过typeof获得的结果是object，因此就不正确。</li>
-</ul>
-<p><strong>所以，在这里的实现，我们采用了Object.prototype.toString.call(obj)的方式来获取正确的类型。</strong></p>
-<p>嘿嘿，今天就到这里啦。</p>
-
-      
-    </div>
-    <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/11/05/Object-Path-Source-Code/" data-id="cj2oylq13001fhoi16cphvsct" class="article-share-link">Share</a>
-      
-        <a href="http://satanwoo.github.io/2015/11/05/Object-Path-Source-Code/#disqus_thread" class="article-comment-link">Comments</a>
-      
-      
-  <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/JavaScript/">JavaScript</a></li></ul>
 
     </footer>
   </div>
@@ -5713,7 +5724,7 @@ s.setAttribute('data-timestamp', +new Date());
   <div class="widget-wrap">
     <h3 class="widget-title">Tags</h3>
     <div class="widget">
-      <ul class="tag-list"><li class="tag-list-item"><a class="tag-list-link" href="/tags/Android/">Android</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Growth/">Growth</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/JavaScript/">JavaScript</a><span class="tag-list-count">3</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Math/">Math</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Performance/">Performance</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/R/">R</a><span class="tag-list-count">2</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Reverse-Engineering/">Reverse Engineering</a><span class="tag-list-count">3</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Swift/">Swift</a><span class="tag-list-count">6</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/iOS/">iOS</a><span class="tag-list-count">22</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/shell/">shell</a><span class="tag-list-count">1</span></li></ul>
+      <ul class="tag-list"><li class="tag-list-item"><a class="tag-list-link" href="/tags/Android/">Android</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Growth/">Growth</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/JavaScript/">JavaScript</a><span class="tag-list-count">3</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Math/">Math</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Performance/">Performance</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/R/">R</a><span class="tag-list-count">2</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Reverse-Engineering/">Reverse Engineering</a><span class="tag-list-count">3</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Swift/">Swift</a><span class="tag-list-count">6</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/iOS/">iOS</a><span class="tag-list-count">23</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/shell/">shell</a><span class="tag-list-count">1</span></li></ul>
     </div>
   </div>
 
@@ -5731,7 +5742,7 @@ s.setAttribute('data-timestamp', +new Date());
   <div class="widget-wrap">
     <h3 class="widget-title">Archives</h3>
     <div class="widget">
-      <ul class="archive-list"><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/04/">April 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/01/">January 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/10/">October 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/09/">September 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/07/">July 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/05/">May 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/04/">April 2016</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/03/">March 2016</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/02/">February 2016</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/12/">December 2015</a><span class="archive-list-count">6</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/11/">November 2015</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/10/">October 2015</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/09/">September 2015</a><span class="archive-list-count">4</span></li></ul>
+      <ul class="archive-list"><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/06/">June 2017</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/04/">April 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/01/">January 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/10/">October 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/09/">September 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/07/">July 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/05/">May 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/04/">April 2016</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/03/">March 2016</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/02/">February 2016</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/12/">December 2015</a><span class="archive-list-count">6</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/11/">November 2015</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/10/">October 2015</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/09/">September 2015</a><span class="archive-list-count">4</span></li></ul>
     </div>
   </div>
 
@@ -5741,6 +5752,10 @@ s.setAttribute('data-timestamp', +new Date());
     <h3 class="widget-title">Recents</h3>
     <div class="widget">
       <ul>
+        
+          <li>
+            <a href="/2017/06/01/FBTweak/">从FBTweak 源码剖析一些中阶知识</a>
+          </li>
         
           <li>
             <a href="/2017/04/23/ARM64IndirectReturn/">ARM64下Indirect Result Location摸索</a>
@@ -5756,10 +5771,6 @@ s.setAttribute('data-timestamp', +new Date());
         
           <li>
             <a href="/2017/01/07/JSONRPCKit/">JSONRPCKit源码解析</a>
-          </li>
-        
-          <li>
-            <a href="/2016/10/23/multithread-dangling-pointer/">浅谈一种解决多线程野指针的新思路</a>
           </li>
         
       </ul>

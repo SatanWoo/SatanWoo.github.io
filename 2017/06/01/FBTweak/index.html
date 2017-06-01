@@ -1,0 +1,463 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  
+  <title>从FBTweak 源码剖析一些中阶知识 | Hexo</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+  <meta name="description" content="在开发的过程中，我们进场要做一些类似于参数调整之类的琐碎问题。如果每次都通过CMD + R来编译运行查看效果，浪费的时间真是得不偿失。因此，在看到了FBTweak这个项目以后，就感觉比较有意思，让我们来对这个项目一探究竟。
+晕头转向的宏定义打开项目，整个项目非常简单，抛去UI部分，主要使用的主API就是在FBTweakInline.h中的4个宏定义：
+#define FBTweakInline(c">
+<meta property="og:type" content="article">
+<meta property="og:title" content="从FBTweak 源码剖析一些中阶知识">
+<meta property="og:url" content="http://satanwoo.github.io/2017/06/01/FBTweak/index.html">
+<meta property="og:site_name" content="Hexo">
+<meta property="og:description" content="在开发的过程中，我们进场要做一些类似于参数调整之类的琐碎问题。如果每次都通过CMD + R来编译运行查看效果，浪费的时间真是得不偿失。因此，在看到了FBTweak这个项目以后，就感觉比较有意思，让我们来对这个项目一探究竟。
+晕头转向的宏定义打开项目，整个项目非常简单，抛去UI部分，主要使用的主API就是在FBTweakInline.h中的4个宏定义：
+#define FBTweakInline(c">
+<meta property="og:image" content="https://github.com/SatanWoo/BeeHive/blob/master/%E5%B1%8F%E5%B9%95%E5%BF%AB%E7%85%A7%202017-06-01%20%E4%B8%8A%E5%8D%881.02.43.png?raw=true">
+<meta property="og:image" content="https://github.com/SatanWoo/BeeHive/blob/master/%E5%B1%8F%E5%B9%95%E5%BF%AB%E7%85%A7%202017-06-01%20%E4%B8%8A%E5%8D%881.07.50.png?raw=true">
+<meta property="og:image" content="https://github.com/SatanWoo/BeeHive/blob/master/%E5%B1%8F%E5%B9%95%E5%BF%AB%E7%85%A7%202017-06-01%20%E4%B8%8A%E5%8D%881.11.55.png?raw=true">
+<meta property="og:image" content="https://github.com/SatanWoo/BeeHive/blob/master/%E5%B1%8F%E5%B9%95%E5%BF%AB%E7%85%A7%202017-06-01%20%E4%B8%8A%E5%8D%8811.50.09.png?raw=true">
+<meta property="og:updated_time" content="2017-06-01T15:46:16.000Z">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="从FBTweak 源码剖析一些中阶知识">
+<meta name="twitter:description" content="在开发的过程中，我们进场要做一些类似于参数调整之类的琐碎问题。如果每次都通过CMD + R来编译运行查看效果，浪费的时间真是得不偿失。因此，在看到了FBTweak这个项目以后，就感觉比较有意思，让我们来对这个项目一探究竟。
+晕头转向的宏定义打开项目，整个项目非常简单，抛去UI部分，主要使用的主API就是在FBTweakInline.h中的4个宏定义：
+#define FBTweakInline(c">
+  
+    <link rel="alternative" href="/atom.xml" title="Hexo" type="application/atom+xml">
+  
+  
+    <link rel="icon" href="/favicon.png">
+  
+  <link rel="stylesheet" href="/css/style.css" type="text/css">
+  
+
+</head>
+<body>
+  <div id="container">
+    <div id="wrap">
+      <header id="header">
+  <div id="banner"></div>
+  <div id="header-outer" class="outer">
+    <div id="header-title" class="inner">
+      <h1 id="logo-wrap">
+        <a href="/" id="logo">Hexo</a>
+      </h1>
+      
+    </div>
+    <div id="header-inner" class="inner">
+      <nav id="main-nav">
+        <a id="main-nav-toggle" class="nav-icon"></a>
+        
+          <a class="main-nav-link" href="/">Home</a>
+        
+          <a class="main-nav-link" href="/archives">Archives</a>
+        
+          <a class="main-nav-link" href="/sitemap.xml">map</a>
+        
+      </nav>
+      <nav id="sub-nav">
+        
+          <a id="nav-rss-link" class="nav-icon" href="/atom.xml" title="RSS Feed"></a>
+        
+        <a id="nav-search-btn" class="nav-icon" title="Search"></a>
+      </nav>
+      <div id="search-form-wrap">
+        <form action="//google.com/search" method="get" accept-charset="UTF-8" class="search-form"><input type="search" name="q" results="0" class="search-form-input" placeholder="Search"><button type="submit" class="search-form-submit">&#xF002;</button><input type="hidden" name="sitesearch" value="http://satanwoo.github.io"></form>
+      </div>
+    </div>
+  </div>
+</header>
+      <div class="outer">
+        <section id="main"><article id="post-FBTweak" class="article article-type-post" itemscope itemprop="blogPost">
+  <div class="article-meta">
+    <a href="/2017/06/01/FBTweak/" class="article-date">
+  <time datetime="2017-06-01T15:43:05.000Z" itemprop="datePublished">2017-06-01</time>
+</a>
+    
+  </div>
+  <div class="article-inner">
+    
+    
+      <header class="article-header">
+        
+  
+    <h1 class="article-title" itemprop="name">
+      从FBTweak 源码剖析一些中阶知识
+    </h1>
+  
+
+      </header>
+    
+    <div class="article-entry" itemprop="articleBody">
+      
+        <p>在开发的过程中，我们进场要做一些类似于参数调整之类的琐碎问题。如果每次都通过<code>CMD + R</code>来编译运行查看效果，浪费的时间真是得不偿失。因此，在看到了<code>FBTweak</code>这个项目以后，就感觉比较有意思，让我们来对这个项目一探究竟。</p>
+<h3 id="晕头转向的宏定义">晕头转向的宏定义</h3><p>打开项目，整个项目非常简单，抛去UI部分，主要使用的主API就是在<code>FBTweakInline.h</code>中的4个宏定义：</p>
+<pre><code><span class="hexcolor">#def</span>ine <span class="function"><span class="title">FBTweakInline</span><span class="params">(category_, collection_, name_, ...)</span></span> _FBTweakInline(category_, collection_, name_, __VA_ARGS__)
+
+<span class="hexcolor">#def</span>ine <span class="function"><span class="title">FBTweakValue</span><span class="params">(category_, collection_, name_, ...)</span></span> _FBTweakValue(category_, collection_, name_, __VA_ARGS__)
+
+<span class="hexcolor">#def</span>ine <span class="function"><span class="title">FBTweakBind</span><span class="params">(object_, property_, category_, collection_, name_, ...)</span></span> _FBTweakBind(object_, property_, category_, collection_, name_, __VA_ARGS__)
+
+<span class="hexcolor">#def</span>ine <span class="function"><span class="title">FBTweakAction</span><span class="params">(category_, collection_, name_, ...)</span></span> _FBTweakAction(category_, collection_, name_, __VA_ARGS__)
+</code></pre><p>看起来很简单，但是随便点一个深入进去看，就会发现如下这些令人头昏脑胀的宏定义。熟悉Facebook开源项目的人可能都知道，它们就好这口。所以在进行整个项目的介绍前，我们先大致分析下各个宏的作用。</p>
+<pre><code>#define __FBTweakConcat_<span class="list">(<span class="keyword">X</span>, Y)</span> X ## Y
+#define __FBTweakConcat<span class="list">(<span class="keyword">X</span>, Y)</span> __FBTweakConcat_<span class="list">(<span class="keyword">X</span>, Y)</span>
+
+#define __FBTweakIndex<span class="list">(<span class="keyword">_1</span>, _2, _3, value, ...)</span> value
+#define __FBTweakIndexCount<span class="list">(...)</span> __FBTweakIndex<span class="list">(<span class="keyword">__VA_ARGS__</span>, <span class="number">3</span>, <span class="number">2</span>, <span class="number">1</span>)</span>
+
+#define __FBTweakDispatch1<span class="list">(<span class="keyword">__withoutRange</span>, __withRange, __withPossible, ...)</span> __withoutRange
+#define __FBTweakDispatch2<span class="list">(<span class="keyword">__withoutRange</span>, __withRange, __withPossible, ...)</span> __withPossible
+#define __FBTweakDispatch3<span class="list">(<span class="keyword">__withoutRange</span>, __withRange, __withPossible, ...)</span> __withRange
+#define _FBTweakDispatch<span class="list">(<span class="keyword">__withoutRange</span>, __withRange, __withPossible, ...)</span> __FBTweakConcat<span class="list">(<span class="keyword">__FBTweakDispatch</span>, __FBTweakIndexCount<span class="list">(<span class="keyword">__VA_ARGS__</span>)</span>)</span><span class="list">(<span class="keyword">__withoutRange</span>, __withRange, __withPossible)</span>
+</code></pre><h4 id="_FBTweakBind">_FBTweakBind</h4><p>我们以<code>_FBTweakBind</code>作为突破口，来进行深入分析。</p>
+<pre><code><span class="hexcolor">#def</span>ine <span class="function"><span class="title">FBTweakBind</span><span class="params">(object_, property_, category_, collection_, name_, ...)</span></span> _FBTweakBind(object_, property_, category_, collection_, name_, __VA_ARGS__)
+</code></pre><p>这个宏包了层皮，就是接受至少5个参数的可变参数，并将参数传递给<code>_FBTweakBind</code>这个宏。在这层定义中，我们看到了<code>...</code>和<code>__VA_ARGS__</code>。</p>
+<p><code>...</code>对于一个宏/函数来说，意味着接受可变参数。这个参数的形参（换句话说，你要使用或者传递给其他函数的载体）就是<code>__VA_ARGS__</code>。</p>
+<p>好，接下来我们看下<code>_FBTweakBind</code>，其定义如下：</p>
+<pre><code><span class="hexcolor">#def</span>ine _FBTweakBind(object_, property_, category_, collection_, name_, ...) _FBTweakDispatch(_FBTweakBindWithoutRange, _FBTweakBindWithRange, _FBTweakBindWithPossible, __VA_ARGS__)(object_, property_, category_, collection_, name_, __VA_ARGS__)
+</code></pre><p>卧槽，一开始看的时候，头大了，怎么两个括号呢？仔细一看，<code>_FBTweakBindWithoutRange</code>，<code>_FBTweakBindWithRange</code>， <code>_FBTweakBindWithPossible</code> 都是不同的宏定义。那么整个<code>_FBTweakBind</code>的作用就是根据可变参数，传递给<code>_FBTweakDispatch</code>，从上述三个宏定义中选择出一个对应的，然后继续调用宏展开。</p>
+<p>好，再看<code>__FBTweakDispatch</code>，如下：</p>
+<pre><code><span class="hexcolor">#def</span>ine _FBTweakDispatch(__withoutRange, __withRange, __withPossible, ...) __FBTweakConcat(__FBTweakDispatch, __FBTweakIndexCount(__VA_ARGS__))(__withoutRange, __withRange, __withPossible)
+</code></pre><p>这个也比较绕，我们继续抽丝剥茧，可以发现，核心的本质就变成：</p>
+<ul>
+<li><code>__FBTweakIndexCount(args)</code> 返回一个具体数字（1、2、3）</li>
+<li><code>__FBTweakConcat(__FBTweakDispatch, 数字)</code> 生成具体的宏定义Token，比如<code>__FBTweakDispatch1</code>，<code>__FBTweakDispatch2</code>之类的。</li>
+<li>利用刚刚的token继续做函数展开。</li>
+</ul>
+<p><b>到这里，整体思路都没啥特别困难的，但是让我有点诧异的如下两个宏定义：</b></p>
+<pre><code><span class="hexcolor">#def</span>ine __FBTweakIndex(_1, _2, _3, value, ...) value
+<span class="hexcolor">#def</span>ine __FBTweakIndexCount(...) __FBTweakIndex(__VA_ARGS__, <span class="number">3</span>, <span class="number">2</span>, <span class="number">1</span>)
+</code></pre><p>我们刚刚提到，<code>__FBTweakIndexCount</code>会根据参数返回具体的数字，那它本质上是依靠<code>__FBTweakIndex</code>去返回第4个参数。（<code>_1, _2, _3</code>就是普通的宏展开占位符，别被骗了，和x, y, z没区别）。</p>
+<p><b>好，这个<code>__FBTweakIndex</code>按定义来说，至少需要<span style="color:red">4个</span>参数，但是我在试了<code>__FBTweakIndexCount()</code>，他竟然也能给返回<span style="color:red">1</span></b>，这就让我懵逼了。</p>
+<p>按照我的理解，当我传递参数为空的时候，<code>__VA_ARGS__</code>就是空，那么宏定义展开的时候，这个应该是不作数的，就导致缺少了一个参数啊？？？</p>
+<p><b style="color:red">后来，我发现我思考错了，我从语法分析的角度去分析了这个宏，但是实际上，宏就是简单的“token”展开！！！</b></p>
+<p>我们再来看看<code>__FBTweakIndex的定义</code>，展开后其实就是要了第4个参数，前面的都没啥用。</p>
+<p>也就是说，我直接写</p>
+<pre><code>__FBTweakIndex(..., <span class="number">1</span>, <span class="number">2</span>, <span class="number">3</span>)<span class="comment">;</span>
+__FBTweakIndex(,, <span class="number">1</span>, <span class="number">2</span>, <span class="number">3</span>)<span class="comment">;</span>
+__FBTweakIndex(, <span class="number">1</span>, <span class="number">2</span>, <span class="number">3</span>)<span class="comment">;</span>
+</code></pre><p>这种虽然没意义的、甚至是直觉上觉得都不能编译通过的代码，都是<strong>合理正确的</strong>。</p>
+<p>是不是有点懵逼，休息一下，消化一下。</p>
+<p>好，我们假设我们获取了数字1，因此，新的宏展开为<code>_FBTweakBindWithoutRange</code>，定义如下：</p>
+<pre><code><span class="number">#def</span>ine <span class="number">_</span>FBTweakBindWithoutRange(<span class="keyword">object</span><span class="number">_</span>, property<span class="number">_</span>, category<span class="number">_</span>, collection<span class="number">_</span>, name<span class="number">_</span>, <span class="annotation">default</span><span class="number">_</span>) \
+((^{ \
+  FBTweak *<span class="number">__</span>bind<span class="number">_</span>tweak = <span class="number">_</span>FBTweakInlineWithoutRange(category<span class="number">_</span>, collection<span class="number">_</span>, name<span class="number">_</span>, <span class="annotation">default</span><span class="number">_</span>); \
+  <span class="number">_</span>FBTweakBindInternal(<span class="keyword">object</span><span class="number">_</span>, property<span class="number">_</span>, category<span class="number">_</span>, collection<span class="number">_</span>, name<span class="number">_</span>, <span class="annotation">default</span><span class="number">_</span>, <span class="number">__</span>bind<span class="number">_</span>tweak); \
+})())
+</code></pre><p>这写法，也是醉了，我以前只是在JavaScript中看到过这样匿名函数自调用的写法，Facebook太强了。</p>
+<p>整个过程继续抽丝剥茧，<code>_FBTweakInlineWithoutRange</code>会调用到如下函数：</p>
+<pre><code><span class="comment">#define _FBTweakInlineWithPossibleInternal(category_, collection_, name_, default_, possible_) \</span>
+((^{ <span class="string">\</span>
+  <span class="comment">/* store the tweak data in the binary at compile time. */</span> <span class="string">\</span>
+  __attribute__((used)) static FBTweakLiteralString category__ = category_; <span class="string">\</span>
+  __attribute__((used)) static FBTweakLiteralString collection__ = collection_; <span class="string">\</span>
+  __attribute__((used)) static FBTweakLiteralString name__ = name_; <span class="string">\</span>
+  __attribute__((used)) static <span class="literal">void</span> *default__ = (__bridge <span class="literal">void</span> *) ^{ <span class="keyword">return</span> default_; }; <span class="string">\</span>
+  __attribute__((used)) static <span class="literal">void</span> *possible__ = (__bridge <span class="literal">void</span> *)  ^{ <span class="keyword">return</span> possible_; }; <span class="string">\</span>
+  __attribute__((used)) static char *encoding__ = (char *)<span class="property">@encode</span>(__typeof__(default_)); <span class="string">\</span>
+  __attribute__((used)) __attribute__((section (FBTweakSegmentName <span class="string">","</span> FBTweakSectionName))) static fb_tweak_entry entry = <span class="string">\</span>
+    { &amp;category__, &amp;collection__, &amp;name__, (<span class="literal">void</span> *)&amp;default__, (<span class="literal">void</span> *)&amp;possible__, &amp;encoding__ }; <span class="string">\</span>
+<span class="string">\</span>
+  <span class="comment">/* find the registered tweak with the given identifier. */</span> <span class="string">\</span>
+  FBTweakStore *store = [FBTweakStore sharedInstance]; <span class="string">\</span>
+  FBTweakCategory *category = [store <span class="attribute">tweakCategoryWithName</span>:category__]; <span class="string">\</span>
+  FBTweakCollection *collection = [category <span class="attribute">tweakCollectionWithName</span>:collection__]; <span class="string">\</span>
+<span class="string">\</span>
+  NSString *identifier = _FBTweakIdentifier(&amp;entry); <span class="string">\</span>
+  FBTweak *__inline_tweak = [collection <span class="attribute">tweakWithIdentifier</span>:identifier]; <span class="string">\</span>
+<span class="string">\</span>
+  <span class="keyword">return</span> __inline_tweak; <span class="string">\</span>
+})())
+</code></pre><p>这里相对来说比较复杂，我们逐个知识点进行查看。</p>
+<pre><code>__attribute__<span class="list">(<span class="list">(<span class="keyword">used</span>)</span>)</span> static FBTweakLiteralString category__ = category_<span class="comment">;</span>
+</code></pre><p>这个前面出来了<code>__attribute__((used))</code>，它的作用是告诉编译器，我声明的这个符号是需要保留的。我们在开发iOS的过程中，常常会遇到有时候会报警告<code>xxx unused</code>，在某些优化的情况下，编译器甚至都不报警告，直接将我们进行了剔除，<b>这样在编译后(预处理、编译、汇编)生成的目标文件里就<span style="color:red">不</span>存在我们这个符号。</b></p>
+<p>继续看这行，又出现了我们新的不熟悉的<code>__attribute__((section (FBTweakSegmentName &quot;,&quot; FBTweakSectionName)))</code></p>
+<pre><code>__attribute__((used)) __attribute__((section (FBTweakSegmentName <span class="string">","</span> FBTweakSectionName))) <span class="keyword">static</span> fb_tweak_entry entry = \
+       { &amp;category__, &amp;collection__, &amp;name__, (<span class="keyword">void</span> *)&amp;default__, (<span class="keyword">void</span> *)&amp;possible__, &amp;encoding__ };
+</code></pre><p>我们知道，iOS里面函数代码一般存在于<code>__TEXT</code>段，数据部分一般存在于<code>__DATA</code>段。但是在每个段中，都存在着许多不同作用的节（section）。比如存储常量字符串的<code>__cfstring</code>等等。</p>
+<p>因此，编译器提供了我们一种<code>__attribute__((section(&quot;xxx段，xxx节&quot;)</code>的方式让我们讲一个指定的数据储存到我们需要的节当中。</p>
+<p><b style="color:red">上述基础知识很容易理解，但是我在实际读代码理解整个运行机制的时候，还是有点懵逼。</b></p>
+<h3 id="令人困惑的指针和数据">令人困惑的指针和数据</h3><p>我们将上章节中的代码简单具象一下：</p>
+<pre><code><span class="keyword">static</span> <span class="built_in">NSString</span> *haha = <span class="string">@"Mingyi"</span>;
+_attribute__((section (<span class="string">"__DATA, MinyiSpecific"</span>))) <span class="keyword">static</span> <span class="built_in">NSString</span> ** entry = &amp;haha;
+</code></pre><p>我们看到，我们将<code>&amp;haha</code>所代表这个数据存入了<code>__DATA</code> Segment的<code>MinyiSpecific</code>Section中。</p>
+<p>但是，<code>&amp;haha</code>的类型是一个<code>NSString **</code>，即指向指针的指针。换句话说，这个指针的指针的背后的含义是<code>haha</code>这个变量本身的地址。我们知道，苹果的程序在加载的过程中都会ASLR地址随机化，那我们对一个地址进行存储，有啥用呢？</p>
+<p><b style="color:red">上述的理解，有个最大的误区，就是从运行时来理解了地址，而不是从编译后的目标文件来理解程序，什么意思呢？</b> </p>
+<p>在我们这里，因为声明了常量字符串@”Mingyi”，在编译(而非程序运行)后，它就存在于可执行文件的<code>cfstring</code>这个节中，如下所示：</p>
+<p><img src="https://github.com/SatanWoo/BeeHive/blob/master/%E5%B1%8F%E5%B9%95%E5%BF%AB%E7%85%A7%202017-06-01%20%E4%B8%8A%E5%8D%881.02.43.png?raw=true" alt=""></p>
+<p>这个数据格式的起始地址偏移为<code>00000001 00003068</code>。</p>
+<p>而由于我们使用的是静态变量<code>haha</code>，在编译后，也会生成一个指向刚刚那个常量字符串地址的数据。这个数据存在于<code>__DATA，__data</code>中，如下图：</p>
+<p><img src="https://github.com/SatanWoo/BeeHive/blob/master/%E5%B1%8F%E5%B9%95%E5%BF%AB%E7%85%A7%202017-06-01%20%E4%B8%8A%E5%8D%881.07.50.png?raw=true" alt=""></p>
+<p>而<code>00000001 00003DC0</code>就是在代码中<code>&amp;haha</code>的含义。</p>
+<p>无论是<code>3068</code>抑或是<code>3DC0</code>，它们的含义都是一个地址偏移，在程序加载运行的过程中，都要进行地址<strong>REBASE</strong>，去获得真正正确地址空间中的数据。但是由于我们的</p>
+<pre><code>_attribute__<span class="list">(<span class="list">(<span class="keyword">section</span> <span class="list">(<span class="string">"__DATA, MinyiSpecific"</span>)</span>)</span>)</span> static NSString ** entry = &amp;haha<span class="comment">;</span>
+</code></pre><p>是一个编译期的行为，因此这行语句的行为表征的还是存储没有rebase之前的相对地址偏移，如下图：</p>
+<p><img src="https://github.com/SatanWoo/BeeHive/blob/master/%E5%B1%8F%E5%B9%95%E5%BF%AB%E7%85%A7%202017-06-01%20%E4%B8%8A%E5%8D%881.11.55.png?raw=true" alt=""></p>
+<p>好，至此，我们才将整个数据存入的部分搞懂。</p>
+<p><strong>注意，iOS是小端序，即数据的高位在低地址。</strong></p>
+<h3 id="镜像数据加载">镜像数据加载</h3><p>说完了数据存储，我们再来看看怎么从编译后的执行文件的节中读取出文件，代码如下：</p>
+<pre><code>  <span class="keyword">static</span> <span class="keyword">uint32_t</span> _tweaksLoaded = <span class="number">0</span>;
+  <span class="keyword">if</span> (OSAtomicTestAndSetBarrier(<span class="number">1</span>, &amp;_tweaksLoaded)) {
+    <span class="keyword">return</span>;
+  }
+
+<span class="preprocessor">#<span class="keyword">ifdef</span> __LP64__</span>
+  <span class="keyword">typedef</span> <span class="keyword">uint64_t</span> fb_tweak_value;
+  <span class="keyword">typedef</span> <span class="keyword">struct</span> section_64 fb_tweak_section;
+  <span class="keyword">typedef</span> <span class="keyword">struct</span> mach_header_64 fb_tweak_header;
+<span class="preprocessor">#<span class="keyword">define</span> fb_tweak_getsectbynamefromheader getsectbynamefromheader_64</span>
+<span class="preprocessor">#<span class="keyword">else</span></span>
+  <span class="keyword">typedef</span> <span class="keyword">uint32_t</span> fb_tweak_value;
+  <span class="keyword">typedef</span> <span class="keyword">struct</span> section fb_tweak_section;
+  <span class="keyword">typedef</span> <span class="keyword">struct</span> mach_header fb_tweak_header;
+<span class="preprocessor">#<span class="keyword">define</span> fb_tweak_getsectbynamefromheader getsectbynamefromheader</span>
+<span class="preprocessor">#<span class="keyword">endif</span></span>
+
+
+  FBTweakStore *store = [FBTweakStore sharedInstance];
+
+  <span class="comment">// 1. 注意点</span>
+  <span class="keyword">uint32_t</span> image_count = _dyld_image_count();
+  <span class="keyword">for</span> (<span class="keyword">uint32_t</span> image_index = <span class="number">0</span>; image_index &lt; image_count; image_index++) {
+    <span class="keyword">const</span> fb_tweak_header *mach_header = (<span class="keyword">const</span> fb_tweak_header *)_dyld_get_image_header(image_index);
+
+    <span class="keyword">unsigned</span> <span class="keyword">long</span> size;
+
+    <span class="comment">// 2.注意点</span>
+    fb_tweak_entry *data = (fb_tweak_entry *)getsectiondata(mach_header, FBTweakSegmentName, FBTweakSectionName, &amp;size);
+    <span class="keyword">if</span> (data == <span class="literal">NULL</span>) {
+      <span class="keyword">continue</span>;
+    }
+    <span class="keyword">size_t</span> count = size / <span class="keyword">sizeof</span>(fb_tweak_entry);
+    <span class="keyword">for</span> (<span class="keyword">size_t</span> i = <span class="number">0</span>; i &lt; count; i++) {
+      fb_tweak_entry *entry = &amp;data[i];
+      FBTweakCategory *category = [store tweakCategoryWithName:*entry-&gt;category];
+      <span class="keyword">if</span> (category == nil) {
+        category = [[FBTweakCategory alloc] initWithName:*entry-&gt;category];
+        [store addTweakCategory:category];
+      }
+
+      FBTweakCollection *collection = [category tweakCollectionWithName:*entry-&gt;collection];
+      <span class="keyword">if</span> (collection == nil) {
+        collection = [[FBTweakCollection alloc] initWithName:*entry-&gt;collection];
+        [category addTweakCollection:collection];
+      }
+
+      NSString *identifier = _FBTweakIdentifier(entry);
+      <span class="keyword">if</span> ([collection tweakWithIdentifier:identifier] == nil) {
+        FBTweak *tweak = _FBTweakCreateWithEntry(identifier, entry);
+
+        <span class="keyword">if</span> (tweak != nil) {
+          [collection addTweak:tweak];
+        }
+      }
+    }
+  }
+}
+</code></pre><ul>
+<li>注意点1:通过dyld获取当前程序加载时候的image个数。什么是image个数呢？你的可执行文件就是一个image。那为什么又会存在多个image呢？如果你平时使用的都是静态库，那么在编译连接完成后，静态库这个scope就不存在了，所有的符号都互相匹配完成。但是呢，苹果自身比如<code>UIKIt</code>之类的库又是动态库，因此，你的可执行文件中会存在多个image。</li>
+</ul>
+<p><img src="https://github.com/SatanWoo/BeeHive/blob/master/%E5%B1%8F%E5%B9%95%E5%BF%AB%E7%85%A7%202017-06-01%20%E4%B8%8A%E5%8D%8811.50.09.png?raw=true" alt=""></p>
+<ul>
+<li>注意点2:读取macho文件中对应的段和节中我们自己储存的数据。</li>
+</ul>
+<h3 id="修改同步映射">修改同步映射</h3><p>我们之前看到，在利用<code>FBTweakBind</code>可以将某个对象的属性和操作进行映射，同步修改。这里的机制看起来很复杂，其实非常简单，就是简单的利用了KVO。</p>
+<p><code>FBTweak</code>就是想要修改的属性，其包含了多个<code>Observer</code>。在<code>FBTweak</code>的<code>currentValue</code>更改后，会利用观察者模式对每个<code>Observer</code>发送属性更新通知。而<code>FBTweak</code>的属性值改变则是和UI界面，利用KVO进行联动修改。</p>
+<p>这里就没什么过于复杂的技术含量了，具体看下<code>FBTweak</code>和<code>_FBTweakColorViewController</code>代码就行。</p>
+<h3 id="其余知识点:">其余知识点:</h3><ul>
+<li><p><code>objc_precise_lifetime</code>的作用  </p>
+<pre><code>__attribute__<span class="list">(<span class="list">(<span class="keyword">objc_precise_lifetime</span>)</span>)</span> id strongObject = _object<span class="comment">;</span>
+</code></pre></li>
+</ul>
+<p>这行代码的作用就是确保ARC不会进行特殊的优化，提前将一些本来认为在Scope最后才释放的对象提前释放了。</p>
+<ul>
+<li><p><code>_Generic</code>是一个编译时的<a href="http://en.cppreference.com/w/c/language/generic" target="_blank" rel="external">泛型选择</a>，他能根据变量的类型兼容来输出不同的结果，比如：</p>
+<pre><code><span class="preprocessor">#<span class="keyword">define</span> cbrt(X) _Generic((X), \</span>
+          <span class="keyword">long</span> <span class="keyword">double</span>: cbrtl, \
+              <span class="keyword">default</span>: cbrt,  \
+<span class="comment">/*for clang*/</span> <span class="keyword">const</span> <span class="keyword">float</span>: cbrtf, \
+                <span class="keyword">float</span>: cbrtf  \
+)(X)
+
+<span class="function"><span class="keyword">int</span> <span class="title">main</span>(<span class="params"><span class="keyword">void</span></span>)
+</span>{
+    <span class="keyword">long</span> <span class="keyword">double</span> x = <span class="number">8.0</span>;
+    <span class="keyword">const</span> <span class="keyword">float</span> y = <span class="number">3.375</span>;
+    printf(<span class="string">"cbrt(8.0) = %Lg\n"</span>, cbrt(x)); <span class="comment">// selects the default cbrt</span>
+    printf(<span class="string">"cbrtf(3.375) = %f\n"</span>, cbrt(y)); <span class="comment">// gcc: converts const float to float,</span>
+                                            <span class="comment">// then selects cbrtf</span>
+                                            <span class="comment">// clang: selects cbrtf for const float</span>
+}
+</code></pre></li>
+</ul>
+<p>上述代码就根据编译器的类型声明，选择不同的函数进行执行。</p>
+
+      
+    </div>
+    <footer class="article-footer">
+      <a data-url="http://satanwoo.github.io/2017/06/01/FBTweak/" data-id="cj3elfj6o001z5gi1oviliyaw" class="article-share-link">Share</a>
+      
+        <a href="http://satanwoo.github.io/2017/06/01/FBTweak/#disqus_thread" class="article-comment-link">Comments</a>
+      
+      
+  <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
+
+    </footer>
+  </div>
+  
+    
+<nav id="article-nav">
+  
+  
+    <a href="/2017/04/23/ARM64IndirectReturn/" id="article-nav-older" class="article-nav-link-wrap">
+      <strong class="article-nav-caption">Older</strong>
+      <div class="article-nav-title">ARM64下Indirect Result Location摸索</div>
+    </a>
+  
+</nav>
+
+  
+</article>
+
+<div id="disqus_thread"></div>
+<script>
+
+/**
+*  RECOMMENDED CONFIGURATION VARIABLES: EDIT AND UNCOMMENT THE SECTION BELOW TO INSERT DYNAMIC VALUES FROM YOUR PLATFORM OR CMS.
+*  LEARN WHY DEFINING THESE VARIABLES IS IMPORTANT: https://disqus.com/admin/universalcode/#configuration-variables*/
+/*
+var disqus_config = function () {
+this.page.url = PAGE_URL;  // Replace PAGE_URL with your page's canonical URL variable
+this.page.identifier = PAGE_IDENTIFIER; // Replace PAGE_IDENTIFIER with your page's unique identifier variable
+};
+*/
+(function() { // DON'T EDIT BELOW THIS LINE
+var d = document, s = d.createElement('script');
+s.src = 'https://satanwoo-2.disqus.com/embed.js';
+s.setAttribute('data-timestamp', +new Date());
+(d.head || d.body).appendChild(s);
+})();
+</script>
+<noscript>Please enable JavaScript to view the <a href="https://disqus.com/?ref_noscript">comments powered by Disqus.</a></noscript>
+                                
+  <section id="comments">
+    <div id="disqus_thread">
+      <noscript>Please enable JavaScript to view the <a href="//disqus.com/?ref_noscript">comments powered by Disqus.</a></noscript>
+    </div>
+  </section>
+</section>
+        
+          <aside id="sidebar">
+  
+    
+  
+    
+  <div class="widget-wrap">
+    <h3 class="widget-title">Tags</h3>
+    <div class="widget">
+      <ul class="tag-list"><li class="tag-list-item"><a class="tag-list-link" href="/tags/Android/">Android</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Growth/">Growth</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/JavaScript/">JavaScript</a><span class="tag-list-count">3</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Math/">Math</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Performance/">Performance</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/R/">R</a><span class="tag-list-count">2</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Reverse-Engineering/">Reverse Engineering</a><span class="tag-list-count">3</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Swift/">Swift</a><span class="tag-list-count">6</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/iOS/">iOS</a><span class="tag-list-count">23</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/shell/">shell</a><span class="tag-list-count">1</span></li></ul>
+    </div>
+  </div>
+
+  
+    
+  <div class="widget-wrap">
+    <h3 class="widget-title">Tag Cloud</h3>
+    <div class="widget tagcloud">
+      <a href="/tags/Android/" style="font-size: 10px;">Android</a> <a href="/tags/Growth/" style="font-size: 10px;">Growth</a> <a href="/tags/JavaScript/" style="font-size: 15px;">JavaScript</a> <a href="/tags/Math/" style="font-size: 10px;">Math</a> <a href="/tags/Performance/" style="font-size: 10px;">Performance</a> <a href="/tags/R/" style="font-size: 12.5px;">R</a> <a href="/tags/Reverse-Engineering/" style="font-size: 15px;">Reverse Engineering</a> <a href="/tags/Swift/" style="font-size: 17.5px;">Swift</a> <a href="/tags/iOS/" style="font-size: 20px;">iOS</a> <a href="/tags/shell/" style="font-size: 10px;">shell</a>
+    </div>
+  </div>
+
+  
+    
+  <div class="widget-wrap">
+    <h3 class="widget-title">Archives</h3>
+    <div class="widget">
+      <ul class="archive-list"><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/06/">June 2017</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/04/">April 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/01/">January 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/10/">October 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/09/">September 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/07/">July 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/05/">May 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/04/">April 2016</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/03/">March 2016</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/02/">February 2016</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/12/">December 2015</a><span class="archive-list-count">6</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/11/">November 2015</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/10/">October 2015</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/09/">September 2015</a><span class="archive-list-count">4</span></li></ul>
+    </div>
+  </div>
+
+  
+    
+  <div class="widget-wrap">
+    <h3 class="widget-title">Recents</h3>
+    <div class="widget">
+      <ul>
+        
+          <li>
+            <a href="/2017/06/01/FBTweak/">从FBTweak 源码剖析一些中阶知识</a>
+          </li>
+        
+          <li>
+            <a href="/2017/04/23/ARM64IndirectReturn/">ARM64下Indirect Result Location摸索</a>
+          </li>
+        
+          <li>
+            <a href="/2017/04/18/CalculateTwoArrayDiff/">快速计算两组数据源的变化的方法 - Doppelganger 源码剖析</a>
+          </li>
+        
+          <li>
+            <a href="/2017/01/07/DispatchGroupCrash/">iOS疑难问题排查之深入探究dispatch_group crash</a>
+          </li>
+        
+          <li>
+            <a href="/2017/01/07/JSONRPCKit/">JSONRPCKit源码解析</a>
+          </li>
+        
+      </ul>
+    </div>
+  </div>
+
+  
+</aside>
+        
+      </div>
+      <footer id="footer">
+  
+  <div class="outer">
+    <div id="footer-info" class="inner">
+      &copy; 2017 John Doe<br>
+      Powered by <a href="http://hexo.io/" target="_blank">Hexo</a>
+    </div>
+  </div>
+</footer>
+    </div>
+    <nav id="mobile-nav">
+  
+    <a href="/" class="mobile-nav-link">Home</a>
+  
+    <a href="/archives" class="mobile-nav-link">Archives</a>
+  
+    <a href="/sitemap.xml" class="mobile-nav-link">map</a>
+  
+</nav>
+    
+<script>
+  var disqus_shortname = 'satanwoo-2';
+  
+  var disqus_url = 'http://satanwoo.github.io/2017/06/01/FBTweak/';
+  
+  (function(){
+    var dsq = document.createElement('script');
+    dsq.type = 'text/javascript';
+    dsq.async = true;
+    dsq.src = '//' + disqus_shortname + '.disqus.com/embed.js';
+    (document.getElementsByTagName('head')[0] || document.getElementsByTagName('body')[0]).appendChild(dsq);
+  })();
+</script>
+
+
+
+  <link rel="stylesheet" href="/fancybox/jquery.fancybox.css" type="text/css">
+  <script src="/fancybox/jquery.fancybox.pack.js" type="text/javascript"></script>
+
+
+<script src="/js/script.js" type="text/javascript"></script>
+
+  </div>
+</body>
+</html>

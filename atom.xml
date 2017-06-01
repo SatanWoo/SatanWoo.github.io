@@ -4,7 +4,7 @@
   
   <link href="/atom.xml" rel="self"/>
   <link href="http://satanwoo.github.io/"/>
-  <updated>2017-04-22T19:18:04.000Z</updated>
+  <updated>2017-06-01T15:46:16.000Z</updated>
   <id>http://satanwoo.github.io/</id>
   
   <author>
@@ -13,6 +13,223 @@
   </author>
   
   <generator uri="http://hexo.io/">Hexo</generator>
+  
+  <entry>
+    <title><![CDATA[从FBTweak 源码剖析一些中阶知识]]></title>
+    <link href="http://satanwoo.github.io/2017/06/01/FBTweak/"/>
+    <id>http://satanwoo.github.io/2017/06/01/FBTweak/</id>
+    <published>2017-06-01T15:43:05.000Z</published>
+    <updated>2017-06-01T15:46:16.000Z</updated>
+    <content type="html"><![CDATA[<p>在开发的过程中，我们进场要做一些类似于参数调整之类的琐碎问题。如果每次都通过<code>CMD + R</code>来编译运行查看效果，浪费的时间真是得不偿失。因此，在看到了<code>FBTweak</code>这个项目以后，就感觉比较有意思，让我们来对这个项目一探究竟。</p>
+<h3 id="晕头转向的宏定义">晕头转向的宏定义</h3><p>打开项目，整个项目非常简单，抛去UI部分，主要使用的主API就是在<code>FBTweakInline.h</code>中的4个宏定义：</p>
+<pre><code><span class="hexcolor">#def</span>ine <span class="function"><span class="title">FBTweakInline</span><span class="params">(category_, collection_, name_, ...)</span></span> _FBTweakInline(category_, collection_, name_, __VA_ARGS__)
+
+<span class="hexcolor">#def</span>ine <span class="function"><span class="title">FBTweakValue</span><span class="params">(category_, collection_, name_, ...)</span></span> _FBTweakValue(category_, collection_, name_, __VA_ARGS__)
+
+<span class="hexcolor">#def</span>ine <span class="function"><span class="title">FBTweakBind</span><span class="params">(object_, property_, category_, collection_, name_, ...)</span></span> _FBTweakBind(object_, property_, category_, collection_, name_, __VA_ARGS__)
+
+<span class="hexcolor">#def</span>ine <span class="function"><span class="title">FBTweakAction</span><span class="params">(category_, collection_, name_, ...)</span></span> _FBTweakAction(category_, collection_, name_, __VA_ARGS__)
+</code></pre><p>看起来很简单，但是随便点一个深入进去看，就会发现如下这些令人头昏脑胀的宏定义。熟悉Facebook开源项目的人可能都知道，它们就好这口。所以在进行整个项目的介绍前，我们先大致分析下各个宏的作用。</p>
+<pre><code>#define __FBTweakConcat_<span class="list">(<span class="keyword">X</span>, Y)</span> X ## Y
+#define __FBTweakConcat<span class="list">(<span class="keyword">X</span>, Y)</span> __FBTweakConcat_<span class="list">(<span class="keyword">X</span>, Y)</span>
+
+#define __FBTweakIndex<span class="list">(<span class="keyword">_1</span>, _2, _3, value, ...)</span> value
+#define __FBTweakIndexCount<span class="list">(...)</span> __FBTweakIndex<span class="list">(<span class="keyword">__VA_ARGS__</span>, <span class="number">3</span>, <span class="number">2</span>, <span class="number">1</span>)</span>
+
+#define __FBTweakDispatch1<span class="list">(<span class="keyword">__withoutRange</span>, __withRange, __withPossible, ...)</span> __withoutRange
+#define __FBTweakDispatch2<span class="list">(<span class="keyword">__withoutRange</span>, __withRange, __withPossible, ...)</span> __withPossible
+#define __FBTweakDispatch3<span class="list">(<span class="keyword">__withoutRange</span>, __withRange, __withPossible, ...)</span> __withRange
+#define _FBTweakDispatch<span class="list">(<span class="keyword">__withoutRange</span>, __withRange, __withPossible, ...)</span> __FBTweakConcat<span class="list">(<span class="keyword">__FBTweakDispatch</span>, __FBTweakIndexCount<span class="list">(<span class="keyword">__VA_ARGS__</span>)</span>)</span><span class="list">(<span class="keyword">__withoutRange</span>, __withRange, __withPossible)</span>
+</code></pre><h4 id="_FBTweakBind">_FBTweakBind</h4><p>我们以<code>_FBTweakBind</code>作为突破口，来进行深入分析。</p>
+<pre><code><span class="hexcolor">#def</span>ine <span class="function"><span class="title">FBTweakBind</span><span class="params">(object_, property_, category_, collection_, name_, ...)</span></span> _FBTweakBind(object_, property_, category_, collection_, name_, __VA_ARGS__)
+</code></pre><p>这个宏包了层皮，就是接受至少5个参数的可变参数，并将参数传递给<code>_FBTweakBind</code>这个宏。在这层定义中，我们看到了<code>...</code>和<code>__VA_ARGS__</code>。</p>
+<p><code>...</code>对于一个宏/函数来说，意味着接受可变参数。这个参数的形参（换句话说，你要使用或者传递给其他函数的载体）就是<code>__VA_ARGS__</code>。</p>
+<p>好，接下来我们看下<code>_FBTweakBind</code>，其定义如下：</p>
+<pre><code><span class="hexcolor">#def</span>ine _FBTweakBind(object_, property_, category_, collection_, name_, ...) _FBTweakDispatch(_FBTweakBindWithoutRange, _FBTweakBindWithRange, _FBTweakBindWithPossible, __VA_ARGS__)(object_, property_, category_, collection_, name_, __VA_ARGS__)
+</code></pre><p>卧槽，一开始看的时候，头大了，怎么两个括号呢？仔细一看，<code>_FBTweakBindWithoutRange</code>，<code>_FBTweakBindWithRange</code>， <code>_FBTweakBindWithPossible</code> 都是不同的宏定义。那么整个<code>_FBTweakBind</code>的作用就是根据可变参数，传递给<code>_FBTweakDispatch</code>，从上述三个宏定义中选择出一个对应的，然后继续调用宏展开。</p>
+<p>好，再看<code>__FBTweakDispatch</code>，如下：</p>
+<pre><code><span class="hexcolor">#def</span>ine _FBTweakDispatch(__withoutRange, __withRange, __withPossible, ...) __FBTweakConcat(__FBTweakDispatch, __FBTweakIndexCount(__VA_ARGS__))(__withoutRange, __withRange, __withPossible)
+</code></pre><p>这个也比较绕，我们继续抽丝剥茧，可以发现，核心的本质就变成：</p>
+<ul>
+<li><code>__FBTweakIndexCount(args)</code> 返回一个具体数字（1、2、3）</li>
+<li><code>__FBTweakConcat(__FBTweakDispatch, 数字)</code> 生成具体的宏定义Token，比如<code>__FBTweakDispatch1</code>，<code>__FBTweakDispatch2</code>之类的。</li>
+<li>利用刚刚的token继续做函数展开。</li>
+</ul>
+<p><b>到这里，整体思路都没啥特别困难的，但是让我有点诧异的如下两个宏定义：</b></p>
+<pre><code><span class="hexcolor">#def</span>ine __FBTweakIndex(_1, _2, _3, value, ...) value
+<span class="hexcolor">#def</span>ine __FBTweakIndexCount(...) __FBTweakIndex(__VA_ARGS__, <span class="number">3</span>, <span class="number">2</span>, <span class="number">1</span>)
+</code></pre><p>我们刚刚提到，<code>__FBTweakIndexCount</code>会根据参数返回具体的数字，那它本质上是依靠<code>__FBTweakIndex</code>去返回第4个参数。（<code>_1, _2, _3</code>就是普通的宏展开占位符，别被骗了，和x, y, z没区别）。</p>
+<p><b>好，这个<code>__FBTweakIndex</code>按定义来说，至少需要<span style="color:red">4个</span>参数，但是我在试了<code>__FBTweakIndexCount()</code>，他竟然也能给返回<span style="color:red">1</span></b>，这就让我懵逼了。</p>
+<p>按照我的理解，当我传递参数为空的时候，<code>__VA_ARGS__</code>就是空，那么宏定义展开的时候，这个应该是不作数的，就导致缺少了一个参数啊？？？</p>
+<p><b style="color:red">后来，我发现我思考错了，我从语法分析的角度去分析了这个宏，但是实际上，宏就是简单的“token”展开！！！</b></p>
+<p>我们再来看看<code>__FBTweakIndex的定义</code>，展开后其实就是要了第4个参数，前面的都没啥用。</p>
+<p>也就是说，我直接写</p>
+<pre><code>__FBTweakIndex(..., <span class="number">1</span>, <span class="number">2</span>, <span class="number">3</span>)<span class="comment">;</span>
+__FBTweakIndex(,, <span class="number">1</span>, <span class="number">2</span>, <span class="number">3</span>)<span class="comment">;</span>
+__FBTweakIndex(, <span class="number">1</span>, <span class="number">2</span>, <span class="number">3</span>)<span class="comment">;</span>
+</code></pre><p>这种虽然没意义的、甚至是直觉上觉得都不能编译通过的代码，都是<strong>合理正确的</strong>。</p>
+<p>是不是有点懵逼，休息一下，消化一下。</p>
+<p>好，我们假设我们获取了数字1，因此，新的宏展开为<code>_FBTweakBindWithoutRange</code>，定义如下：</p>
+<pre><code><span class="number">#def</span>ine <span class="number">_</span>FBTweakBindWithoutRange(<span class="keyword">object</span><span class="number">_</span>, property<span class="number">_</span>, category<span class="number">_</span>, collection<span class="number">_</span>, name<span class="number">_</span>, <span class="annotation">default</span><span class="number">_</span>) \
+((^{ \
+  FBTweak *<span class="number">__</span>bind<span class="number">_</span>tweak = <span class="number">_</span>FBTweakInlineWithoutRange(category<span class="number">_</span>, collection<span class="number">_</span>, name<span class="number">_</span>, <span class="annotation">default</span><span class="number">_</span>); \
+  <span class="number">_</span>FBTweakBindInternal(<span class="keyword">object</span><span class="number">_</span>, property<span class="number">_</span>, category<span class="number">_</span>, collection<span class="number">_</span>, name<span class="number">_</span>, <span class="annotation">default</span><span class="number">_</span>, <span class="number">__</span>bind<span class="number">_</span>tweak); \
+})())
+</code></pre><p>这写法，也是醉了，我以前只是在JavaScript中看到过这样匿名函数自调用的写法，Facebook太强了。</p>
+<p>整个过程继续抽丝剥茧，<code>_FBTweakInlineWithoutRange</code>会调用到如下函数：</p>
+<pre><code><span class="comment">#define _FBTweakInlineWithPossibleInternal(category_, collection_, name_, default_, possible_) \</span>
+((^{ <span class="string">\</span>
+  <span class="comment">/* store the tweak data in the binary at compile time. */</span> <span class="string">\</span>
+  __attribute__((used)) static FBTweakLiteralString category__ = category_; <span class="string">\</span>
+  __attribute__((used)) static FBTweakLiteralString collection__ = collection_; <span class="string">\</span>
+  __attribute__((used)) static FBTweakLiteralString name__ = name_; <span class="string">\</span>
+  __attribute__((used)) static <span class="literal">void</span> *default__ = (__bridge <span class="literal">void</span> *) ^{ <span class="keyword">return</span> default_; }; <span class="string">\</span>
+  __attribute__((used)) static <span class="literal">void</span> *possible__ = (__bridge <span class="literal">void</span> *)  ^{ <span class="keyword">return</span> possible_; }; <span class="string">\</span>
+  __attribute__((used)) static char *encoding__ = (char *)<span class="property">@encode</span>(__typeof__(default_)); <span class="string">\</span>
+  __attribute__((used)) __attribute__((section (FBTweakSegmentName <span class="string">","</span> FBTweakSectionName))) static fb_tweak_entry entry = <span class="string">\</span>
+    { &amp;category__, &amp;collection__, &amp;name__, (<span class="literal">void</span> *)&amp;default__, (<span class="literal">void</span> *)&amp;possible__, &amp;encoding__ }; <span class="string">\</span>
+<span class="string">\</span>
+  <span class="comment">/* find the registered tweak with the given identifier. */</span> <span class="string">\</span>
+  FBTweakStore *store = [FBTweakStore sharedInstance]; <span class="string">\</span>
+  FBTweakCategory *category = [store <span class="attribute">tweakCategoryWithName</span>:category__]; <span class="string">\</span>
+  FBTweakCollection *collection = [category <span class="attribute">tweakCollectionWithName</span>:collection__]; <span class="string">\</span>
+<span class="string">\</span>
+  NSString *identifier = _FBTweakIdentifier(&amp;entry); <span class="string">\</span>
+  FBTweak *__inline_tweak = [collection <span class="attribute">tweakWithIdentifier</span>:identifier]; <span class="string">\</span>
+<span class="string">\</span>
+  <span class="keyword">return</span> __inline_tweak; <span class="string">\</span>
+})())
+</code></pre><p>这里相对来说比较复杂，我们逐个知识点进行查看。</p>
+<pre><code>__attribute__<span class="list">(<span class="list">(<span class="keyword">used</span>)</span>)</span> static FBTweakLiteralString category__ = category_<span class="comment">;</span>
+</code></pre><p>这个前面出来了<code>__attribute__((used))</code>，它的作用是告诉编译器，我声明的这个符号是需要保留的。我们在开发iOS的过程中，常常会遇到有时候会报警告<code>xxx unused</code>，在某些优化的情况下，编译器甚至都不报警告，直接将我们进行了剔除，<b>这样在编译后(预处理、编译、汇编)生成的目标文件里就<span style="color:red">不</span>存在我们这个符号。</b></p>
+<p>继续看这行，又出现了我们新的不熟悉的<code>__attribute__((section (FBTweakSegmentName &quot;,&quot; FBTweakSectionName)))</code></p>
+<pre><code>__attribute__((used)) __attribute__((section (FBTweakSegmentName <span class="string">","</span> FBTweakSectionName))) <span class="keyword">static</span> fb_tweak_entry entry = \
+       { &amp;category__, &amp;collection__, &amp;name__, (<span class="keyword">void</span> *)&amp;default__, (<span class="keyword">void</span> *)&amp;possible__, &amp;encoding__ };
+</code></pre><p>我们知道，iOS里面函数代码一般存在于<code>__TEXT</code>段，数据部分一般存在于<code>__DATA</code>段。但是在每个段中，都存在着许多不同作用的节（section）。比如存储常量字符串的<code>__cfstring</code>等等。</p>
+<p>因此，编译器提供了我们一种<code>__attribute__((section(&quot;xxx段，xxx节&quot;)</code>的方式让我们讲一个指定的数据储存到我们需要的节当中。</p>
+<p><b style="color:red">上述基础知识很容易理解，但是我在实际读代码理解整个运行机制的时候，还是有点懵逼。</b></p>
+<h3 id="令人困惑的指针和数据">令人困惑的指针和数据</h3><p>我们将上章节中的代码简单具象一下：</p>
+<pre><code><span class="keyword">static</span> <span class="built_in">NSString</span> *haha = <span class="string">@"Mingyi"</span>;
+_attribute__((section (<span class="string">"__DATA, MinyiSpecific"</span>))) <span class="keyword">static</span> <span class="built_in">NSString</span> ** entry = &amp;haha;
+</code></pre><p>我们看到，我们将<code>&amp;haha</code>所代表这个数据存入了<code>__DATA</code> Segment的<code>MinyiSpecific</code>Section中。</p>
+<p>但是，<code>&amp;haha</code>的类型是一个<code>NSString **</code>，即指向指针的指针。换句话说，这个指针的指针的背后的含义是<code>haha</code>这个变量本身的地址。我们知道，苹果的程序在加载的过程中都会ASLR地址随机化，那我们对一个地址进行存储，有啥用呢？</p>
+<p><b style="color:red">上述的理解，有个最大的误区，就是从运行时来理解了地址，而不是从编译后的目标文件来理解程序，什么意思呢？</b> </p>
+<p>在我们这里，因为声明了常量字符串@”Mingyi”，在编译(而非程序运行)后，它就存在于可执行文件的<code>cfstring</code>这个节中，如下所示：</p>
+<p><img src="https://github.com/SatanWoo/BeeHive/blob/master/%E5%B1%8F%E5%B9%95%E5%BF%AB%E7%85%A7%202017-06-01%20%E4%B8%8A%E5%8D%881.02.43.png?raw=true" alt=""></p>
+<p>这个数据格式的起始地址偏移为<code>00000001 00003068</code>。</p>
+<p>而由于我们使用的是静态变量<code>haha</code>，在编译后，也会生成一个指向刚刚那个常量字符串地址的数据。这个数据存在于<code>__DATA，__data</code>中，如下图：</p>
+<p><img src="https://github.com/SatanWoo/BeeHive/blob/master/%E5%B1%8F%E5%B9%95%E5%BF%AB%E7%85%A7%202017-06-01%20%E4%B8%8A%E5%8D%881.07.50.png?raw=true" alt=""></p>
+<p>而<code>00000001 00003DC0</code>就是在代码中<code>&amp;haha</code>的含义。</p>
+<p>无论是<code>3068</code>抑或是<code>3DC0</code>，它们的含义都是一个地址偏移，在程序加载运行的过程中，都要进行地址<strong>REBASE</strong>，去获得真正正确地址空间中的数据。但是由于我们的</p>
+<pre><code>_attribute__<span class="list">(<span class="list">(<span class="keyword">section</span> <span class="list">(<span class="string">"__DATA, MinyiSpecific"</span>)</span>)</span>)</span> static NSString ** entry = &amp;haha<span class="comment">;</span>
+</code></pre><p>是一个编译期的行为，因此这行语句的行为表征的还是存储没有rebase之前的相对地址偏移，如下图：</p>
+<p><img src="https://github.com/SatanWoo/BeeHive/blob/master/%E5%B1%8F%E5%B9%95%E5%BF%AB%E7%85%A7%202017-06-01%20%E4%B8%8A%E5%8D%881.11.55.png?raw=true" alt=""></p>
+<p>好，至此，我们才将整个数据存入的部分搞懂。</p>
+<p><strong>注意，iOS是小端序，即数据的高位在低地址。</strong></p>
+<h3 id="镜像数据加载">镜像数据加载</h3><p>说完了数据存储，我们再来看看怎么从编译后的执行文件的节中读取出文件，代码如下：</p>
+<pre><code>  <span class="keyword">static</span> <span class="keyword">uint32_t</span> _tweaksLoaded = <span class="number">0</span>;
+  <span class="keyword">if</span> (OSAtomicTestAndSetBarrier(<span class="number">1</span>, &amp;_tweaksLoaded)) {
+    <span class="keyword">return</span>;
+  }
+
+<span class="preprocessor">#<span class="keyword">ifdef</span> __LP64__</span>
+  <span class="keyword">typedef</span> <span class="keyword">uint64_t</span> fb_tweak_value;
+  <span class="keyword">typedef</span> <span class="keyword">struct</span> section_64 fb_tweak_section;
+  <span class="keyword">typedef</span> <span class="keyword">struct</span> mach_header_64 fb_tweak_header;
+<span class="preprocessor">#<span class="keyword">define</span> fb_tweak_getsectbynamefromheader getsectbynamefromheader_64</span>
+<span class="preprocessor">#<span class="keyword">else</span></span>
+  <span class="keyword">typedef</span> <span class="keyword">uint32_t</span> fb_tweak_value;
+  <span class="keyword">typedef</span> <span class="keyword">struct</span> section fb_tweak_section;
+  <span class="keyword">typedef</span> <span class="keyword">struct</span> mach_header fb_tweak_header;
+<span class="preprocessor">#<span class="keyword">define</span> fb_tweak_getsectbynamefromheader getsectbynamefromheader</span>
+<span class="preprocessor">#<span class="keyword">endif</span></span>
+
+
+  FBTweakStore *store = [FBTweakStore sharedInstance];
+
+  <span class="comment">// 1. 注意点</span>
+  <span class="keyword">uint32_t</span> image_count = _dyld_image_count();
+  <span class="keyword">for</span> (<span class="keyword">uint32_t</span> image_index = <span class="number">0</span>; image_index &lt; image_count; image_index++) {
+    <span class="keyword">const</span> fb_tweak_header *mach_header = (<span class="keyword">const</span> fb_tweak_header *)_dyld_get_image_header(image_index);
+
+    <span class="keyword">unsigned</span> <span class="keyword">long</span> size;
+
+    <span class="comment">// 2.注意点</span>
+    fb_tweak_entry *data = (fb_tweak_entry *)getsectiondata(mach_header, FBTweakSegmentName, FBTweakSectionName, &amp;size);
+    <span class="keyword">if</span> (data == <span class="literal">NULL</span>) {
+      <span class="keyword">continue</span>;
+    }
+    <span class="keyword">size_t</span> count = size / <span class="keyword">sizeof</span>(fb_tweak_entry);
+    <span class="keyword">for</span> (<span class="keyword">size_t</span> i = <span class="number">0</span>; i &lt; count; i++) {
+      fb_tweak_entry *entry = &amp;data[i];
+      FBTweakCategory *category = [store tweakCategoryWithName:*entry-&gt;category];
+      <span class="keyword">if</span> (category == nil) {
+        category = [[FBTweakCategory alloc] initWithName:*entry-&gt;category];
+        [store addTweakCategory:category];
+      }
+
+      FBTweakCollection *collection = [category tweakCollectionWithName:*entry-&gt;collection];
+      <span class="keyword">if</span> (collection == nil) {
+        collection = [[FBTweakCollection alloc] initWithName:*entry-&gt;collection];
+        [category addTweakCollection:collection];
+      }
+
+      NSString *identifier = _FBTweakIdentifier(entry);
+      <span class="keyword">if</span> ([collection tweakWithIdentifier:identifier] == nil) {
+        FBTweak *tweak = _FBTweakCreateWithEntry(identifier, entry);
+
+        <span class="keyword">if</span> (tweak != nil) {
+          [collection addTweak:tweak];
+        }
+      }
+    }
+  }
+}
+</code></pre><ul>
+<li>注意点1:通过dyld获取当前程序加载时候的image个数。什么是image个数呢？你的可执行文件就是一个image。那为什么又会存在多个image呢？如果你平时使用的都是静态库，那么在编译连接完成后，静态库这个scope就不存在了，所有的符号都互相匹配完成。但是呢，苹果自身比如<code>UIKIt</code>之类的库又是动态库，因此，你的可执行文件中会存在多个image。</li>
+</ul>
+<p><img src="https://github.com/SatanWoo/BeeHive/blob/master/%E5%B1%8F%E5%B9%95%E5%BF%AB%E7%85%A7%202017-06-01%20%E4%B8%8A%E5%8D%8811.50.09.png?raw=true" alt=""></p>
+<ul>
+<li>注意点2:读取macho文件中对应的段和节中我们自己储存的数据。</li>
+</ul>
+<h3 id="修改同步映射">修改同步映射</h3><p>我们之前看到，在利用<code>FBTweakBind</code>可以将某个对象的属性和操作进行映射，同步修改。这里的机制看起来很复杂，其实非常简单，就是简单的利用了KVO。</p>
+<p><code>FBTweak</code>就是想要修改的属性，其包含了多个<code>Observer</code>。在<code>FBTweak</code>的<code>currentValue</code>更改后，会利用观察者模式对每个<code>Observer</code>发送属性更新通知。而<code>FBTweak</code>的属性值改变则是和UI界面，利用KVO进行联动修改。</p>
+<p>这里就没什么过于复杂的技术含量了，具体看下<code>FBTweak</code>和<code>_FBTweakColorViewController</code>代码就行。</p>
+<h3 id="其余知识点:">其余知识点:</h3><ul>
+<li><p><code>objc_precise_lifetime</code>的作用  </p>
+<pre><code>__attribute__<span class="list">(<span class="list">(<span class="keyword">objc_precise_lifetime</span>)</span>)</span> id strongObject = _object<span class="comment">;</span>
+</code></pre></li>
+</ul>
+<p>这行代码的作用就是确保ARC不会进行特殊的优化，提前将一些本来认为在Scope最后才释放的对象提前释放了。</p>
+<ul>
+<li><p><code>_Generic</code>是一个编译时的<a href="http://en.cppreference.com/w/c/language/generic" target="_blank" rel="external">泛型选择</a>，他能根据变量的类型兼容来输出不同的结果，比如：</p>
+<pre><code><span class="preprocessor">#<span class="keyword">define</span> cbrt(X) _Generic((X), \</span>
+          <span class="keyword">long</span> <span class="keyword">double</span>: cbrtl, \
+              <span class="keyword">default</span>: cbrt,  \
+<span class="comment">/*for clang*/</span> <span class="keyword">const</span> <span class="keyword">float</span>: cbrtf, \
+                <span class="keyword">float</span>: cbrtf  \
+)(X)
+
+<span class="function"><span class="keyword">int</span> <span class="title">main</span>(<span class="params"><span class="keyword">void</span></span>)
+</span>{
+    <span class="keyword">long</span> <span class="keyword">double</span> x = <span class="number">8.0</span>;
+    <span class="keyword">const</span> <span class="keyword">float</span> y = <span class="number">3.375</span>;
+    printf(<span class="string">"cbrt(8.0) = %Lg\n"</span>, cbrt(x)); <span class="comment">// selects the default cbrt</span>
+    printf(<span class="string">"cbrtf(3.375) = %f\n"</span>, cbrt(y)); <span class="comment">// gcc: converts const float to float,</span>
+                                            <span class="comment">// then selects cbrtf</span>
+                                            <span class="comment">// clang: selects cbrtf for const float</span>
+}
+</code></pre></li>
+</ul>
+<p>上述代码就根据编译器的类型声明，选择不同的函数进行执行。</p>
+]]></content>
+    <summary type="html">
+    <![CDATA[<p>在开发的过程中，我们进场要做一些类似于参数调整之类的琐碎问题。如果每次都通过<code>CMD + R</code>来编译运行查看效果，浪费的时间真是得不偿失。因此，在看到了<code>FBTweak</code>这个项目以后，就感觉比较有意思，让我们来对这个项目一探究竟。]]>
+    </summary>
+    
+      <category term="iOS" scheme="http://satanwoo.github.io/tags/iOS/"/>
+    
+  </entry>
   
   <entry>
     <title><![CDATA[ARM64下Indirect Result Location摸索]]></title>
@@ -2555,309 +2772,6 @@ NSLayoutConstraint *constraint = [NSLayoutConstraint <span class="string">constr
     <summary type="html">
     <![CDATA[<p>在开始这篇文章之前，想必大家都应该使用过Autolayout方式的界面布局，相信大家都有过类似于如下这样的API调用：    </p>
 <pre><code>[NSLayoutConstraint(item: self.viewA, attribute: .CenterY,]]>
-    </summary>
-    
-      <category term="iOS" scheme="http://satanwoo.github.io/tags/iOS/"/>
-    
-  </entry>
-  
-  <entry>
-    <title><![CDATA[重构你的ViewController]]></title>
-    <link href="http://satanwoo.github.io/2015/12/30/Refactor-Mega-ViewController/"/>
-    <id>http://satanwoo.github.io/2015/12/30/Refactor-Mega-ViewController/</id>
-    <published>2015-12-29T16:37:56.000Z</published>
-    <updated>2015-12-29T16:48:37.000Z</updated>
-    <content type="html"><![CDATA[<p>这篇文章来自阅读<a href="https://realm.io/news/andy-matuschak-refactor-mega-controller/" target="_blank" rel="external">Let’s Play: Refactor the Mega Controller!</a></p>
-<p>在该文中，作者阐述了如何使用Swift重构一个臭名昭著的Massive View Controller。从中，我们可以一窥Swift诸多优秀的特性以及如何利用这些特性将ViewController的职责进行解耦。</p>
-<p>但是作者由于时间有限，并没有讲述完全，因此本文是我阅读<a href="https://github.com/andymatuschak/refactor-the-mega-controller" target="_blank" rel="external">源码</a>后的理解。</p>
-<p><strong>建议大家在阅读本文之前，能够先去看看链接中的视频。</strong></p>
-<h3 id="Let’s_get_started">Let’s get started</h3><p>首先我们下载源码，可以看到如下文件：</p>
-<pre><code>-<span class="ruby"> <span class="constant">NavigationController</span>.swift
-</span>-<span class="ruby"> <span class="constant">ViewController</span>.swift
-</span>-<span class="ruby"> <span class="constant">AddViewController</span>.swift</span>
-</code></pre><p>其中，<code>ViewController.swift</code>是项目的核心，代码行数超过<strong>246</strong>行。在这里我要强调一下，并不是代码行数多不好，而是要看你这个职责是不是相关。如果246行都是在实现一个数据结构或者算法，当然可行。但是如果246行里面包含了逻辑业务、网络请求、数据持久化，那必然是可以分离一部分职责出去。</p>
-<p>在本文的<code>ViewController.swift</code>，这个类在初始状态下包含了<code>UITableViewDataSource</code>, <code>UITableViewDelegate</code>, <code>UIViewControllerTransitioningDelegate</code>, <code>UIViewControllerAnimatedTransitioning</code>, <code>NSFetchedResultsController</code>以及一系类跟UI显示相关的代码。</p>
-<h4 id="1-_干掉UINavigationBar相关的内容">1. 干掉UINavigationBar相关的内容</h4><p>作者在app中构建了可变化的NavigationBar，因此bar的样式是根据不同状态进行改变的。原来的逻辑整体写在了<code>ViewController.swift</code>中，如下所示：</p>
-<pre><code> func updateNavigationBar() {
-        <span class="keyword">switch</span> fetchedResultsController!<span class="variable">.fetchedObjects</span>!<span class="variable">.count</span> {
-        <span class="keyword">case</span> <span class="number">0.</span>.<span class="number">.3</span>:
-            navigationController!<span class="variable">.navigationBar</span><span class="variable">.barTintColor</span> = <span class="literal">nil</span>
-            navigationController!<span class="variable">.navigationBar</span><span class="variable">.titleTextAttributes</span> = <span class="literal">nil</span>
-            navigationController!<span class="variable">.navigationBar</span><span class="variable">.tintColor</span> = <span class="literal">nil</span>
-        <span class="keyword">case</span> <span class="number">4.</span>.<span class="number">.9</span>:
-            navigationController!<span class="variable">.navigationBar</span><span class="variable">.barTintColor</span> = <span class="built_in">UIColor</span>(red: <span class="number">235</span>/<span class="number">255</span>, green: <span class="number">156</span>/<span class="number">255</span>, blue: <span class="number">77</span>/<span class="number">255</span>, alpha: <span class="number">1.0</span>)
-            navigationController!<span class="variable">.navigationBar</span><span class="variable">.titleTextAttributes</span> = [<span class="built_in">NSForegroundColorAttributeName</span>: <span class="built_in">UIColor</span><span class="variable">.whiteColor</span>()]
-            navigationController!<span class="variable">.navigationBar</span><span class="variable">.tintColor</span> = <span class="built_in">UIColor</span><span class="variable">.whiteColor</span>()
-        <span class="keyword">default</span>:
-            navigationController!<span class="variable">.navigationBar</span><span class="variable">.barTintColor</span> = <span class="built_in">UIColor</span>(red: <span class="number">248</span>/<span class="number">255</span>, green: <span class="number">73</span>/<span class="number">255</span>, blue: <span class="number">68</span>/<span class="number">255</span>, alpha: <span class="number">1.0</span>)
-            navigationController!<span class="variable">.navigationBar</span><span class="variable">.titleTextAttributes</span> = [<span class="built_in">NSForegroundColorAttributeName</span>: <span class="built_in">UIColor</span><span class="variable">.whiteColor</span>()]
-            navigationController!<span class="variable">.navigationBar</span><span class="variable">.tintColor</span> = <span class="built_in">UIColor</span><span class="variable">.whiteColor</span>()
-        }
-    }
-
-override func preferredStatusBarStyle() -&gt; <span class="built_in">UIStatusBarStyle</span> {
-    <span class="keyword">switch</span> fetchedResultsController?<span class="variable">.fetchedObjects</span>!<span class="variable">.count</span> {
-    <span class="keyword">case</span> <span class="variable">.Some</span>(<span class="number">0.</span>.<span class="number">.3</span>), <span class="variable">.None</span>:
-        <span class="keyword">return</span> <span class="variable">.Default</span>
-    <span class="keyword">case</span> <span class="variable">.Some</span>(_):
-        <span class="keyword">return</span> <span class="variable">.LightContent</span>
-    }
-}
-</code></pre><p>同时，还在几个事件回调的地方，如Core Data的<code>controllerDidChange</code>，调用了<code>setNeedsStatusBarAppearanceUpdate()</code>。</p>
-<p>这个想法粗略想想并没什么问题，因为我们需要根据一系列的事件变化来改变我们的界面样式，这是很明显的业务逻辑。而我们都很清楚，ViewController就是用来写业务逻辑的地方。</p>
-<p>先抛开ViewController是否是应该写业务逻辑的地方这一个有待商榷的论点之外，我们先看看，我们可以如何重构现有代码。</p>
-<p><strong>首先</strong>，<code>updateNavigationBar</code>中多个case中的代码有了重复，因此我们可以将其重构成一个函数，接受三个关于样式的参数，如下：</p>
-<pre><code>func applyTheme(<span class="string">barTintColor:</span>newBarTintColor, <span class="string">tintColor:</span>newTintColor, <span class="string">titleTextAttributes:</span>newTextAttributes) {
-    barTintColor = <span class="string">barTintColor:</span>newBarTintColor
-    tintColor = <span class="string">tintColor:</span>newTintColor
-    titleTextAttributes = <span class="string">titleTextAttributes:</span>newTextAttributes
-}
-</code></pre><p>重构完函数以后，我们发现在多个样式中用到了switch case进行业务逻辑参数转换样式参数的过程。<strong>这说明什么，我们可以将转换逻辑和switch case一起通过Enum进行重构（这里说的东西都是基于你懂Enum）</strong></p>
-<pre><code><span class="keyword">enum</span> NavigationTheme {
-    <span class="keyword">case</span> Normal
-    <span class="keyword">case</span> Warning
-    <span class="keyword">case</span> Doomed
-
-    var statusBarStyle: <span class="built_in">UIStatusBarStyle</span> {
-        <span class="keyword">switch</span> <span class="keyword">self</span> {
-        <span class="keyword">case</span> <span class="variable">.Normal</span>: <span class="keyword">return</span> <span class="variable">.Default</span>
-        <span class="keyword">case</span> <span class="variable">.Warning</span>, <span class="variable">.Doomed</span>: <span class="keyword">return</span> <span class="variable">.LightContent</span>
-        }
-    }
-
-    var barTintColor: <span class="built_in">UIColor</span>? {
-        <span class="keyword">switch</span> <span class="keyword">self</span> {
-        <span class="keyword">case</span> <span class="variable">.Normal</span>:
-            <span class="keyword">return</span> <span class="literal">nil</span>
-        <span class="keyword">case</span> <span class="variable">.Warning</span>:
-            <span class="keyword">return</span> <span class="built_in">UIColor</span>(red: <span class="number">235</span>/<span class="number">255</span>, green: <span class="number">156</span>/<span class="number">255</span>, blue: <span class="number">77</span>/<span class="number">255</span>, alpha: <span class="number">1.0</span>)
-        <span class="keyword">case</span> <span class="variable">.Doomed</span>:
-            <span class="keyword">return</span> <span class="built_in">UIColor</span>(red: <span class="number">248</span>/<span class="number">255</span>, green: <span class="number">73</span>/<span class="number">255</span>, blue: <span class="number">68</span>/<span class="number">255</span>, alpha: <span class="number">1.0</span>)
-        }
-    }
-
-    var titleTextAttributes: [String: <span class="built_in">NSObject</span>]? {
-        <span class="keyword">switch</span> <span class="keyword">self</span> {
-        <span class="keyword">case</span> <span class="variable">.Normal</span>:
-            <span class="keyword">return</span> <span class="literal">nil</span>
-        <span class="keyword">case</span> <span class="variable">.Warning</span>, <span class="variable">.Doomed</span>:
-            <span class="keyword">return</span> [<span class="built_in">NSForegroundColorAttributeName</span>: <span class="built_in">UIColor</span><span class="variable">.whiteColor</span>()]
-        }
-    }
-
-    var tintColor: <span class="built_in">UIColor</span>? {
-        <span class="keyword">switch</span> <span class="keyword">self</span> {
-        <span class="keyword">case</span> <span class="variable">.Normal</span>:
-            <span class="keyword">return</span> <span class="literal">nil</span>
-        <span class="keyword">case</span> <span class="variable">.Warning</span>, <span class="variable">.Doomed</span>:
-            <span class="keyword">return</span> <span class="built_in">UIColor</span><span class="variable">.whiteColor</span>()
-        }
-    }
-}
-
-extension NavigationTheme {
-    init(numberOfImminentTasks: Int) {
-        <span class="keyword">switch</span> numberOfImminentTasks {
-        <span class="keyword">case</span> -Int<span class="variable">.max</span> ... <span class="number">3</span>:
-            <span class="keyword">self</span> = <span class="variable">.Normal</span>
-        <span class="keyword">case</span> <span class="number">4.</span>.<span class="number">.9</span>:
-            <span class="keyword">self</span> = <span class="variable">.Warning</span>
-        <span class="keyword">default</span>:
-            <span class="keyword">self</span> = <span class="variable">.Doomed</span>
-        }
-    }
-}    
-</code></pre><p>由于Enum在swift中是一等公民，因此可以可以在其中构建大量的<strong>Computed Properties</strong>，这些计算变量依赖于当前enum的状态。不仅如此，我们还将之前分散的三种样式，组合成了一个<strong>紧凑的结构体</strong>，大大简化了变量传输。</p>
-<p>重构结束后，我们在<code>Viewcontroller.swift</code>中设置一个计算变量<code>navigationTheme</code>，其的构造函数是之前的<code>fetchedResultsController?.fetchedObjects?.count</code>。</p>
-<p>最后是在相应的事件后触发更新UINavigationBar即可，在本文的视线中，是采用了closure的形式完成：</p>
-<pre><code>navigationThemeDidChangeHandler = { [<span class="keyword">weak</span> <span class="keyword">self</span>] theme <span class="keyword">in</span>
-            <span class="keyword">if</span> <span class="keyword">let</span> navigationController = <span class="keyword">self</span>?.navigationController {
-                navigationController.navigationBar.applyTheme(theme)
-                navigationController.statusBarStyle = theme.statusBarStyle
-            }
-        }
-</code></pre><h3 id="2-_干掉时间相关的转换逻辑">2. 干掉时间相关的转换逻辑</h3><p>相信很多人做app的时候遇到过，服务器返回的是一系列标准时间参数，而你需要将其转换成界面需要的生日、星座、年龄等等，这又是一大堆的业务逻辑。为了解决这种逻辑代码和ViewController的耦合，很多人提出了<code>ViewModel</code>，将部分弱业务逻辑代码剥离出来，单独写在一个地方。</p>
-<p><strong>但是，我需要强调一点，这种形式的剥离，并不能叫ViewModal，而是一个简单的adapter而已。</strong></p>
-<p>在本文中，列表Cell里面需要根据日期距离当前时间的差距显示成昨天、今天、明天等等。因此，其构建了一个单独的的DateFormatter，根据传入的两个Date进行转换，代码如下：</p>
-<pre><code><span class="class"><span class="keyword">struct</span> <span class="title">RelativeTimeDateFormatter</span> </span>{
-    <span class="keyword">let</span> calendar: <span class="type">NSCalendar</span>
-
-    <span class="keyword">init</span>(calendar: <span class="type">NSCalendar</span> = <span class="type">NSCalendar</span>.autoupdatingCurrentCalendar()) {
-        <span class="keyword">self</span>.calendar = calendar
-    }
-
-    <span class="func"><span class="keyword">func</span> <span class="title">stringForDate</span><span class="params">(date: NSDate, relativeToDate baseDate: NSDate)</span></span> -&gt; <span class="type">String</span> {
-        <span class="keyword">var</span> beginningOfDate: <span class="type">NSDate</span>? = <span class="literal">nil</span>
-        <span class="keyword">var</span> beginningOfBaseDate: <span class="type">NSDate</span>? = <span class="literal">nil</span>
-
-        calendar.rangeOfUnit(.<span class="type">Day</span>, startDate: &amp;beginningOfDate, interval: <span class="literal">nil</span>, forDate: date)
-        calendar.rangeOfUnit(.<span class="type">Day</span>, startDate: &amp;beginningOfBaseDate, interval: <span class="literal">nil</span>, forDate: baseDate)
-        <span class="keyword">let</span> numberOfCalendarDaysBetweenDates = calendar.components(<span class="type">NSCalendarUnit</span>.<span class="type">Day</span>, fromDate: beginningOfBaseDate!, toDate: beginningOfDate!, options: <span class="type">NSCalendarOptions</span>()).day
-
-        <span class="keyword">switch</span> numberOfCalendarDaysBetweenDates {
-        <span class="keyword">case</span> -<span class="type">Int</span>.<span class="built_in">max</span> ... -<span class="number">2</span>:
-            <span class="keyword">return</span> <span class="string">"<span class="subst">\(<span class="built_in">abs</span>(numberOfCalendarDaysBetweenDates)</span>) days ago"</span>
-        <span class="keyword">case</span> -<span class="number">1</span>:
-            <span class="keyword">return</span> <span class="string">"Yesterday"</span>
-        <span class="keyword">case</span> <span class="number">0</span>:
-            <span class="keyword">return</span> <span class="string">"Today"</span>
-        <span class="keyword">case</span> <span class="number">1</span>:
-            <span class="keyword">return</span> <span class="string">"Tomorrow"</span>
-        <span class="keyword">default</span>:
-            <span class="keyword">return</span> <span class="string">"In <span class="subst">\(numberOfCalendarDaysBetweenDates)</span> days"</span>
-        }
-    }
-}
-</code></pre><p><strong>这里需要注意的是，NSCalendar的初始化非常耗时，过去在Objective-C时代常常使用dispatch_once构建单例传输，在这里通过结构体中的成员变量维护了一份，作用是同样的。</strong></p>
-<h3 id="3-_干掉NSPredicate">3. 干掉NSPredicate</h3><p>对于NSPredicate，有些人可能还不熟悉，他就是类似于SQLite中的查询语句，只不过其应用范围是CoreData。咦，查询语句还能重构？</p>
-<p>其实在本文中，对于NSPredicate的使用只有原先这一句  <code>fetchRequest.predicate = NSPredicate(format: &quot;dueDate &lt;= %@&quot;, argumentArray: [NSCalendar.currentCalendar().dateByAddingUnit(.Day, value: 10, toDate: NSDate(), options: NSCalendarOptions())!])</code></p>
-<p>这段代码从重复性上来说是不需要重构的。但是，我们可以看到，在这里的构造参数里面，我们还是进行了一定的业务逻辑转换。所以，和DateFormatter一样，我们也可以将这部分所谓为的”弱业务逻辑”代码进行剥离：</p>
-<pre><code>extension NSPredicate {
-    convenience init(forTasksWithinNumberOfDays <span class="string">numberOfDays:</span> Int, ofDate <span class="string">date:</span> NSDate, <span class="string">calendar:</span> NSCalendar = NSCalendar.currentCalendar()) {
-        self.init(<span class="string">format:</span> <span class="string">"dueDate &lt;= %@"</span>, <span class="string">argumentArray:</span> [calendar.dateByAddingUnit(.Day, <span class="string">value:</span> numberOfDays, <span class="string">toDate:</span> date, <span class="string">options:</span> NSCalendarOptions())!])
-    }
-}
-</code></pre><p><strong>除了业务逻辑剥离之外，其实我们也可以看到，在这个NSPredicate的新构造参数，可以接受一个<code>calendar</code>，这对于测试用例编写的依赖注入是非常有好处的。</strong></p>
-<h3 id="4-_Core_Data_Stack">4. Core Data Stack</h3><p>用过Core Data的人都知道，Core Data的使用非常麻烦，需要配置大量的选项，照着苹果源码写的经历相信大家都有过，那恶心的200-300行配置代码，真是么么哒了。</p>
-<p><strong>但是，这几百行代码又是无法省略的</strong>，那该怎么办呢？</p>
-<p>一个比较好的解决方案就<code>Core Data Stack</code>    。意为将CoreData的初始化以及多个NSManagerObjectContext封装进<code>CoreDataStack</code> 维护。 </p>
-<p>在本文中，因为只是使用了一个主线程的NSManagerObjectContext，所以可能读者在阅读源码的时候可能觉得这个重构只是将CoreData配置从View剥离了。但是实际上，使用CoreDataStack可以做到更多，建议大家阅读Github上相关项目。</p>
-<h3 id="5-_干掉NSFetchedResultsControllerDelegate">5. 干掉NSFetchedResultsControllerDelegate</h3><p>NSFetchedResultsController大家可以简单理解为获取CoreData数据的一个中介层。根据传输进入的谓语NSPredicate进行查询，查询结束后通过相应的Delegate事件回调。</p>
-<p>在作者的代码中，作者通过构建<code>manager</code>的方式剥离了NSFetchedResultsController的职责，将NSFetchedResultsController的初始化、回调封装进了<code>UpcomingTaskDataManager.swift</code>中。</p>
-<p><strong>不过值得注意的一点是，尽管作者封装的NSFetchedResultsControllerDelegate的回调，但是为了让调用者可以自定义处理事件，实际上作者还是需要暴露一些的Delegate，当然，新的回调相对来说进行了一定的简化，同时在数据回调时经过了业务转化。</strong></p>
-<pre><code><span class="class"><span class="keyword">protocol</span> <span class="title">UpcomingTaskDataManagerDelegate</span> </span>{
-    <span class="func"><span class="keyword">func</span> <span class="title">dataManagerWillChangeContent</span><span class="params">(dataManager: UpcomingTaskDataManager)</span></span>
-    <span class="func"><span class="keyword">func</span> <span class="title">dataManagerDidChangeContent</span><span class="params">(dataManager: UpcomingTaskDataManager)</span></span>
-    <span class="func"><span class="keyword">func</span> <span class="title">dataManager</span><span class="params">(dataManager: UpcomingTaskDataManager, didInsertRowAtIndexPath indexPath: NSIndexPath)</span></span>
-    <span class="func"><span class="keyword">func</span> <span class="title">dataManager</span><span class="params">(dataManager: UpcomingTaskDataManager, didDeleteRowAtIndexPath indexPath: NSIndexPath)</span></span>
-}
-</code></pre><h3 id="6-_CoreDataModel_&lt;=&gt;_Model">6. CoreDataModel &lt;=&gt; Model</h3><p>这一步是将从Core Data中获取的NSManagedObject Model 转换成业务中使用的Model。为什么要这么做呢？原因有三个：  </p>
-<ul>
-<li>CoreData中的属性一更改，就会触发NSFetchedResultsController，这会很影响性能。</li>
-<li>CoreData中的属性存在很多bug</li>
-<li>NSManagedObject不是一个struct类型，很有可能<strong>误伤</strong></li>
-</ul>
-<pre>
-import CoreData  
-import Foundation
-
-struct Task: Equatable {
-    var id: String
-    var title: String
-    var dueDate: NSDate
-}
-
-func ==(lhs: Task, rhs: Task) -> Bool {
-    return lhs.id == rhs.id && lhs.title == rhs.title && lhs.dueDate == rhs.dueDate
-}
-
-extension Task {
-    init(managedTask: NSManagedObject) {
-        self.id = managedTask.valueForKey("id") as! String
-        self.title = managedTask.valueForKey("title") as! String
-        self.dueDate = managedTask.valueForKey("dueDate") as! NSDate
-    }
-}
-</pre>
-
-<p>作者用以上的Task类型替换了CoreData中的ManagedObject，可以有效的避免以上问题。</p>
-<h3 id="7-封装数据结构">7.封装数据结构</h3><p>在这一步里，我将作者自定义<code>TaskTableViewCell</code>和构建<code>AddCompletionSegue</code>合并到了一块说。</p>
-<p>这两步的重构，看似简单，但是其实也蕴含了一个思想：<strong>类型越确定，编程越容易，运行越安全</strong></p>
-<p>在原文的实现，一开始作者都是通过采用基础的数据结构UITableViewCell和UISegue。这样带来的坏处就是类型不明确导致的职责不明确。对于基础的数据结构，我们常常还要进行类型判断和转换，容易犯错。</p>
-<h3 id="8-干掉UITableViewDelegate和UITableViewDataSource">8.干掉UITableViewDelegate和UITableViewDataSource</h3><p>这一步想必大家都很熟悉了，微博上整天热传了<em>用ViewModel重构你的ViewController</em>经常提及的就是干掉UITableViewDelegate和UITableViewDataSource。</p>
-<p>那说了那么多，我们来看看究竟如何干掉它。</p>
-<p>毫无以为，我们首先要构建一个类型，来实现UITableViewDelegate和DataSource，如下所示：</p>
-<pre><code><span class="comment">// 1. </span>
-<span class="class"><span class="keyword">class</span> <span class="title">UpcomingTaskDataManagerTableViewAdapter</span>&lt;<span class="title">CellType</span>: <span class="title">UITableViewCell</span>&gt;: <span class="title">NSObject</span>, <span class="title">UITableViewDataSource</span>, <span class="title">UpcomingTaskDataManagerDelegate</span> </span>{
-    private <span class="keyword">let</span> tableView: <span class="type">UITableView</span>
-    private <span class="keyword">let</span> upcomingTaskDataManager: <span class="type">UpcomingTaskDataManager</span>
-    private <span class="keyword">let</span> cellReuseIdentifier: <span class="type">String</span>
-    private <span class="keyword">let</span> cellConfigurationHandler: (<span class="type">CellType</span>, <span class="type">Task</span>) -&gt; ()
-    private <span class="keyword">let</span> didChangeHandler: () -&gt; <span class="type">Void</span>
-
-<span class="comment">// .2</span>
-    <span class="keyword">init</span>(tableView: <span class="type">UITableView</span>, upcomingTaskDataManager: <span class="type">UpcomingTaskDataManager</span>, cellReuseIdentifier: <span class="type">String</span>, cellConfigurationHandler: (<span class="type">CellType</span>, <span class="type">Task</span>) -&gt; (), didChangeHandler: () -&gt; <span class="type">Void</span>) {
-        <span class="keyword">self</span>.tableView = tableView
-        <span class="keyword">self</span>.upcomingTaskDataManager = upcomingTaskDataManager
-        <span class="keyword">self</span>.cellReuseIdentifier = cellReuseIdentifier
-        <span class="keyword">self</span>.cellConfigurationHandler = cellConfigurationHandler
-        <span class="keyword">self</span>.didChangeHandler = didChangeHandler
-
-        <span class="keyword">super</span>.<span class="keyword">init</span>()
-    }
-
-<span class="comment">// 3.</span>
-    <span class="func"><span class="keyword">func</span> <span class="title">tableView</span><span class="params">(tableView: UITableView, commitEditingStyle editingStyle: UITableViewCellEditingStyle, forRowAtIndexPath indexPath: NSIndexPath)</span></span> {
-        upcomingTaskDataManager.deleteTask(upcomingTaskDataManager.taskSections[indexPath.section].items[indexPath.row])
-    }
-
-    <span class="func"><span class="keyword">func</span> <span class="title">numberOfSectionsInTableView</span><span class="params">(tableView: UITableView)</span></span> -&gt; <span class="type">Int</span> {
-        <span class="keyword">return</span> upcomingTaskDataManager.taskSections.<span class="built_in">count</span>
-    }
-
-    <span class="func"><span class="keyword">func</span> <span class="title">tableView</span><span class="params">(tableView: UITableView, titleForHeaderInSection section: Int)</span></span> -&gt; <span class="type">String</span>? {
-        <span class="keyword">return</span> upcomingTaskDataManager.taskSections[section].title
-    }
-
-    <span class="func"><span class="keyword">func</span> <span class="title">tableView</span><span class="params">(tableView: UITableView, numberOfRowsInSection section: Int)</span></span> -&gt; <span class="type">Int</span> {
-        <span class="keyword">return</span> upcomingTaskDataManager.taskSections[section].items.<span class="built_in">count</span>
-    }
-
-    <span class="func"><span class="keyword">func</span> <span class="title">tableView</span><span class="params">(tableView: UITableView, cellForRowAtIndexPath indexPath: NSIndexPath)</span></span> -&gt; <span class="type">UITableViewCell</span> {
-        <span class="keyword">let</span> task = upcomingTaskDataManager.taskSections[indexPath.section].items[indexPath.row]
-        <span class="keyword">let</span> cell = tableView.dequeueReusableCellWithIdentifier(cellReuseIdentifier, forIndexPath: indexPath) <span class="keyword">as</span>! <span class="type">CellType</span>
-        cellConfigurationHandler(cell, task)
-        <span class="keyword">return</span> cell
-    }
-</code></pre><ol>
-<li>这个<code>UpcomingTaskDataManagerTableViewAdapter</code>通过传入一个CellType支持泛型。  </li>
-<li>通过接受几个closure来进行自定义的配置，包括cell的样式配置以及tableview数据更新后的回调。  </li>
-<li>实现的UITableViewDataSource</li>
-</ol>
-<p>同样，由于职责的重新分配，我们要将跟<code>TaskManager</code>（包括NSFetchedResultsController）相关的划入到这个adapter中。</p>
-<h3 id="大结局">大结局</h3><p>最后重构后的ViewController，只有<strong>37</strong>代码，效果如下：</p>
-<pre><code><span class="class"><span class="keyword">class</span> <span class="title">ViewController</span>: <span class="title">UITableViewController</span> </span>{
-    <span class="keyword">var</span> navigationThemeDidChangeHandler: ((<span class="type">NavigationTheme</span>) -&gt; <span class="type">Void</span>)?
-    <span class="keyword">var</span> navigationTheme: <span class="type">NavigationTheme</span> {
-        <span class="keyword">return</span> <span class="type">NavigationTheme</span>(numberOfImminentTasks: upcomingTaskDataManager.totalNumberOfTasks)
-    }
-
-    private <span class="keyword">let</span> upcomingTaskDataManager = <span class="type">UpcomingTaskDataManager</span>()
-    private <span class="keyword">var</span> upcomingTaskDataManagerTableViewAdapter: <span class="type">UpcomingTaskDataManagerTableViewAdapter</span>&lt;<span class="type">TaskTableViewCell</span>&gt;!
-
-    <span class="keyword">override</span> <span class="func"><span class="keyword">func</span> <span class="title">viewDidLoad</span><span class="params">()</span></span> {
-        <span class="keyword">super</span>.viewDidLoad()
-
-        upcomingTaskDataManagerTableViewAdapter = <span class="type">UpcomingTaskDataManagerTableViewAdapter</span>(
-            tableView: tableView,
-            upcomingTaskDataManager: upcomingTaskDataManager,
-            cellReuseIdentifier: <span class="string">"Cell"</span>,
-            cellConfigurationHandler: { cell, task <span class="keyword">in</span>
-                cell.viewData = <span class="type">TaskTableViewCell</span>.<span class="type">ViewData</span>(task: task, relativeToDate: <span class="type">NSDate</span>())
-            },
-            didChangeHandler: { [<span class="keyword">weak</span> <span class="keyword">self</span>] <span class="keyword">in</span> <span class="keyword">self</span>?.updateNavigationBar() }
-        )
-        upcomingTaskDataManager.delegate = upcomingTaskDataManagerTableViewAdapter
-        tableView.dataSource = upcomingTaskDataManagerTableViewAdapter
-
-        updateNavigationBar()
-    }
-
-    <span class="keyword">override</span> <span class="func"><span class="keyword">func</span> <span class="title">tableView</span><span class="params">(tableView: UITableView, canEditRowAtIndexPath indexPath: NSIndexPath)</span></span> -&gt; <span class="type">Bool</span> {
-        <span class="keyword">return</span> <span class="literal">true</span>
-    }
-
-    <span class="func"><span class="keyword">func</span> <span class="title">updateNavigationBar</span><span class="params">()</span></span> {
-        navigationThemeDidChangeHandler?(navigationTheme)
-    }
-
-    <span class="preprocessor">@IBAction</span> <span class="func"><span class="keyword">func</span> <span class="title">unwindFromAddController</span><span class="params">(segue: AddCompletionSegue)</span></span> {
-        upcomingTaskDataManager.createTaskWithTitle(segue.taskTitle, dueDate: segue.taskDueDate)
-    }
-}
-</code></pre>]]></content>
-    <summary type="html">
-    <![CDATA[<p>这篇文章来自阅读<a href="https://realm.io/news/andy-matuschak-refactor-mega-controller/" target="_blank" rel="external">Let’s Play: Refactor the ]]>
     </summary>
     
       <category term="iOS" scheme="http://satanwoo.github.io/tags/iOS/"/>
