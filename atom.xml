@@ -4,7 +4,7 @@
   
   <link href="/atom.xml" rel="self"/>
   <link href="http://satanwoo.github.io/"/>
-  <updated>2017-06-01T15:46:16.000Z</updated>
+  <updated>2017-06-13T15:32:57.000Z</updated>
   <id>http://satanwoo.github.io/</id>
   
   <author>
@@ -13,6 +13,251 @@
   </author>
   
   <generator uri="http://hexo.io/">Hexo</generator>
+  
+  <entry>
+    <title><![CDATA[深入剖析Macho (1)]]></title>
+    <link href="http://satanwoo.github.io/2017/06/13/Macho-1/"/>
+    <id>http://satanwoo.github.io/2017/06/13/Macho-1/</id>
+    <published>2017-06-13T15:25:34.000Z</published>
+    <updated>2017-06-13T15:32:57.000Z</updated>
+    <content type="html"><![CDATA[<h3 id="起因">起因</h3><p>最近在公司里和一些同事搞了一些东西，略微底层。于是希望借这个机会好好把<code>Macho</code>相关的知识点梳理下。</p>
+<p>虽然网上关于<code>Macho</code>的文章介绍一大堆，但是我希望能够从<code>Macho</code>的构成，加载过程以及需要了解的相关背景角度去进行分析，每一个点都力图深入。也会在这篇文章最后打造一个类似<code>class-dump</code>的小型工具。</p>
+<h3 id="程序启动加载的过程">程序启动加载的过程</h3><p>当你点击一个icon启动应用程序的时候，系统在内部大致做了如下几件事：</p>
+<ul>
+<li>内核（OS Kernel）创建一个进程，分配虚拟的进程空间等等，加载动态链接器。</li>
+<li>通过动态链接器加载主二进制程序引用的库、绑定符号。</li>
+<li>启动程序</li>
+</ul>
+<p>虽然简要概述很简单，但是有几个需要特别主要的地方：</p>
+<ol>
+<li>二进制程序的格式是怎么样的？内核是如何加载它的？</li>
+<li>内核是如何得知要使用哪种动态链接器的？</li>
+<li>动态链接器和静态链接器的区别是啥？</li>
+<li>程序在运行前究竟要做哪些步骤？顺序是怎么样的？</li>
+</ol>
+<p><strong>带着这些问题，我将一步步来剖析整个过程</strong></p>
+<h3 id="二进制程序格式">二进制程序格式</h3><p>在MacOS或者iOS上可执行的程序格式叫做<code>Macho-O</code>，它的主要成分如下图所示：</p>
+<p><img src="http://cc.cocimg.com/api/uploads/20150122/1421892661838860.gif" alt=""></p>
+<ul>
+<li>一个<code>mach_header</code>标记一些元信息，比如架构、CPU、大小端等等</li>
+<li>多个<code>Load Command</code>告诉你究竟如何加载每个段的信息。</li>
+<li>多个<code>Segement</code>及<code>Section</code>，包含了每个段自身的信息。包括一些数据、代码以及<del>段的执行权限</del>等等。</li>
+</ul>
+<p><strong><div style="color:red">需要注意的是，不仅仅是可执行文件是<code>Macho-O</code>，目标文件(.o)以及动态库，静态库都是<code>Mach-O</code>格式。</div></strong></p>
+<p>所以，下面我们就用64位的定义从每个部分来介绍一下具体的数据结构：</p>
+<h3 id="mach_header_64">mach_header_64</h3><p>这个结构体代表的都是<code>Mach-O</code>文件的一些元信息，它的作用是让内核在读取该文件创建虚拟进程空间的时候，检查文件的合法性以及当前硬件的特性是否能支持程序的运行。</p>
+<p>从源码中可以看出，整个结构题定义如下：</p>
+<pre><code><span class="keyword">struct</span> mach_header_64 {
+    <span class="keyword">uint32_t</span>    magic;        <span class="comment">/* mach magic number identifier */</span>
+    <span class="keyword">cpu_type_t</span>    cputype;    <span class="comment">/* cpu specifier */</span>
+    <span class="keyword">cpu_subtype_t</span>    cpusubtype;    <span class="comment">/* machine specifier */</span>
+    <span class="keyword">uint32_t</span>    filetype;    <span class="comment">/* type of file */</span>
+    <span class="keyword">uint32_t</span>    ncmds;        <span class="comment">/* number of load commands */</span>
+    <span class="keyword">uint32_t</span>    sizeofcmds;    <span class="comment">/* the size of all the load commands */</span>
+    <span class="keyword">uint32_t</span>    flags;        <span class="comment">/* flags */</span>
+    <span class="keyword">uint32_t</span>    reserved;    <span class="comment">/* reserved */</span>
+};
+</code></pre><ul>
+<li><strong>magic</strong> 用于标识当前设备的是大端序还是小端序。如果是<code>0xfeedfacf(MH_MAGIC_64)</code>就是大端序，而<code>0xcffaedfe(MH_CIGAM_64)</code>是小端序，iOS系统上是小端序。</li>
+<li><strong>cputype</strong> 标识CPU的架构，比如ARM，X86，i386等等，进行了宏观划分。</li>
+<li><strong>cpusubtype</strong> 具体的CPU类型，区分不同版本的处理器。</li>
+<li><strong>filetype</strong> 划分之前我们提到的文件类型，比如是可执行文件还是目标文件。</li>
+<li><strong>ncmds</strong> 有几个<code>LoadCommands</code>，每个<code>LoadCommands</code>代表了一种<code>Segment</code>的加载方式。</li>
+<li><strong>sizeofcmds</strong> <code>LoadCommand</code>的大小，主要用于划分Mach-O文件的‘区域’。</li>
+<li><strong>flags</strong> 标记了一些dyld过程中的参数。</li>
+<li><strong>reversed</strong> 没用。</li>
+</ul>
+<p>这里有个比较有意思的问题是，我为了验证大端序小端序的问题的时候，用了MacOS上的计算器进行<br>验证，本质上这应该是个小端序的应用程序，其二进制如下：</p>
+<p><img src="https://github.com/SatanWoo/BeeHive/blob/master/%E5%B1%8F%E5%B9%95%E5%BF%AB%E7%85%A7%202017-06-11%20%E4%B8%8B%E5%8D%883.12.33.png?raw=true" alt="屏幕快照 2017-06-11 下午3.12.33.png"> </p>
+<p>但是在<code>otool</code>和<code>MachoView</code>上看出来都是<code>MH_MAGIC_64</code>，如下所示：</p>
+<p><img src="https://github.com/SatanWoo/BeeHive/blob/master/%E5%B1%8F%E5%B9%95%E5%BF%AB%E7%85%A7%202017-06-11%20%E4%B8%8B%E5%8D%883.13.47.png?raw=true" alt="屏幕快照 2017-06-11 下午3.13.47.png"> </p>
+<p>我擦，这下看了懵逼，难道是我理解错了？于是赶紧翻了下<code>class-dump</code>代码，其解析header部分代码如下：</p>
+<pre><code>// 解析部分代码
+_byteOrder = <span class="type">CDByteOrder_LittleEndian</span>;
+
+<span class="type">CDDataCursor</span> *cursor = [[<span class="type">CDDataCursor</span> alloc] initWithData:data];
+_magic = [cursor readBigInt32];
+<span class="keyword">if</span> (_magic == <span class="type">MH_MAGIC</span> || _magic == <span class="type">MH_MAGIC_64</span>) {
+    _byteOrder = <span class="type">CDByteOrder_BigEndian</span>;
+} <span class="keyword">else</span> <span class="keyword">if</span> (_magic == <span class="type">MH_CIGAM</span> || _magic == <span class="type">MH_CIGAM_64</span>) {
+    _byteOrder = <span class="type">CDByteOrder_LittleEndian</span>;
+} <span class="keyword">else</span> {
+    <span class="keyword">return</span> <span class="keyword">nil</span>;
+}
+
+// readBigInt32的代码
+- (uint32_t)readBigInt32;
+{
+    uint32_t <span class="literal">result</span>;
+
+    <span class="keyword">if</span> (_offset + sizeof(<span class="literal">result</span>) &lt;= [_data length]) {
+        <span class="literal">result</span> = <span class="type">OSReadBigInt32</span>([_data bytes], _offset);
+        _offset += sizeof(<span class="literal">result</span>);
+    } <span class="keyword">else</span> {
+        [<span class="type">NSException</span> <span class="keyword">raise</span>:<span class="type">NSRangeException</span> format:@<span class="string">"Trying to read past end in %s"</span>, __cmd];
+        <span class="literal">result</span> = <span class="number">0</span>;
+    }
+
+    <span class="keyword">return</span> <span class="literal">result</span>;
+}
+</code></pre><p>我们在用LLDB看下<code>_data</code>里面的内容指向的内存地址：</p>
+<pre><code>(lldb) po _<span class="preprocessor">data</span>
+&lt;OS_dispatch_data: <span class="preprocessor">data</span>[<span class="number">0x100600b40</span>] = { leaf, size = <span class="number">199520</span>, <span class="keyword">buf </span>= <span class="number">0x100281000</span> }&gt;
+</code></pre><p>用<code>Xcode Memory</code>看下：</p>
+<p><img src="https://private-alipayobjects.alipay.com/alipay-rmsdeploy-image/skylark/png/15777/7383bc2bce9ed97f.png" alt="屏幕快照 2017-06-11 下午3.25.06.png"> </p>
+<p>看起来是没错的。然后由于MacOSX本身是小端序的，<code>CFFAEDFE</code>这样的数据会被自动解析成<code>FE ED FA CF</code>。所以这样是有问题的。因此，<code>class-dump</code>采用了<code>OSReadBigInt32</code>的方式去解析：</p>
+<pre><code><span class="constant">OS_INLINE</span>
+<span class="constant">UInt32</span>
+<span class="constant">OSReadSwapInt32</span>(
+    volatile void               * base,
+    volatile <span class="constant">UInt</span>                 offset
+)
+{
+    <span class="class"><span class="keyword">union</span> <span class="title">lconv</span> {</span>
+    <span class="constant">UInt32</span> ul;
+    <span class="constant">UInt8</span>  uc[<span class="number">4</span>];
+    } *inp, outv;
+
+    <span class="regexp">//</span> 步骤<span class="number">1</span>
+    inp = (<span class="class"><span class="keyword">union</span> <span class="title">lconv</span> *)((<span class="title">UInt8</span> *)<span class="title">base</span> + <span class="title">offset</span>);</span>
+
+    /<span class="regexp">/ 步骤2
+    outv.uc[0] = inp-&gt;uc[3];
+    outv.uc[1] = inp-&gt;uc[2];
+    outv.uc[2] = inp-&gt;uc[1];
+    outv.uc[3] = inp-&gt;uc[0];
+
+    ／／ 步骤3
+    return (outv.ul);
+}</span>
+</code></pre><p>这个方法会利用<code>union</code>的特性，进行数据交换。我们还是用刚刚的例子来验证：</p>
+<ul>
+<li>步骤1按照默认方式读出数据：<code>FE ED FA CF</code>。</li>
+<li>步骤2进行交换，地址从低到高，分别是<code>FE ED FA CF</code>。</li>
+<li>步骤3利用<code>union</code>的特性，当成一个32的数输出，按照默认小端序解析，会成为<code>CF FA ED FE</code>。也即是<code>MH_CIGAM_64</code>，是小端序。</li>
+</ul>
+<p><strong>其实按照MachoView的解析方式，将<code>MH_CIGAM_64</code>和<code>MH_MAGIC_64</code>理解成MACHO文件和当前平台的编码顺序是否一致更好，如果解析出来是<code>MH_CIGAM_64</code>则表示不一致；否则一致。</strong></p>
+<h3 id="Segment（段）">Segment（段）</h3><p>讲完了<code>Mach-O</code>文件的header部分，我们需要进行Load Commands部分。但是在这之前，我想先大致介绍下Mach-O中的Segment及其下属的Section（节），让大家能更好的理解Load Commands。</p>
+<p>从整体上来说，<code>Mach-O</code>里面包含的段有以下这些：</p>
+<ul>
+<li><strong>__TEXT</strong> 代码段/只读数据段</li>
+<li><strong>__PAGEZERO</strong> Catch访问NULL指针的非法操作的段</li>
+<li><strong>__DATA</strong> 数据段</li>
+<li><strong>__LINKEDIT</strong> 包含需要被动态链接器使用的信息，包括符号表、字符串表、重定位项表等。</li>
+<li><strong>__OBJC</strong> 包含会被<code>Objective Runtime</code>使用到的一些数据。</li>
+</ul>
+<blockquote>
+<p>关于<code>__OBJC</code>这个段，我是一脸懵逼的，从Macho文档上看，他包含了一些编译器私有的节。没有任何公开的资料描述，具体让我研究研究再说。</p>
+</blockquote>
+<h4 id="Section（节）">Section（节）</h4><p>刚刚我们提到的<code>__TEXT</code>和<code>__DATA</code>段都分别有下属的节。</p>
+<p><strong><div style="color:red">之所以按照段-&gt;节的方式组织，是因为同一个段下的节，在内存的权限相同，可以不完全按照页大小进行对齐，节省内存空间。而对外整体暴露段，在装载程序的时候完整映射成一个vma，可以更好的做内存对齐。</div></strong></p>
+<table>
+<thead>
+<tr>
+<th>名称</th>
+<th>作用</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>TEXT.</strong>text</td>
+<td><strong>只有</strong>可执行的机器码</td>
+</tr>
+<tr>
+<td><strong>TEXT.</strong>cstring</td>
+<td>去重后的C字符串</td>
+</tr>
+<tr>
+<td><strong>TEXT.</strong>const</td>
+<td>初始化过的常量</td>
+</tr>
+<tr>
+<td><strong>TEXT.</strong>stubs</td>
+<td>符号桩。本质上是一小段会直接跳入lazybinding的表对应项指针指向的地址的代码。</td>
+</tr>
+<tr>
+<td><strong>TEXT.</strong>stub_helper</td>
+<td>辅助函数。上述提到的lazybinding的表中对应项的指针在没有找到真正的符号地址的时候，都指向这。</td>
+</tr>
+<tr>
+<td><strong>TEXT.</strong>unwind_info</td>
+<td>用于存储处理异常情况信息</td>
+</tr>
+<tr>
+<td><strong>TEXT.</strong>eh_frame</td>
+<td>调试辅助信息</td>
+</tr>
+<tr>
+<td><strong>DATA.</strong>data</td>
+<td>初始化过的可变的数据</td>
+</tr>
+<tr>
+<td><strong>DATA.</strong>nl_symbol_ptr</td>
+<td>非lazy-binding的指针表，每个表项中的指针都指向一个在装载过程中，被动态链机器搜索完成的符号</td>
+</tr>
+<tr>
+<td><strong>DATA.</strong>la_symbol_ptr</td>
+<td>lazy-binding的指针表，每个表项中的指针一开始指向stub_helper</td>
+</tr>
+<tr>
+<td><strong>DATA.</strong>const</td>
+<td>没有初始化过的常量</td>
+</tr>
+<tr>
+<td><strong>DATA.</strong>mod_init_func</td>
+<td>初始化函数，在main之前调用</td>
+</tr>
+<tr>
+<td><strong>DATA.</strong>mod_term_func</td>
+<td>终止函数，在main返回之后调用</td>
+</tr>
+<tr>
+<td><strong>DATA.</strong>bss</td>
+<td>没有初始化的静态变量</td>
+</tr>
+<tr>
+<td><strong>DATA.</strong>common</td>
+<td>没有初始化过的符号声明</td>
+</tr>
+</tbody>
+</table>
+<p>其中，比较难以理解的可能是<code>__la_symbol_ptr</code>，让我们还是来以计算器的例子来理解：</p>
+<ul>
+<li>我们先从MachoView上找一个<code>stub</code>，比如[xxxx -&gt; _CFRelease]。</li>
+<li>其数据是<strong>FF256A7C0000</strong>，结合这个节是在__TEXT段中，我猜测是应该一段汇编代码的16进制表示。</li>
+</ul>
+<p><img src="https://github.com/SatanWoo/BeeHive/blob/master/%E5%B1%8F%E5%B9%95%E5%BF%AB%E7%85%A7%202017-06-12%20%E4%B8%8A%E5%8D%8810.48.21.png?raw=true" alt="屏幕快照 2017-06-12 上午10.48.21.png"> </p>
+<ul>
+<li>从Hopper中打开，查看对应偏移量的stub含义：</li>
+</ul>
+<p><img src="https://github.com/SatanWoo/BeeHive/blob/master/%E5%B1%8F%E5%B9%95%E5%BF%AB%E7%85%A7%202017-06-12%20%E4%B8%8A%E5%8D%8810.40.50.png?raw=true" alt="屏幕快照 2017-06-12 上午10.40.50.png"> </p>
+<p>我们可以看到这段代码的16进制表达就是：</p>
+<p><img src="https://github.com/SatanWoo/BeeHive/blob/master/%E5%B1%8F%E5%B9%95%E5%BF%AB%E7%85%A7%202017-06-13%20%E4%B8%8B%E5%8D%883.47.50.png?raw=true" alt="屏幕快照 2017-06-13 下午3.47.50.png"> </p>
+<p>从上图不难看出，stub的含义就是跳转到以<code>__la_symbol_ptr</code>对应表项数据所指向地址的代码。</p>
+<ul>
+<li>跳入以后，我们可以看到如下代码：</li>
+</ul>
+<p><img src="https://github.com/SatanWoo/BeeHive/blob/master/%E5%B1%8F%E5%B9%95%E5%BF%AB%E7%85%A7%202017-06-12%20%E4%B8%8A%E5%8D%8810.41.02.png?raw=true" alt="屏幕快照 2017-06-12 上午10.41.02.png"> </p>
+<p>可以看到，在还没加载程序的时候，对应表项的数据还是<code>dq _CFRelease</code>。双击点进去看一下：</p>
+<p><img src="https://github.com/SatanWoo/BeeHive/blob/master/%E5%B1%8F%E5%B9%95%E5%BF%AB%E7%85%A7%202017-06-13%20%E4%B8%8B%E5%8D%883.51.34.png?raw=true" alt="屏幕快照 2017-06-13 下午3.51.34.png"> </p>
+<p>这里显示的应该是有点问题，如果全0的话是不可能使用lazy binding的。</p>
+<p>我们还是用MachOView来看一下：</p>
+<p><img src="https://github.com/SatanWoo/BeeHive/blob/master/%E5%B1%8F%E5%B9%95%E5%BF%AB%E7%85%A7%202017-06-13%20%E4%B8%8B%E5%8D%884.04.04.png?raw=true" alt="屏幕快照 2017-06-13 下午4.04.04.png"> </p>
+<p>跳转到这个地址看看，没错了，处于stub_helper节里了：</p>
+<p><img src="https://github.com/SatanWoo/BeeHive/blob/master/%E5%B1%8F%E5%B9%95%E5%BF%AB%E7%85%A7%202017-06-13%20%E4%B8%8B%E5%8D%884.04.28.png?raw=true" alt="屏幕快照 2017-06-13 下午4.04.28.png"> </p>
+<p><img src="https://github.com/SatanWoo/BeeHive/blob/master/%E5%B1%8F%E5%B9%95%E5%BF%AB%E7%85%A7%202017-06-13%20%E4%B8%8B%E5%8D%884.04.33.png?raw=true" alt="屏幕快照 2017-06-13 下午4.04.33.png"> </p>
+<blockquote>
+<p><code>__la_symbol_ptr</code> 里面所有表项的数据都会被bind成<code>dyld_stub_helper</code>。</p>
+</blockquote>
+]]></content>
+    <summary type="html">
+    <![CDATA[<h3 id="起因">起因</h3><p>最近在公司里和一些同事搞了一些东西，略微底层。于是希望借这个机会好好把<code>Macho</code>相关的知识点梳理下。</p>
+<p>虽然网上关于<code>Macho</code>的文章介绍一大堆，但是我希望能够从<code>]]>
+    </summary>
+    
+      <category term="iOS" scheme="http://satanwoo.github.io/tags/iOS/"/>
+    
+  </entry>
   
   <entry>
     <title><![CDATA[从FBTweak 源码剖析一些中阶知识]]></title>
@@ -2538,240 +2783,6 @@ selectedTitleLabelsContentView<span class="class">.layer</span><span class="clas
 ]]></content>
     <summary type="html">
     <![CDATA[<p>DGRunKeeperSwitch是非常有趣的自定义的<em>Segment Control</em>的实现，从其Github上的展现效果来看，可以发现在 <em>同一个</em> UILabel中的文本竟然可以展现出两种不同的颜色，是不是很奇妙？今天就让我们来看看它是如何]]>
-    </summary>
-    
-      <category term="iOS" scheme="http://satanwoo.github.io/tags/iOS/"/>
-    
-  </entry>
-  
-  <entry>
-    <title><![CDATA[PureLayout 源码解析]]></title>
-    <link href="http://satanwoo.github.io/2016/02/05/PureLayout/"/>
-    <id>http://satanwoo.github.io/2016/02/05/PureLayout/</id>
-    <published>2016-02-05T14:33:20.000Z</published>
-    <updated>2016-02-05T14:34:46.000Z</updated>
-    <content type="html"><![CDATA[<p>在开始这篇文章之前，想必大家都应该使用过Autolayout方式的界面布局，相信大家都有过类似于如下这样的API调用：    </p>
-<pre><code>[NSLayoutConstraint(item: self.viewA, attribute: .CenterY, relatedBy: .Equal, toItem: self.viewB, attribute: .CenterY, multiplier: <span class="number">1.0</span>, constant: <span class="number">0.0</span>)]
-</code></pre><p>抑或是Visual Format Language</p>
-<pre><code>NSLayoutConstraint.constraintsWithVisualFormat(<span class="string">"|-(leftPadding)-[imageView(imageViewWidth)]-(rigntPadding)-[labelA]-(4)-[labelB]-(&gt;=44)-|"</span>, <span class="string">options:</span> NSLayoutFormatOptions(<span class="string">rawValue:</span> <span class="number">0</span>), <span class="string">metrics:</span> methics, <span class="string">views:</span> views)
-</code></pre><p>这种冗长而又晦涩的代码，真是恶心人啊。因此在Github上涌现了一大堆简化布局的开源库，如SnapKit, Mansory以及今天我们要说的PureLayout。  </p>
-<p>在这之中，PureLayout是最轻量级的，它仅仅是对Autolayout现成的语法进行了一层封装，相较于Mansory引入的一些<strong>新概念</strong>，Purelayout更直接易懂。</p>
-<h3 id="源码解析">源码解析</h3><p>Purelayout的源码基本没什么难懂的地方，我们首先来看一下其项目结构：</p>
-<ul>
-<li>PurelayoutDefines.h</li>
-<li>ALView + PureLayout.h/.m</li>
-<li>NSArray + PureLayout.h/.m</li>
-<li>NSLayoutConstraint + Purelayout.h/.m</li>
-</ul>
-<h4 id="PurelayoutDefines">PurelayoutDefines</h4><p>首先从PurelayoutDefines上入手，这个文件主要是进行一些类似<strong>Domain Specific Language</strong>定义的转化，如：</p>
-<pre><code>typedef NS_ENUM(NSInteger, ALEdge) {
-    /** The <span class="built_in">left</span> edge of the view. */
-    ALEdgeLeft = NSLayoutAttributeLeft,
-    /** The <span class="built_in">right</span> edge of the view. */
-    ALEdgeRight = NSLayoutAttributeRight,
-    /** The top edge of the view. */
-    ALEdgeTop = NSLayoutAttributeTop,
-    /** The bottom edge of the view. */
-    ALEdgeBottom = NSLayoutAttributeBottom,
-    /** The leading edge of the view (<span class="built_in">left</span> edge <span class="keyword">for</span> <span class="built_in">left</span>-<span class="keyword">to</span>-<span class="built_in">right</span> languages like English, <span class="built_in">right</span> edge <span class="keyword">for</span> <span class="built_in">right</span>-<span class="keyword">to</span>-<span class="built_in">left</span> languages like Arabic). */
-    ALEdgeLeading = NSLayoutAttributeLeading,
-    /** The trailing edge of the view (<span class="built_in">right</span> edge <span class="keyword">for</span> <span class="built_in">left</span>-<span class="keyword">to</span>-<span class="built_in">right</span> languages like English, <span class="built_in">left</span> edge <span class="keyword">for</span> <span class="built_in">right</span>-<span class="keyword">to</span>-<span class="built_in">left</span> languages like Arabic). */
-    ALEdgeTrailing = NSLayoutAttributeTrailing
-};
-</code></pre><p>上述这段代码，就是将传统的UIKit中的NSLayoutAttribute的枚举类型全部转换成对应的PureLayout中的定义，如ALEdgeRight对应到NSLayoutAttributeRight。</p>
-<p><strong>LayoutMargins</strong><br>在这里补充一点题外知识，在iOS8中，苹果为Autolayout引入了LayoutMargins这一概念。这个概念乍一听可能都不了解，但是大家回忆下，比如在Storyboard中，我们拖拽一个UIView到ViewController的view并设置边距的时候，上边距和下边距对应的限制都是layout guide，如下图所示：</p>
-<p><img src="http://7lrzqz.com1.z0.glb.clouddn.com/%E5%B1%8F%E5%B9%95%E5%BF%AB%E7%85%A7%202016-01-26%20%E4%B8%8B%E5%8D%882.55.37.png" alt=""></p>
-<p><img src="http://7lrzqz.com1.z0.glb.clouddn.com/%E5%B1%8F%E5%B9%95%E5%BF%AB%E7%85%A7%202016-01-26%20%E4%B8%8B%E5%8D%882.56.23.png" alt=""><br><img src="http://7lrzqz.com1.z0.glb.clouddn.com/%E5%B1%8F%E5%B9%95%E5%BF%AB%E7%85%A7%202016-01-26%20%E4%B8%8B%E5%8D%882.56.13.png" alt=""></p>
-<p><strong>简单来说，在iOS7上就已经存在了LayoutMargin了，当时的作用是用来限制view的真实内容不会被UINavigationBar（上部）以及UIToolbar（下部）所遮盖</strong>。而从iOS8中开始，苹果将这一技术引入到了任意一个UIView中。</p>
-<h4 id="ALView_+_Purelayout">ALView + Purelayout</h4><p><strong>ALView实际上是UIView或者NSView的别名，通过添加ALView的分类，可以通过Define在编译期进行替换，避免为NSView和UIView各创建一份重复的代码</strong>。这个类中的API过多，因此我们以轴对齐为典型的例子来分解下源码：</p>
-<ol>
-<li>轴对齐<br>在PureLayout中，包括<code>Vertical</code>, <code>Horizontal</code>, <code>Baseline</code>等几种轴对齐方式，其中Baseline指的是View中潜在包含文字的Baseline。</li>
-</ol>
-<p>好，我们来看看相关的API</p>
-<pre><code><span class="comment">/** Aligns an axis of the view to the same axis of another view. */</span>
-<span class="tag">-</span> (<span class="tag">NSLayoutConstraint</span> *)<span class="rule"><span class="attribute">autoAlignAxis</span>:<span class="value">(ALAxis)axis toSameAxisOfView:(ALView *)otherView</span></span>;
-</code></pre><p>从该API的名称，我们可以直观的感觉出其作用是用于将两个View按照同一个轴对齐。这个API是一个<strong>Convenience Init</strong>，其层层传递</p>
-<pre><code>- (NSLayoutConstraint *)<span class="string">autoAlignAxis:</span>(ALAxis)axis <span class="string">toSameAxisOfView:</span>(ALView *)otherView
-{
-    <span class="keyword">return</span> [self <span class="string">autoAlignAxis:</span>axis <span class="string">toSameAxisOfView:</span>otherView <span class="string">withOffset:</span><span class="number">0.0</span>];
-}
-
-- (NSLayoutConstraint *)<span class="string">autoAlignAxis:</span>(ALAxis)axis <span class="string">toSameAxisOfView:</span>(ALView *)otherView <span class="string">withOffset:</span>(CGFloat)offset
-{
-    <span class="keyword">return</span> [self <span class="string">autoConstrainAttribute:</span>(ALAttribute)axis <span class="string">toAttribute:</span>(ALAttribute)axis <span class="string">ofView:</span>otherView <span class="string">withOffset:</span>offset];
-}
-</code></pre><p>最后调用了</p>
-<pre><code><span class="pp">- <span class="params">(<span class="variable">NSLayoutConstraint</span> *)</span>autoConstrainAttribute:<span class="params">(<span class="variable">ALAttribute</span>)</span>attribute toAttribute:<span class="params">(<span class="variable">ALAttribute</span>)</span>toAttribute ofView:<span class="params">(<span class="variable">ALView</span> *)</span>otherView withOffset:<span class="params">(<span class="variable">CGFloat</span>)</span>offset`</span>
-</code></pre><p>好，那就让我们来看看这个上述这个函数的实现，如下所示：</p>
-<pre><code><span class="comment">//1.</span>
-self.translatesAutoresizingMaskIntoConstraints = NO;
-
-<span class="comment">//2.</span>
-NSLayoutAttribute layoutAttribute = [NSLayoutConstraint <span class="string">al_layoutAttributeForAttribute:</span>attribute];
-NSLayoutAttribute toLayoutAttribute = [NSLayoutConstraint <span class="string">al_layoutAttributeForAttribute:</span>toAttribute];
-
-<span class="comment">//3.</span>
-NSLayoutConstraint *constraint = [NSLayoutConstraint <span class="string">constraintWithItem:</span>self <span class="string">attribute:</span>layoutAttribute <span class="string">relatedBy:</span>relation <span class="string">toItem:</span>otherView <span class="string">attribute:</span>toLayoutAttribute <span class="string">multiplier:</span><span class="number">1.0</span> <span class="string">constant:</span>offset];
-
-<span class="comment">//4.</span>
-[constraint autoInstall];
-<span class="keyword">return</span> constraint;
-</code></pre><ul>
-<li>1.首先将translatesAutoresizingMaskIntoConstraints设置为false，对于要使用autolayout的UIView，必须设置为false，也就是不将传统frame布局中的Autoresizing Mask转换成约束。</li>
-<li>2.根据传入的<strong>PureLayout属性</strong>转换成对应的NSLayoutAttribute</li>
-<li>3.调用冗长恶心的Autolayout API构建约束</li>
-<li>4.添加约束</li>
-</ul>
-<p>在这里，我们需要注意一下这个<code>[constraint autoInstall]</code>，让我们来探一探实现：</p>
-<pre><code>- (<span class="keyword">void</span>)autoInstall
-{
-<span class="comment">// 1. iOS8+</span>
-<span class="preprocessor">#if __PureLayout_MinBaseSDK_iOS_8_0 || __PureLayout_MinBaseSDK_OSX_10_10</span>
-    <span class="keyword">if</span> ([<span class="keyword">self</span> respondsToSelector:<span class="keyword">@selector</span>(setActive:)]) {
-        [<span class="built_in">NSLayoutConstraint</span> al_applyGlobalStateToConstraint:<span class="keyword">self</span>];
-        <span class="comment">// 1.1</span>
-        <span class="keyword">if</span> ([<span class="built_in">NSLayoutConstraint</span> al_preventAutomaticConstraintInstallation]) {         
-            [[<span class="built_in">NSLayoutConstraint</span> al_currentArrayOfCreatedConstraints] addObject:<span class="keyword">self</span>];
-        } <span class="keyword">else</span> {
-        <span class="comment">// 1.2 </span>
-            <span class="keyword">self</span><span class="variable">.active</span> = <span class="literal">YES</span>;
-        }
-        <span class="keyword">return</span>;
-    }
-<span class="preprocessor">#endif /* __PureLayout_MinBaseSDK_iOS_8_0 || __PureLayout_MinBaseSDK_OSX_10_10 */</span>
-
-<span class="comment">// 2. iOS 7</span>
-    <span class="built_in">NSAssert</span>(<span class="keyword">self</span><span class="variable">.firstItem</span> || <span class="keyword">self</span><span class="variable">.secondItem</span>, <span class="string">@"Can't install a constraint with nil firstItem and secondItem."</span>);
-    <span class="keyword">if</span> (<span class="keyword">self</span><span class="variable">.firstItem</span>) {
-        <span class="keyword">if</span> (<span class="keyword">self</span><span class="variable">.secondItem</span>) {
-            <span class="built_in">NSAssert</span>([<span class="keyword">self</span><span class="variable">.firstItem</span> isKindOfClass:[ALView class]] &amp;&amp; [<span class="keyword">self</span><span class="variable">.secondItem</span> isKindOfClass:[ALView class]], <span class="string">@"Can only automatically install a constraint if both items are views."</span>);
-            ALView *commonSuperview = [<span class="keyword">self</span><span class="variable">.firstItem</span> al_commonSuperviewWithView:<span class="keyword">self</span><span class="variable">.secondItem</span>];
-            [commonSuperview al_addConstraint:<span class="keyword">self</span>];
-        } <span class="keyword">else</span> {
-            <span class="built_in">NSAssert</span>([<span class="keyword">self</span><span class="variable">.firstItem</span> isKindOfClass:[ALView class]], <span class="string">@"Can only automatically install a constraint if the item is a view."</span>);
-            [<span class="keyword">self</span><span class="variable">.firstItem</span> al_addConstraint:<span class="keyword">self</span>];
-        }
-    } <span class="keyword">else</span> {
-        <span class="built_in">NSAssert</span>([<span class="keyword">self</span><span class="variable">.secondItem</span> isKindOfClass:[ALView class]], <span class="string">@"Can only automatically install a constraint if the item is a view."</span>);
-        [<span class="keyword">self</span><span class="variable">.secondItem</span> al_addConstraint:<span class="keyword">self</span>];
-    }
-}
-</code></pre><p>整个实现的部分被一分为二，上半部分专门针对iOS8+的，下半部分针对iOS7（<strong>事实上在整个PureLayout的设计中，大部分地方的处理方式都一分为二了</strong>）</p>
-<p>我们暂时也不管<code>al_applyGlobalStateToConstraint:self</code> 以及 <code>al_preventAutomaticConstraintInstallation</code>的作用，我们从1.2看起。</p>
-<ul>
-<li>在iOS8上，启用或者禁用一个AutoLayout的Constraint变得更加容易了，仅仅需要设置active即可</li>
-<li>在iOS7上，需要手动的addConstraint或者removeConstraint</li>
-<li>在处理iOS7的逻辑当中，需要判断当前这个Constraint是否是针对两个Item的，如果是，找到他们的公共父View，在父View在添加约束，比如添加View A和View B之间的间距；而如果是单一一个View，比如是设置高度或者宽度的，直接在当前View添加即可。</li>
-<li>通过调用<code>al_addConstraint</code>进行约束实际的添加。</li>
-</ul>
-<p>而<strong>al_addConstraint</strong>的实现则如下所示：</p>
-<pre><code><span class="attr_selector">[NSLayoutConstraint al_applyGlobalStateToConstraint:constraint]</span>;
-<span class="tag">if</span> ([NSLayoutConstraint al_preventAutomaticConstraintInstallation]) {
-    <span class="attr_selector">[[NSLayoutConstraint al_currentArrayOfCreatedConstraints]</span> <span class="tag">addObject</span><span class="pseudo">:constraint</span>];
-} <span class="tag">else</span> {
-    <span class="attr_selector">[self addConstraint:constraint]</span>;
-}
-</code></pre><p>这里又出现了<code>al_applyGlobalStateToConstraint:constraint</code>以及<code>al_preventAutomaticConstraintInstallation</code>了，这次我们可不能再躲着它了，赶紧瞧一瞧。</p>
-<p>首先是<code>al_applyGlobalStateToConstraint:constraint</code>，这个参数对应的是一个全局静态变量，用于判断：</p>
-<pre><code><span class="keyword">if</span> ([<span class="built_in">NSLayoutConstraint</span> al_isExecutingPriorityConstraintsBlock]) {
-    constraint<span class="variable">.priority</span> = [<span class="built_in">NSLayoutConstraint</span> al_currentGlobalConstraintPriority];
-}
-</code></pre><p>而这个<code>al_isExecutingPriorityConstraintsBlock</code>则是用于如下这个函数：</p>
-<pre><code>+ (void)autoSetPriority:(ALLayoutPriority)priority forConstraints:(ALConstraintsBlock)<span class="keyword">block
-</span>{
-    NSAssert(<span class="keyword">block, </span><span class="comment">@"The constraints block cannot be nil.");</span>
-    <span class="preprocessor">if</span> (<span class="keyword">block) </span>{
-        [[<span class="keyword">self </span>al_globalConstraintPriorities] <span class="keyword">addObject:@(priority)];
-</span>        <span class="keyword">block();
-</span>        [[<span class="keyword">self </span>al_globalConstraintPriorities] removeLastObject]<span class="comment">;</span>
-    }
-}
-</code></pre><p>这里可能大家有点晦涩，主要在于PureLayout对于给Constraint设置Priority定义了一个Block-based的方法，也就是<code>autoSetPriority</code>。在回调的Block中，可以对多个Constraint设置同一个大小的Priority。（<strong>其实我也不是很理解这个集体加Priority设计的目的</strong>）</p>
-<p><strong>不过需要有一点可以肯定的是，设置Constraint的Priority的时机一定要在<code>addConstraint</code>或者<code>active = true</code>之前</strong></p>
-<p>而对于<code>al_preventAutomaticConstraintInstallation</code>这个变量，作者在API中描述了如下一段话：</p>
-<blockquote>Creates all of the constraints in the block, then installs (activates) them all at once.<br> All constraints created from calls to the PureLayout API in the block are returned in a single array.<br> This may be more efficient than installing (activating) each constraint one-by-one.</blockquote>
-
-<p>简而言之，一次性添加所有约束（实际上调用了UIKit的API<code>activateConstraints</code>），比一个个添加要有效率。<strong>然而，Purelayout的这个特性对于iOS7来说，用不上，只能通过<code>addConstraint</code>一个个装，哈哈，么么哒</strong></p>
-<h4 id="NSArray_+_Purelayout">NSArray + Purelayout</h4><p>说完了ALView的layout，我们接下来说说另外的NSArray + Purelayout。顾名思义，该分类的主要目的就是给一个NSArray中的所有UIView添加约束。</p>
-<p>比如这个API：</p>
-<pre><code>- <span class="list">(<span class="keyword">__NSArray_of</span><span class="list">(<span class="keyword">NSLayoutConstraint</span> <span class="variable">*) *</span>)</span>autoDistributeViewsAlongAxis:<span class="list">(<span class="keyword">ALAxis</span>)</span>axis
-                                                           alignedTo:<span class="list">(<span class="keyword">ALAttribute</span>)</span>alignment
-                                                    withFixedSpacing:<span class="list">(<span class="keyword">CGFloat</span>)</span>spacing
-                                                        insetSpacing:<span class="list">(<span class="keyword">BOOL</span>)</span>shouldSpaceInsets
-                                                        matchedSizes:<span class="list">(<span class="keyword">BOOL</span>)</span>shouldMatchSizes</span>
-</code></pre><p>其实现如下：</p>
-<pre><code><span class="built_in">NSAssert</span>([<span class="keyword">self</span> al_containsMinimumNumberOfViews:<span class="number">1</span>], <span class="string">@"This array must contain at least 1 view to distribute."</span>);
-
-<span class="comment">//1. 第一部分</span>
-    ALDimension matchedDimension;
-    ALEdge firstEdge, lastEdge;
-    <span class="keyword">switch</span> (axis) {
-        <span class="keyword">case</span> ALAxisHorizontal:
-        <span class="keyword">case</span> ALAxisBaseline: <span class="comment">// same value as ALAxisLastBaseline</span>
-<span class="preprocessor">#if __PureLayout_MinBaseSDK_iOS_8_0</span>
-        <span class="keyword">case</span> ALAxisFirstBaseline:
-<span class="preprocessor">#endif /* __PureLayout_MinBaseSDK_iOS_8_0 */</span>
-            matchedDimension = ALDimensionWidth;
-            firstEdge = ALEdgeLeading;
-            lastEdge = ALEdgeTrailing;
-            <span class="keyword">break</span>;
-        <span class="keyword">case</span> ALAxisVertical:
-            matchedDimension = ALDimensionHeight;
-            firstEdge = ALEdgeTop;
-            lastEdge = ALEdgeBottom;
-            <span class="keyword">break</span>;
-        <span class="keyword">default</span>:
-            <span class="built_in">NSAssert</span>(<span class="literal">nil</span>, <span class="string">@"Not a valid ALAxis."</span>);
-            <span class="keyword">return</span> <span class="literal">nil</span>;
-    }
-    <span class="built_in">CGFloat</span> leadingSpacing = shouldSpaceInsets ? spacing : <span class="number">0.0</span>;
-    <span class="built_in">CGFloat</span> trailingSpacing = shouldSpaceInsets ? spacing : <span class="number">0.0</span>;
-
-<span class="comment">//2. 第二部分  </span>
-    __<span class="built_in">NSMutableArray_of</span>(<span class="built_in">NSLayoutConstraint</span> *) *constraints = [<span class="built_in">NSMutableArray</span> new];
-    ALView *previousView = <span class="literal">nil</span>;
-    <span class="keyword">for</span> (<span class="keyword">id</span> object <span class="keyword">in</span> <span class="keyword">self</span>) {
-        <span class="keyword">if</span> ([object isKindOfClass:[ALView class]]) {
-            ALView *view = (ALView *)object;
-            view<span class="variable">.translatesAutoresizingMaskIntoConstraints</span> = <span class="literal">NO</span>;
-            <span class="keyword">if</span> (previousView) {
-                <span class="comment">// Second, Third, ... View</span>
-                [constraints addObject:[view autoPinEdge:firstEdge toEdge:lastEdge ofView:previousView withOffset:spacing]];
-                <span class="keyword">if</span> (shouldMatchSizes) {
-                    [constraints addObject:[view autoMatchDimension:matchedDimension toDimension:matchedDimension ofView:previousView]];
-                }
-                [constraints addObject:[view al_alignAttribute:alignment toView:previousView forAxis:axis]];
-            }
-            <span class="keyword">else</span> {
-                <span class="comment">// First view</span>
-                [constraints addObject:[view autoPinEdgeToSuperviewEdge:firstEdge withInset:leadingSpacing]];
-            }
-            previousView = view;
-        }
-    }
-    <span class="keyword">if</span> (previousView) {
-        <span class="comment">// Last View</span>
-        [constraints addObject:[previousView autoPinEdgeToSuperviewEdge:lastEdge withInset:trailingSpacing]];
-    }
-    <span class="keyword">return</span> constraints;            
-</code></pre><ol>
-<li>这个API的目的是将一组UIView按照Spacing间距进行均分，同时每个UIView的宽度或者高度保持一致。</li>
-<li>第一部分是根据传入的轴，进行判断，是在竖直方向均分还是水平方向均分，同时影响的还有是宽度一致还是高度一致。</li>
-<li>第二部分是根据传入的轴（比如水平方向），将前一个View的右边距和后一个View的左边距添加间距，循环添加，直至最后一个View的右边距和父View的右边距添加完成约束。  </li>
-</ol>
-<p>其他方面，这个分类的作用基本和<code>ALView + PureLayout一致</code>，也就不再重复解释了。<br>至此，PureLayout的源码解析基本上差不多了，其余类似于边对齐的API，如：</p>
-<pre><code><span class="pp">- <span class="params">(<span class="variable">NSLayoutConstraint</span> *)</span>autoPinEdge:<span class="params">(<span class="variable">ALEdge</span>)</span>edge toEdge:<span class="params">(<span class="variable">ALEdge</span>)</span>toEdge ofView:<span class="params">(<span class="variable">ALView</span> *)</span>otherView;</span>
-</code></pre><p>又或者是约束尺寸的，如：</p>
-<pre><code>- <span class="list">(<span class="keyword">__NSArray_of</span><span class="list">(<span class="keyword">NSLayoutConstraint</span> <span class="variable">*) *</span>)</span>autoSetDimensionsToSize:<span class="list">(<span class="keyword">CGSize</span>)</span>size<span class="comment">;</span></span>
-</code></pre><p>都大同小异，在此就不一一赘述了。</p>
-<p>最后，<strong>强调一点</strong>：</p>
-<ol>
-<li>PureLayout必须在主线程使用，其本身实现非常依赖于静态的全局变量。</li>
-</ol>
-]]></content>
-    <summary type="html">
-    <![CDATA[<p>在开始这篇文章之前，想必大家都应该使用过Autolayout方式的界面布局，相信大家都有过类似于如下这样的API调用：    </p>
-<pre><code>[NSLayoutConstraint(item: self.viewA, attribute: .CenterY,]]>
     </summary>
     
       <category term="iOS" scheme="http://satanwoo.github.io/tags/iOS/"/>

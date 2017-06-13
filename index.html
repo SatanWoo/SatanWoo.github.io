@@ -62,6 +62,295 @@
       <div class="outer">
         <section id="main">
   
+    <article id="post-Macho-1" class="article article-type-post" itemscope itemprop="blogPost">
+  <div class="article-meta">
+    <a href="/2017/06/13/Macho-1/" class="article-date">
+  <time datetime="2017-06-13T15:25:34.000Z" itemprop="datePublished">2017-06-13</time>
+</a>
+    
+  </div>
+  <div class="article-inner">
+    
+    
+      <header class="article-header">
+        
+  
+    <h1 itemprop="name">
+      <a class="article-title" href="/2017/06/13/Macho-1/">深入剖析Macho (1)</a>
+    </h1>
+  
+
+      </header>
+    
+    <div class="article-entry" itemprop="articleBody">
+      
+        <h3 id="起因">起因</h3><p>最近在公司里和一些同事搞了一些东西，略微底层。于是希望借这个机会好好把<code>Macho</code>相关的知识点梳理下。</p>
+<p>虽然网上关于<code>Macho</code>的文章介绍一大堆，但是我希望能够从<code>Macho</code>的构成，加载过程以及需要了解的相关背景角度去进行分析，每一个点都力图深入。也会在这篇文章最后打造一个类似<code>class-dump</code>的小型工具。</p>
+<h3 id="程序启动加载的过程">程序启动加载的过程</h3><p>当你点击一个icon启动应用程序的时候，系统在内部大致做了如下几件事：</p>
+<ul>
+<li>内核（OS Kernel）创建一个进程，分配虚拟的进程空间等等，加载动态链接器。</li>
+<li>通过动态链接器加载主二进制程序引用的库、绑定符号。</li>
+<li>启动程序</li>
+</ul>
+<p>虽然简要概述很简单，但是有几个需要特别主要的地方：</p>
+<ol>
+<li>二进制程序的格式是怎么样的？内核是如何加载它的？</li>
+<li>内核是如何得知要使用哪种动态链接器的？</li>
+<li>动态链接器和静态链接器的区别是啥？</li>
+<li>程序在运行前究竟要做哪些步骤？顺序是怎么样的？</li>
+</ol>
+<p><strong>带着这些问题，我将一步步来剖析整个过程</strong></p>
+<h3 id="二进制程序格式">二进制程序格式</h3><p>在MacOS或者iOS上可执行的程序格式叫做<code>Macho-O</code>，它的主要成分如下图所示：</p>
+<p><img src="http://cc.cocimg.com/api/uploads/20150122/1421892661838860.gif" alt=""></p>
+<ul>
+<li>一个<code>mach_header</code>标记一些元信息，比如架构、CPU、大小端等等</li>
+<li>多个<code>Load Command</code>告诉你究竟如何加载每个段的信息。</li>
+<li>多个<code>Segement</code>及<code>Section</code>，包含了每个段自身的信息。包括一些数据、代码以及<del>段的执行权限</del>等等。</li>
+</ul>
+<p><strong><div style="color:red">需要注意的是，不仅仅是可执行文件是<code>Macho-O</code>，目标文件(.o)以及动态库，静态库都是<code>Mach-O</code>格式。</div></strong></p>
+<p>所以，下面我们就用64位的定义从每个部分来介绍一下具体的数据结构：</p>
+<h3 id="mach_header_64">mach_header_64</h3><p>这个结构体代表的都是<code>Mach-O</code>文件的一些元信息，它的作用是让内核在读取该文件创建虚拟进程空间的时候，检查文件的合法性以及当前硬件的特性是否能支持程序的运行。</p>
+<p>从源码中可以看出，整个结构题定义如下：</p>
+<pre><code><span class="keyword">struct</span> mach_header_64 {
+    <span class="keyword">uint32_t</span>    magic;        <span class="comment">/* mach magic number identifier */</span>
+    <span class="keyword">cpu_type_t</span>    cputype;    <span class="comment">/* cpu specifier */</span>
+    <span class="keyword">cpu_subtype_t</span>    cpusubtype;    <span class="comment">/* machine specifier */</span>
+    <span class="keyword">uint32_t</span>    filetype;    <span class="comment">/* type of file */</span>
+    <span class="keyword">uint32_t</span>    ncmds;        <span class="comment">/* number of load commands */</span>
+    <span class="keyword">uint32_t</span>    sizeofcmds;    <span class="comment">/* the size of all the load commands */</span>
+    <span class="keyword">uint32_t</span>    flags;        <span class="comment">/* flags */</span>
+    <span class="keyword">uint32_t</span>    reserved;    <span class="comment">/* reserved */</span>
+};
+</code></pre><ul>
+<li><strong>magic</strong> 用于标识当前设备的是大端序还是小端序。如果是<code>0xfeedfacf(MH_MAGIC_64)</code>就是大端序，而<code>0xcffaedfe(MH_CIGAM_64)</code>是小端序，iOS系统上是小端序。</li>
+<li><strong>cputype</strong> 标识CPU的架构，比如ARM，X86，i386等等，进行了宏观划分。</li>
+<li><strong>cpusubtype</strong> 具体的CPU类型，区分不同版本的处理器。</li>
+<li><strong>filetype</strong> 划分之前我们提到的文件类型，比如是可执行文件还是目标文件。</li>
+<li><strong>ncmds</strong> 有几个<code>LoadCommands</code>，每个<code>LoadCommands</code>代表了一种<code>Segment</code>的加载方式。</li>
+<li><strong>sizeofcmds</strong> <code>LoadCommand</code>的大小，主要用于划分Mach-O文件的‘区域’。</li>
+<li><strong>flags</strong> 标记了一些dyld过程中的参数。</li>
+<li><strong>reversed</strong> 没用。</li>
+</ul>
+<p>这里有个比较有意思的问题是，我为了验证大端序小端序的问题的时候，用了MacOS上的计算器进行<br>验证，本质上这应该是个小端序的应用程序，其二进制如下：</p>
+<p><img src="https://github.com/SatanWoo/BeeHive/blob/master/%E5%B1%8F%E5%B9%95%E5%BF%AB%E7%85%A7%202017-06-11%20%E4%B8%8B%E5%8D%883.12.33.png?raw=true" alt="屏幕快照 2017-06-11 下午3.12.33.png"> </p>
+<p>但是在<code>otool</code>和<code>MachoView</code>上看出来都是<code>MH_MAGIC_64</code>，如下所示：</p>
+<p><img src="https://github.com/SatanWoo/BeeHive/blob/master/%E5%B1%8F%E5%B9%95%E5%BF%AB%E7%85%A7%202017-06-11%20%E4%B8%8B%E5%8D%883.13.47.png?raw=true" alt="屏幕快照 2017-06-11 下午3.13.47.png"> </p>
+<p>我擦，这下看了懵逼，难道是我理解错了？于是赶紧翻了下<code>class-dump</code>代码，其解析header部分代码如下：</p>
+<pre><code>// 解析部分代码
+_byteOrder = <span class="type">CDByteOrder_LittleEndian</span>;
+
+<span class="type">CDDataCursor</span> *cursor = [[<span class="type">CDDataCursor</span> alloc] initWithData:data];
+_magic = [cursor readBigInt32];
+<span class="keyword">if</span> (_magic == <span class="type">MH_MAGIC</span> || _magic == <span class="type">MH_MAGIC_64</span>) {
+    _byteOrder = <span class="type">CDByteOrder_BigEndian</span>;
+} <span class="keyword">else</span> <span class="keyword">if</span> (_magic == <span class="type">MH_CIGAM</span> || _magic == <span class="type">MH_CIGAM_64</span>) {
+    _byteOrder = <span class="type">CDByteOrder_LittleEndian</span>;
+} <span class="keyword">else</span> {
+    <span class="keyword">return</span> <span class="keyword">nil</span>;
+}
+
+// readBigInt32的代码
+- (uint32_t)readBigInt32;
+{
+    uint32_t <span class="literal">result</span>;
+
+    <span class="keyword">if</span> (_offset + sizeof(<span class="literal">result</span>) &lt;= [_data length]) {
+        <span class="literal">result</span> = <span class="type">OSReadBigInt32</span>([_data bytes], _offset);
+        _offset += sizeof(<span class="literal">result</span>);
+    } <span class="keyword">else</span> {
+        [<span class="type">NSException</span> <span class="keyword">raise</span>:<span class="type">NSRangeException</span> format:@<span class="string">"Trying to read past end in %s"</span>, __cmd];
+        <span class="literal">result</span> = <span class="number">0</span>;
+    }
+
+    <span class="keyword">return</span> <span class="literal">result</span>;
+}
+</code></pre><p>我们在用LLDB看下<code>_data</code>里面的内容指向的内存地址：</p>
+<pre><code>(lldb) po _<span class="preprocessor">data</span>
+&lt;OS_dispatch_data: <span class="preprocessor">data</span>[<span class="number">0x100600b40</span>] = { leaf, size = <span class="number">199520</span>, <span class="keyword">buf </span>= <span class="number">0x100281000</span> }&gt;
+</code></pre><p>用<code>Xcode Memory</code>看下：</p>
+<p><img src="https://private-alipayobjects.alipay.com/alipay-rmsdeploy-image/skylark/png/15777/7383bc2bce9ed97f.png" alt="屏幕快照 2017-06-11 下午3.25.06.png"> </p>
+<p>看起来是没错的。然后由于MacOSX本身是小端序的，<code>CFFAEDFE</code>这样的数据会被自动解析成<code>FE ED FA CF</code>。所以这样是有问题的。因此，<code>class-dump</code>采用了<code>OSReadBigInt32</code>的方式去解析：</p>
+<pre><code><span class="constant">OS_INLINE</span>
+<span class="constant">UInt32</span>
+<span class="constant">OSReadSwapInt32</span>(
+    volatile void               * base,
+    volatile <span class="constant">UInt</span>                 offset
+)
+{
+    <span class="class"><span class="keyword">union</span> <span class="title">lconv</span> {</span>
+    <span class="constant">UInt32</span> ul;
+    <span class="constant">UInt8</span>  uc[<span class="number">4</span>];
+    } *inp, outv;
+
+    <span class="regexp">//</span> 步骤<span class="number">1</span>
+    inp = (<span class="class"><span class="keyword">union</span> <span class="title">lconv</span> *)((<span class="title">UInt8</span> *)<span class="title">base</span> + <span class="title">offset</span>);</span>
+
+    /<span class="regexp">/ 步骤2
+    outv.uc[0] = inp-&gt;uc[3];
+    outv.uc[1] = inp-&gt;uc[2];
+    outv.uc[2] = inp-&gt;uc[1];
+    outv.uc[3] = inp-&gt;uc[0];
+
+    ／／ 步骤3
+    return (outv.ul);
+}</span>
+</code></pre><p>这个方法会利用<code>union</code>的特性，进行数据交换。我们还是用刚刚的例子来验证：</p>
+<ul>
+<li>步骤1按照默认方式读出数据：<code>FE ED FA CF</code>。</li>
+<li>步骤2进行交换，地址从低到高，分别是<code>FE ED FA CF</code>。</li>
+<li>步骤3利用<code>union</code>的特性，当成一个32的数输出，按照默认小端序解析，会成为<code>CF FA ED FE</code>。也即是<code>MH_CIGAM_64</code>，是小端序。</li>
+</ul>
+<p><strong>其实按照MachoView的解析方式，将<code>MH_CIGAM_64</code>和<code>MH_MAGIC_64</code>理解成MACHO文件和当前平台的编码顺序是否一致更好，如果解析出来是<code>MH_CIGAM_64</code>则表示不一致；否则一致。</strong></p>
+<h3 id="Segment（段）">Segment（段）</h3><p>讲完了<code>Mach-O</code>文件的header部分，我们需要进行Load Commands部分。但是在这之前，我想先大致介绍下Mach-O中的Segment及其下属的Section（节），让大家能更好的理解Load Commands。</p>
+<p>从整体上来说，<code>Mach-O</code>里面包含的段有以下这些：</p>
+<ul>
+<li><strong>__TEXT</strong> 代码段/只读数据段</li>
+<li><strong>__PAGEZERO</strong> Catch访问NULL指针的非法操作的段</li>
+<li><strong>__DATA</strong> 数据段</li>
+<li><strong>__LINKEDIT</strong> 包含需要被动态链接器使用的信息，包括符号表、字符串表、重定位项表等。</li>
+<li><strong>__OBJC</strong> 包含会被<code>Objective Runtime</code>使用到的一些数据。</li>
+</ul>
+<blockquote>
+<p>关于<code>__OBJC</code>这个段，我是一脸懵逼的，从Macho文档上看，他包含了一些编译器私有的节。没有任何公开的资料描述，具体让我研究研究再说。</p>
+</blockquote>
+<h4 id="Section（节）">Section（节）</h4><p>刚刚我们提到的<code>__TEXT</code>和<code>__DATA</code>段都分别有下属的节。</p>
+<p><strong><div style="color:red">之所以按照段-&gt;节的方式组织，是因为同一个段下的节，在内存的权限相同，可以不完全按照页大小进行对齐，节省内存空间。而对外整体暴露段，在装载程序的时候完整映射成一个vma，可以更好的做内存对齐。</div></strong></p>
+<table>
+<thead>
+<tr>
+<th>名称</th>
+<th>作用</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>TEXT.</strong>text</td>
+<td><strong>只有</strong>可执行的机器码</td>
+</tr>
+<tr>
+<td><strong>TEXT.</strong>cstring</td>
+<td>去重后的C字符串</td>
+</tr>
+<tr>
+<td><strong>TEXT.</strong>const</td>
+<td>初始化过的常量</td>
+</tr>
+<tr>
+<td><strong>TEXT.</strong>stubs</td>
+<td>符号桩。本质上是一小段会直接跳入lazybinding的表对应项指针指向的地址的代码。</td>
+</tr>
+<tr>
+<td><strong>TEXT.</strong>stub_helper</td>
+<td>辅助函数。上述提到的lazybinding的表中对应项的指针在没有找到真正的符号地址的时候，都指向这。</td>
+</tr>
+<tr>
+<td><strong>TEXT.</strong>unwind_info</td>
+<td>用于存储处理异常情况信息</td>
+</tr>
+<tr>
+<td><strong>TEXT.</strong>eh_frame</td>
+<td>调试辅助信息</td>
+</tr>
+<tr>
+<td><strong>DATA.</strong>data</td>
+<td>初始化过的可变的数据</td>
+</tr>
+<tr>
+<td><strong>DATA.</strong>nl_symbol_ptr</td>
+<td>非lazy-binding的指针表，每个表项中的指针都指向一个在装载过程中，被动态链机器搜索完成的符号</td>
+</tr>
+<tr>
+<td><strong>DATA.</strong>la_symbol_ptr</td>
+<td>lazy-binding的指针表，每个表项中的指针一开始指向stub_helper</td>
+</tr>
+<tr>
+<td><strong>DATA.</strong>const</td>
+<td>没有初始化过的常量</td>
+</tr>
+<tr>
+<td><strong>DATA.</strong>mod_init_func</td>
+<td>初始化函数，在main之前调用</td>
+</tr>
+<tr>
+<td><strong>DATA.</strong>mod_term_func</td>
+<td>终止函数，在main返回之后调用</td>
+</tr>
+<tr>
+<td><strong>DATA.</strong>bss</td>
+<td>没有初始化的静态变量</td>
+</tr>
+<tr>
+<td><strong>DATA.</strong>common</td>
+<td>没有初始化过的符号声明</td>
+</tr>
+</tbody>
+</table>
+<p>其中，比较难以理解的可能是<code>__la_symbol_ptr</code>，让我们还是来以计算器的例子来理解：</p>
+<ul>
+<li>我们先从MachoView上找一个<code>stub</code>，比如[xxxx -&gt; _CFRelease]。</li>
+<li>其数据是<strong>FF256A7C0000</strong>，结合这个节是在__TEXT段中，我猜测是应该一段汇编代码的16进制表示。</li>
+</ul>
+<p><img src="https://github.com/SatanWoo/BeeHive/blob/master/%E5%B1%8F%E5%B9%95%E5%BF%AB%E7%85%A7%202017-06-12%20%E4%B8%8A%E5%8D%8810.48.21.png?raw=true" alt="屏幕快照 2017-06-12 上午10.48.21.png"> </p>
+<ul>
+<li>从Hopper中打开，查看对应偏移量的stub含义：</li>
+</ul>
+<p><img src="https://github.com/SatanWoo/BeeHive/blob/master/%E5%B1%8F%E5%B9%95%E5%BF%AB%E7%85%A7%202017-06-12%20%E4%B8%8A%E5%8D%8810.40.50.png?raw=true" alt="屏幕快照 2017-06-12 上午10.40.50.png"> </p>
+<p>我们可以看到这段代码的16进制表达就是：</p>
+<p><img src="https://github.com/SatanWoo/BeeHive/blob/master/%E5%B1%8F%E5%B9%95%E5%BF%AB%E7%85%A7%202017-06-13%20%E4%B8%8B%E5%8D%883.47.50.png?raw=true" alt="屏幕快照 2017-06-13 下午3.47.50.png"> </p>
+<p>从上图不难看出，stub的含义就是跳转到以<code>__la_symbol_ptr</code>对应表项数据所指向地址的代码。</p>
+<ul>
+<li>跳入以后，我们可以看到如下代码：</li>
+</ul>
+<p><img src="https://github.com/SatanWoo/BeeHive/blob/master/%E5%B1%8F%E5%B9%95%E5%BF%AB%E7%85%A7%202017-06-12%20%E4%B8%8A%E5%8D%8810.41.02.png?raw=true" alt="屏幕快照 2017-06-12 上午10.41.02.png"> </p>
+<p>可以看到，在还没加载程序的时候，对应表项的数据还是<code>dq _CFRelease</code>。双击点进去看一下：</p>
+<p><img src="https://github.com/SatanWoo/BeeHive/blob/master/%E5%B1%8F%E5%B9%95%E5%BF%AB%E7%85%A7%202017-06-13%20%E4%B8%8B%E5%8D%883.51.34.png?raw=true" alt="屏幕快照 2017-06-13 下午3.51.34.png"> </p>
+<p>这里显示的应该是有点问题，如果全0的话是不可能使用lazy binding的。</p>
+<p>我们还是用MachOView来看一下：</p>
+<p><img src="https://github.com/SatanWoo/BeeHive/blob/master/%E5%B1%8F%E5%B9%95%E5%BF%AB%E7%85%A7%202017-06-13%20%E4%B8%8B%E5%8D%884.04.04.png?raw=true" alt="屏幕快照 2017-06-13 下午4.04.04.png"> </p>
+<p>跳转到这个地址看看，没错了，处于stub_helper节里了：</p>
+<p><img src="https://github.com/SatanWoo/BeeHive/blob/master/%E5%B1%8F%E5%B9%95%E5%BF%AB%E7%85%A7%202017-06-13%20%E4%B8%8B%E5%8D%884.04.28.png?raw=true" alt="屏幕快照 2017-06-13 下午4.04.28.png"> </p>
+<p><img src="https://github.com/SatanWoo/BeeHive/blob/master/%E5%B1%8F%E5%B9%95%E5%BF%AB%E7%85%A7%202017-06-13%20%E4%B8%8B%E5%8D%884.04.33.png?raw=true" alt="屏幕快照 2017-06-13 下午4.04.33.png"> </p>
+<blockquote>
+<p><code>__la_symbol_ptr</code> 里面所有表项的数据都会被bind成<code>dyld_stub_helper</code>。</p>
+</blockquote>
+
+      
+    </div>
+    <footer class="article-footer">
+      <a data-url="http://satanwoo.github.io/2017/06/13/Macho-1/" data-id="cj3vq8pee001hqli1anakfro5" class="article-share-link">Share</a>
+      
+        <a href="http://satanwoo.github.io/2017/06/13/Macho-1/#disqus_thread" class="article-comment-link">Comments</a>
+      
+      
+  <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
+
+    </footer>
+  </div>
+  
+</article>
+
+<div id="disqus_thread"></div>
+<script>
+
+/**
+*  RECOMMENDED CONFIGURATION VARIABLES: EDIT AND UNCOMMENT THE SECTION BELOW TO INSERT DYNAMIC VALUES FROM YOUR PLATFORM OR CMS.
+*  LEARN WHY DEFINING THESE VARIABLES IS IMPORTANT: https://disqus.com/admin/universalcode/#configuration-variables*/
+/*
+var disqus_config = function () {
+this.page.url = PAGE_URL;  // Replace PAGE_URL with your page's canonical URL variable
+this.page.identifier = PAGE_IDENTIFIER; // Replace PAGE_IDENTIFIER with your page's unique identifier variable
+};
+*/
+(function() { // DON'T EDIT BELOW THIS LINE
+var d = document, s = d.createElement('script');
+s.src = 'https://satanwoo-2.disqus.com/embed.js';
+s.setAttribute('data-timestamp', +new Date());
+(d.head || d.body).appendChild(s);
+})();
+</script>
+<noscript>Please enable JavaScript to view the <a href="https://disqus.com/?ref_noscript">comments powered by Disqus.</a></noscript>
+                                
+  
     <article id="post-FBTweak" class="article article-type-post" itemscope itemprop="blogPost">
   <div class="article-meta">
     <a href="/2017/06/01/FBTweak/" class="article-date">
@@ -290,7 +579,7 @@ _attribute__((section (<span class="string">"__DATA, MinyiSpecific"</span>))) <s
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2017/06/01/FBTweak/" data-id="cj3elfj6o001z5gi1oviliyaw" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2017/06/01/FBTweak/" data-id="cj3vq8pfb0021qli1j4fffb6j" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2017/06/01/FBTweak/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -430,7 +719,7 @@ foo(&amp;s, <span class="number">1</span>, <span class="number">2</span>);
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2017/04/23/ARM64IndirectReturn/" data-id="cj3elfj73002g5gi1139a4yy5" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2017/04/23/ARM64IndirectReturn/" data-id="cj3vq8pfw002iqli17e6q4xcd" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2017/04/23/ARM64IndirectReturn/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -601,7 +890,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2017/04/18/CalculateTwoArrayDiff/" data-id="cj3elfj71002c5gi1trzrjeof" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2017/04/18/CalculateTwoArrayDiff/" data-id="cj3vq8pft002eqli1x59otf64" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2017/04/18/CalculateTwoArrayDiff/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -791,7 +1080,7 @@ dispatch_group_create(<span class="keyword">void</span>)
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2017/01/07/DispatchGroupCrash/" data-id="cj3elfj6v00235gi1s5ld3rct" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2017/01/07/DispatchGroupCrash/" data-id="cj3vq8pfi0025qli1soeuugv7" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2017/01/07/DispatchGroupCrash/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -1039,7 +1328,7 @@ func <span class="function"><span class="title">resultFromBatchObjects</span><sp
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2017/01/07/JSONRPCKit/" data-id="cj3elfj69001r5gi1a2dog746" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2017/01/07/JSONRPCKit/" data-id="cj3vq8pex001tqli11uf51kkd" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2017/01/07/JSONRPCKit/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -1323,7 +1612,7 @@ dispatch_sync(dq, ^{
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/10/23/multithread-dangling-pointer/" data-id="cj3elfj3g00075gi1b2ss8ltk" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/10/23/multithread-dangling-pointer/" data-id="cj3vq8pc30007qli1vrs39yzf" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/10/23/multithread-dangling-pointer/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -1479,7 +1768,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/09/17/uiwindow-iOS/" data-id="cj3elfj2p00035gi1trsxungl" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/09/17/uiwindow-iOS/" data-id="cj3vq8pb20003qli1ocvw8ml1" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/09/17/uiwindow-iOS/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -1639,7 +1928,7 @@ OSSpinUnlock(&amp;_lock)<span class="comment">;</span>
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/07/10/immutable-thread/" data-id="cj3elfj3k00095gi10o8wke8i" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/07/10/immutable-thread/" data-id="cj3vq8pc90009qli1leq0aqm9" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/07/10/immutable-thread/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -1763,7 +2052,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/05/02/Spotify/" data-id="cj3elfj5500105gi1xu6mfyg0" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/05/02/Spotify/" data-id="cj3vq8pdp0010qli14qx1l8h2" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/05/02/Spotify/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -1891,7 +2180,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/04/26/blank-space-in-html/" data-id="cj3elfj4h000o5gi1xocb6x8y" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/04/26/blank-space-in-html/" data-id="cj3vq8pcx000oqli186kmyfu6" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/04/26/blank-space-in-html/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -2149,7 +2438,7 @@ Elapsed application CPU <span class="keyword">time</span> (seconds): <span class
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/04/11/dispatch-once/" data-id="cj3elfj3w000e5gi12qra093f" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/04/11/dispatch-once/" data-id="cj3vq8pce000eqli1vq5vv35l" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/04/11/dispatch-once/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -2366,7 +2655,7 @@ a4.<span class="function"><span class="title">staticInfo</span><span class="para
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/03/22/dispatch-in-swift/" data-id="cj3elfj3y000g5gi1qxwygvax" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/03/22/dispatch-in-swift/" data-id="cj3vq8pch000gqli1o6zey3jy" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/03/22/dispatch-in-swift/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -2480,7 +2769,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/03/14/RxSwift/" data-id="cj3elfj5a00165gi13xicp39u" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/03/14/RxSwift/" data-id="cj3vq8pdw0016qli1itzq7h3d" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/03/14/RxSwift/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -2590,7 +2879,7 @@ val = edx(<span class="literal">true</span>)
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/03/14/SizeUp/" data-id="cj3elfj5700135gi16qyt2xhu" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/03/14/SizeUp/" data-id="cj3vq8pdt0013qli1mat3v1pw" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/03/14/SizeUp/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -2752,7 +3041,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/03/14/DXXcodeConsoleUnicodePlugin/" data-id="cj3elfj6y00285gi1v9fmyk9f" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/03/14/DXXcodeConsoleUnicodePlugin/" data-id="cj3vq8pfm002aqli1vr4lbn7t" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/03/14/DXXcodeConsoleUnicodePlugin/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -2851,7 +3140,7 @@ fi
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/02/27/check-manifest/" data-id="cj3elfj4a000l5gi1jl3f9yk0" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/02/27/check-manifest/" data-id="cj3vq8pcq000lqli1n4xuz44d" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/02/27/check-manifest/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -2983,7 +3272,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/02/27/pod-install-plugin/" data-id="cj3elfj3c00055gi1u0ll6c2d" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/02/27/pod-install-plugin/" data-id="cj3vq8pbj0005qli1kk9bmdit" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/02/27/pod-install-plugin/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -3261,7 +3550,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/02/27/FBKVOController/" data-id="cj3elfj6t00215gi1fr97lkg6" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/02/27/FBKVOController/" data-id="cj3vq8pff0023qli177o8t3qv" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/02/27/FBKVOController/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -3397,7 +3686,7 @@ selectedTitleLabelsContentView<span class="class">.layer</span><span class="clas
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/02/05/DGRunKeeperSwitch/" data-id="cj3elfj6z002a5gi1t5wfafsw" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/02/05/DGRunKeeperSwitch/" data-id="cj3vq8pfq002cqli16b4qs16o" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/02/05/DGRunKeeperSwitch/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -3675,7 +3964,7 @@ NSLayoutConstraint *constraint = [NSLayoutConstraint <span class="string">constr
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/02/05/PureLayout/" data-id="cj3elfj5k001d5gi1000f9dtu" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/02/05/PureLayout/" data-id="cj3vq8pe7001dqli1ducz8lum" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/02/05/PureLayout/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -4023,7 +4312,7 @@ extension Task {
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/12/30/Refactor-Mega-ViewController/" data-id="cj3elfj5f001b5gi1bqyn6r3c" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/12/30/Refactor-Mega-ViewController/" data-id="cj3vq8pe4001bqli1ccdj7gyx" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2015/12/30/Refactor-Mega-ViewController/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -4196,7 +4485,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/12/20/Learn-R-2/" data-id="cj3elfj5q001h5gi1py2bnm7s" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/12/20/Learn-R-2/" data-id="cj3vq8pej001jqli1qp6aqvy9" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2015/12/20/Learn-R-2/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -4272,7 +4561,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/12/15/Regression-Model-1/" data-id="cj3elfj5c00185gi1r9632q7f" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/12/15/Regression-Model-1/" data-id="cj3vq8pdy0018qli19e3uqvoo" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2015/12/15/Regression-Model-1/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -4437,7 +4726,7 @@ $foo
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/12/13/Learn-R-1/" data-id="cj3elfj5v001k5gi1vedksdqx" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/12/13/Learn-R-1/" data-id="cj3vq8pem001mqli1251v3y6o" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2015/12/13/Learn-R-1/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -4565,7 +4854,7 @@ frame <span class="preprocessor">#<span class="number">20</span>: libdyld.dylib`
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/12/11/LLDB-1/" data-id="cj3elfj65001p5gi163h8gwyl" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/12/11/LLDB-1/" data-id="cj3vq8pev001rqli1423fjkht" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2015/12/11/LLDB-1/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -4886,7 +5175,7 @@ TBBoundingBox TBBoundingBoxMake(<span class="built_in">double</span> x0, <span c
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/12/11/TBAnnotationClustering/" data-id="cj3elfj4p000s5gi1fy4vbjhi" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/12/11/TBAnnotationClustering/" data-id="cj3vq8pd7000sqli1igvwqm4f" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2015/12/11/TBAnnotationClustering/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -5133,7 +5422,7 @@ BOOL success = class_addMethod(<span class="keyword">class</span>, originalSelec
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/11/26/FDFullScreenPopGesture-Source-Code/" data-id="cj3elfj6l001x5gi1u9f435ex" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/11/26/FDFullScreenPopGesture-Source-Code/" data-id="cj3vq8pf7001zqli17vj1cxwz" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2015/11/26/FDFullScreenPopGesture-Source-Code/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -5265,7 +5554,7 @@ replicationLayer.instanceDelay = <span class="number">0.3</span>
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/11/17/Fun-of-CAReplicationLayer/" data-id="cj3elfj6g001v5gi1mmmxbaju" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/11/17/Fun-of-CAReplicationLayer/" data-id="cj3vq8pf4001xqli1qrw2ft7y" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2015/11/17/Fun-of-CAReplicationLayer/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -5493,194 +5782,12 @@ modalVC<span class="class">.modalPresentationStyle</span> = <span class="class">
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/11/12/Swift-UITransition-iOS8/" data-id="cj3elfj4s000u5gi1g02ri1pf" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/11/12/Swift-UITransition-iOS8/" data-id="cj3vq8pd9000uqli1avvutlvb" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2015/11/12/Swift-UITransition-iOS8/#disqus_thread" class="article-comment-link">Comments</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Swift/">Swift</a></li></ul>
-
-    </footer>
-  </div>
-  
-</article>
-
-<div id="disqus_thread"></div>
-<script>
-
-/**
-*  RECOMMENDED CONFIGURATION VARIABLES: EDIT AND UNCOMMENT THE SECTION BELOW TO INSERT DYNAMIC VALUES FROM YOUR PLATFORM OR CMS.
-*  LEARN WHY DEFINING THESE VARIABLES IS IMPORTANT: https://disqus.com/admin/universalcode/#configuration-variables*/
-/*
-var disqus_config = function () {
-this.page.url = PAGE_URL;  // Replace PAGE_URL with your page's canonical URL variable
-this.page.identifier = PAGE_IDENTIFIER; // Replace PAGE_IDENTIFIER with your page's unique identifier variable
-};
-*/
-(function() { // DON'T EDIT BELOW THIS LINE
-var d = document, s = d.createElement('script');
-s.src = 'https://satanwoo-2.disqus.com/embed.js';
-s.setAttribute('data-timestamp', +new Date());
-(d.head || d.body).appendChild(s);
-})();
-</script>
-<noscript>Please enable JavaScript to view the <a href="https://disqus.com/?ref_noscript">comments powered by Disqus.</a></noscript>
-                                
-  
-    <article id="post-Understand-Viper" class="article article-type-post" itemscope itemprop="blogPost">
-  <div class="article-meta">
-    <a href="/2015/11/05/Understand-Viper/" class="article-date">
-  <time datetime="2015-11-04T17:01:51.000Z" itemprop="datePublished">2015-11-05</time>
-</a>
-    
-  </div>
-  <div class="article-inner">
-    
-    
-      <header class="article-header">
-        
-  
-    <h1 itemprop="name">
-      <a class="article-title" href="/2015/11/05/Understand-Viper/">浅入浅出VIPER设计架构(1)</a>
-    </h1>
-  
-
-      </header>
-    
-    <div class="article-entry" itemprop="articleBody">
-      
-        <p>之前和豌豆荚的同学聊天，发现他们的App从MVVM切换到VIPER设计架构，于是这两天花了点时间研读了一下 相关资料，浅谈一下。</p>
-<h3 id="VIPER是什么">VIPER是什么</h3><p>VIPER是<b>View, Interactor, Presenter, Entity, Routing</b>5个词语的缩写，这5个词语也是VIPER架构的核心。</p>
-<p>View - 视图，接收传递的内容，然后进行内容展示。</p>
-<p>Presenter - 视图逻辑控制器，这个模块只用来执行和UI相关的逻辑。什么叫和UI相关的逻辑呢？比如：接收用户交互、将展示的内容分发给不同的UI界面进行展示。</p>
-<p>Interactor - <b>纯业务逻辑控制器</b>，这个模块完全脱离于UI，只用来做业务相关的逻辑控制。举例来说，比如下载逻辑、计算逻辑等等可以划分为单一Use Case的逻辑。</p>
-<p>Entity - 基础的数据模型，比方说大家经常定义的XXXModel之类的，但是，这里的XXXModel可以认为基本就是<b>纯数据结构了</b>，不包含轻量级业务处理逻辑</p>
-<p>Routing - 路由器，视图切换的逻辑。比如包含如何从一个界面切换到另一个界面，切换的顺序是如何等等。</p>
-<p>除了五大核心之外，我们还经常使用了<strong>Data Store</strong>这个模块。因为我们之前提过，我们的Entity基本就是纯数据结构，不包含轻量级的业务逻辑，因此，Entity进行持久化这个职责是要单独划分出来，而这个职能就落到了Data Store身上。</p>
-<p>下面是网上一张比较经典的架构设计图：</p>
-<p><img src="https://www.objc.io/images/issue-13/2014-06-07-viper-wireframe-76305b6d.png"></p>
-<h3 id="为什么要用VIPER">为什么要用VIPER</h3><p><strong>在软件工程领域，有一个很重要的观点，就是测试、测试、测试。（重要的话说三遍！）</strong></p>
-<p>之前在BMW Group实习的时候从事Java开发，每一个函数都要经过JUnit的测试，也就是我们所谓的Test-Driven Development。但是iOS开发由于其逻辑和视图的强耦合关系，常常导致业务逻辑不能完全独立于界面，进行单元测试十分困难。比如，臭名昭著的”Massive View Controller” 就是因为将大量的业务逻辑和视图逻辑耦合进了Controller，导致Controller非常臃肿，也不容易剥离进行测试。</p>
-<p>而VIPER架构引入了Interactor和Presentator两个概念，将业务逻辑和视图逻辑独立开来，从而可以单独测试业务逻辑的代码。</p>
-<h3 id="例子分析">例子分析</h3><p>说了好多虚的概念，有些人一定已经被弄晕了，还是赶紧看两个典型的例子看深入了解下吧.</p>
-<h4 id="1-_Counter">1. Counter</h4><p>第一个例子来源于<a href="https://github.com/mutualmobile/Counter" target="_blank" rel="external">Counter</a>，是一个非常简单了计数应用。麻雀虽小，却五脏俱全。</p>
-<p>打开项目，我们可以快速的过一下项目结构：</p>
-<pre><code>-<span class="ruby">- <span class="constant">CNTAppDelegate</span>.h/.m
-</span>-<span class="ruby">- <span class="constant">CNTCountInteractorIO</span>.h
-</span>-<span class="ruby">- <span class="constant">CNTCountInteractor</span>.h/.m
-</span>-<span class="ruby">- <span class="constant">CNTCountPresenter</span>.h/.m
-</span>-<span class="ruby">- <span class="constant">CNTCountView</span>.h
-</span>-<span class="ruby">- <span class="constant">CNTCountViewController</span>.h/.m/.xib</span>
-</code></pre><p>首先我们来看一下最简单的模块：CNTCountView</p>
-<pre><code><span class="comment">// CNTCountView.h</span>
-<span class="class"><span class="keyword">@protocol</span> <span class="title">CNTCountView</span> &lt;<span class="title">NSObject</span>&gt;</span>
-- (<span class="keyword">void</span>)setCountText:(<span class="built_in">NSString</span>*)countText;
-- (<span class="keyword">void</span>)setDecrementEnabled:(<span class="built_in">BOOL</span>)enabled;
-<span class="keyword">@end</span>
-</code></pre><p>咦？为什么这个View只包含一个Protocol呢？说好的View用来接收传递的内容然后进行内容展示呢？</p>
-<p>原因是这样：在iOS应用中，一个无法避免的模块就是ViewController（<strong>无论如何每个应用都必须存在一个RootViewController</strong>）。每个ViewController包含一个根View用来进行视图展示。因此，在将VIPER架构应用到iOS领域的过程中，实际上起到View作用的是ViewController！(<b>当然，ViewController不仅仅起到了视图展示的作用</b>)</p>
-<p><em>题外话：我个人认为这个例子的取名不太好，让人迷惑，如果换个名字，如CNTCountViewOperation就没有这个问题了</em></p>
-<p>既然如此，让我们赶快去看看相关的ViewController：CNTCountViewController中的实现。</p>
-<pre><code><span class="comment">// CNTCountViewController.h</span>
-<span class="class"><span class="keyword">@interface</span> <span class="title">CNTCountViewController</span> : <span class="title">UIViewController</span> &lt;<span class="title">CNTCountView</span>&gt;</span>
-<span class="keyword">@property</span> (<span class="keyword">nonatomic</span>, <span class="keyword">weak</span>) <span class="keyword">IBOutlet</span>    <span class="built_in">UILabel</span>*    countLabel;
-<span class="keyword">@property</span> (<span class="keyword">nonatomic</span>, <span class="keyword">weak</span>) <span class="keyword">IBOutlet</span>    <span class="built_in">UIButton</span>*   decrementButton;
-<span class="keyword">@property</span> (<span class="keyword">nonatomic</span>, <span class="keyword">weak</span>) <span class="keyword">IBOutlet</span>    <span class="built_in">UIButton</span>*   incrementButton;
-
-<span class="keyword">@property</span> (<span class="keyword">nonatomic</span>, <span class="keyword">strong</span>)   CNTCountPresenter*  presenter;
-<span class="keyword">@end</span>
-</code></pre><p>在上述CNTCountViewController的头文件中，我们可以看到该类遵从了CNTCountView协议。其次，他包含了真正的View：两个UIButton和一个UILabel。说明这和我们之前说的ViewController起到了真正的视图展示作用是吻合的。</p>
-<p>同时，我们还看到了一个非常显眼的类：<strong>CNTCountPresenter</strong>。如果这个类的命名没错，那这个类就是所谓的Presenter了，用来进行界面逻辑控制的类。那么是不是这样呢？我们<em>Command + 左击</em>这个类一探究竟！</p>
-<pre><code><span class="comment">// CNTCountPresenter.h</span>
-<span class="class"><span class="keyword">@interface</span> <span class="title">CNTCountPresenter</span> : <span class="title">NSObject</span> &lt;<span class="title">CNTCountInteractorOutput</span>&gt;</span>
-<span class="keyword">@property</span> (<span class="keyword">nonatomic</span>, <span class="keyword">weak</span>)     <span class="keyword">id</span>&lt;CNTCountView&gt;            view;
-<span class="keyword">@property</span> (<span class="keyword">nonatomic</span>, <span class="keyword">strong</span>)   <span class="keyword">id</span>&lt;CNTCountInteractorInput&gt; interactor;
-
-- (<span class="keyword">void</span>)updateView;
-- (<span class="keyword">void</span>)increment;
-- (<span class="keyword">void</span>)decrement;
-<span class="keyword">@end</span>
-</code></pre><p>从CNTCountPresenter的头文件中，我们能看出很多逻辑关系。Presenter包含了一个View和一个Interactor。这和文首我们对于VIPER的介绍相吻合：Presenter从Interactor获取数据，经过界面逻辑处理后，将数据发送给View进行展示。</p>
-<p>从Interactor请求获取数据的部分代码如下：</p>
-<pre><code><span class="comment">// CNTCountPresenter.m</span>
-<span class="tag">-</span> (void)<span class="tag">updateView</span>
-{
-    <span class="attr_selector">[self.interactor requestCount]</span>;
-}
-
-<span class="tag">-</span> (void)<span class="tag">increment</span>
-{
-    <span class="attr_selector">[self.interactor increment]</span>;
-}
-
-<span class="tag">-</span> (void)<span class="tag">decrement</span>
-{
-    <span class="attr_selector">[self.interactor decrement]</span>;
-}
-</code></pre><p>由于Presenter从Interactor获取数据，那么势必Presenter是Interactor的一个输出，而Interactor是Presenter的一个输入。</p>
-<pre><code><span class="comment">// CNTCountInteractorIO.h</span>
-<span class="class"><span class="keyword">@protocol</span> <span class="title">CNTCountInteractorInput</span> &lt;<span class="title">NSObject</span>&gt;</span>
-- (<span class="keyword">void</span>)requestCount;
-- (<span class="keyword">void</span>)increment;
-- (<span class="keyword">void</span>)decrement;
-<span class="keyword">@end</span>
-
-<span class="class"><span class="keyword">@protocol</span> <span class="title">CNTCountInteractorOutput</span> &lt;<span class="title">NSObject</span>&gt;</span>
-- (<span class="keyword">void</span>)updateCount:(<span class="built_in">NSUInteger</span>)count;
-<span class="keyword">@end</span>
-</code></pre><p><em><b>这里各位可以先不关注Protocol协议的设计本身，只要理解逻辑关系即可。</b></em></p>
-<p>通过这样的职责划分，落入到Interactor类中的职责就是最基本的业务逻辑：计数的增加和减少。</p>
-<pre><code><span class="comment">// CNTCountInteractor.h</span>
-- (<span class="keyword">void</span>)requestCount
-{
-    [<span class="keyword">self</span> sendCount];
-}
-
-- (<span class="keyword">void</span>)increment
-{
-    ++<span class="keyword">self</span><span class="variable">.count</span>;
-    [<span class="keyword">self</span> sendCount];
-}
-
-- (<span class="keyword">void</span>)decrement
-{
-    <span class="keyword">if</span> ([<span class="keyword">self</span> canDecrement])
-    {
-        --<span class="keyword">self</span><span class="variable">.count</span>;
-        [<span class="keyword">self</span> sendCount];
-    }
-}
-</code></pre><p>至此，我们可以将Counter的项目架构进行如下表示：</p>
-<p>Interactor &lt;——–&gt; Presenter</p>
-<ul>
-<li><strong>Interactor</strong> 是 <strong>Presenter</strong>  的 <b>输入</b></li>
-<li><strong>Presenter</strong>  是 <strong>Interactor</strong> 的 <b>输出</b></li>
-<li><strong>Presenter</strong> 通过某些事件触发，去向其输入<strong>Interactor</strong>请求数据</li>
-</ul>
-<p>Presenter &lt;——–&gt; View(ViewController)</p>
-<ul>
-<li><strong>View</strong>       是 <strong>Presenter</strong>  的 <b>输出</b></li>
-<li><strong>ViewController</strong> 触发了 <strong>Presenter</strong> 去<strong>Interactor</strong>中请求新的业务结果，从而更新<strong>View</strong></li>
-</ul>
-<p>Presenter更新View的代码如下：</p>
-<pre><code><span class="comment">// CNTCountPresenter.m</span>
-<span class="tag">-</span> (void)<span class="tag">updateCount</span>:(NSUInteger)<span class="tag">count</span>
-{
-    <span class="attr_selector">[self.view setCountText:[self formattedCount:count]</span>];
-    <span class="attr_selector">[self.view setDecrementEnabled:[self canDecrementCount:count]</span>];
-}
-</code></pre><p>到这里，Counter这个例子的解读基本就完成了。细心的读者一定会发现，<strong>Entity</strong>和<strong>Route</strong>到哪里去了？</p>
-<p>是的，这个例子由于过于简单，压根不需要Entity。并且由于它是单视图应用，压根不涉及到页面切换，因此也无须Route功能。不过我们在后续的浅入浅出VIPER架构（2）中解读一个更细致更负责的例子，敬请期待！</p>
-
-      
-    </div>
-    <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/11/05/Understand-Viper/" data-id="cj3elfj4l000q5gi1cngwjshd" class="article-share-link">Share</a>
-      
-        <a href="http://satanwoo.github.io/2015/11/05/Understand-Viper/#disqus_thread" class="article-comment-link">Comments</a>
-      
-      
-  <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
 
     </footer>
   </div>
@@ -5724,7 +5831,7 @@ s.setAttribute('data-timestamp', +new Date());
   <div class="widget-wrap">
     <h3 class="widget-title">Tags</h3>
     <div class="widget">
-      <ul class="tag-list"><li class="tag-list-item"><a class="tag-list-link" href="/tags/Android/">Android</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Growth/">Growth</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/JavaScript/">JavaScript</a><span class="tag-list-count">3</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Math/">Math</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Performance/">Performance</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/R/">R</a><span class="tag-list-count">2</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Reverse-Engineering/">Reverse Engineering</a><span class="tag-list-count">3</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Swift/">Swift</a><span class="tag-list-count">6</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/iOS/">iOS</a><span class="tag-list-count">23</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/shell/">shell</a><span class="tag-list-count">1</span></li></ul>
+      <ul class="tag-list"><li class="tag-list-item"><a class="tag-list-link" href="/tags/Android/">Android</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Growth/">Growth</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/JavaScript/">JavaScript</a><span class="tag-list-count">3</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Math/">Math</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Performance/">Performance</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/R/">R</a><span class="tag-list-count">2</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Reverse-Engineering/">Reverse Engineering</a><span class="tag-list-count">3</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Swift/">Swift</a><span class="tag-list-count">6</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/iOS/">iOS</a><span class="tag-list-count">24</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/shell/">shell</a><span class="tag-list-count">1</span></li></ul>
     </div>
   </div>
 
@@ -5742,7 +5849,7 @@ s.setAttribute('data-timestamp', +new Date());
   <div class="widget-wrap">
     <h3 class="widget-title">Archives</h3>
     <div class="widget">
-      <ul class="archive-list"><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/06/">June 2017</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/04/">April 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/01/">January 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/10/">October 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/09/">September 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/07/">July 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/05/">May 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/04/">April 2016</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/03/">March 2016</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/02/">February 2016</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/12/">December 2015</a><span class="archive-list-count">6</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/11/">November 2015</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/10/">October 2015</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/09/">September 2015</a><span class="archive-list-count">4</span></li></ul>
+      <ul class="archive-list"><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/06/">June 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/04/">April 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/01/">January 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/10/">October 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/09/">September 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/07/">July 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/05/">May 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/04/">April 2016</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/03/">March 2016</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/02/">February 2016</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/12/">December 2015</a><span class="archive-list-count">6</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/11/">November 2015</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/10/">October 2015</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/09/">September 2015</a><span class="archive-list-count">4</span></li></ul>
     </div>
   </div>
 
@@ -5752,6 +5859,10 @@ s.setAttribute('data-timestamp', +new Date());
     <h3 class="widget-title">Recents</h3>
     <div class="widget">
       <ul>
+        
+          <li>
+            <a href="/2017/06/13/Macho-1/">深入剖析Macho (1)</a>
+          </li>
         
           <li>
             <a href="/2017/06/01/FBTweak/">从FBTweak 源码剖析一些中阶知识</a>
@@ -5767,10 +5878,6 @@ s.setAttribute('data-timestamp', +new Date());
         
           <li>
             <a href="/2017/01/07/DispatchGroupCrash/">iOS疑难问题排查之深入探究dispatch_group crash</a>
-          </li>
-        
-          <li>
-            <a href="/2017/01/07/JSONRPCKit/">JSONRPCKit源码解析</a>
           </li>
         
       </ul>
