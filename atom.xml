@@ -4,7 +4,7 @@
   
   <link href="/atom.xml" rel="self"/>
   <link href="http://satanwoo.github.io/"/>
-  <updated>2017-06-13T15:32:57.000Z</updated>
+  <updated>2017-06-13T15:34:48.000Z</updated>
   <id>http://satanwoo.github.io/</id>
   
   <author>
@@ -19,7 +19,7 @@
     <link href="http://satanwoo.github.io/2017/06/13/Macho-1/"/>
     <id>http://satanwoo.github.io/2017/06/13/Macho-1/</id>
     <published>2017-06-13T15:25:34.000Z</published>
-    <updated>2017-06-13T15:32:57.000Z</updated>
+    <updated>2017-06-13T15:34:48.000Z</updated>
     <content type="html"><![CDATA[<h3 id="起因">起因</h3><p>最近在公司里和一些同事搞了一些东西，略微底层。于是希望借这个机会好好把<code>Macho</code>相关的知识点梳理下。</p>
 <p>虽然网上关于<code>Macho</code>的文章介绍一大堆，但是我希望能够从<code>Macho</code>的构成，加载过程以及需要了解的相关背景角度去进行分析，每一个点都力图深入。也会在这篇文章最后打造一个类似<code>class-dump</code>的小型工具。</p>
 <h3 id="程序启动加载的过程">程序启动加载的过程</h3><p>当你点击一个icon启动应用程序的时候，系统在内部大致做了如下几件事：</p>
@@ -104,7 +104,7 @@ _magic = [cursor readBigInt32];
 <pre><code>(lldb) po _<span class="preprocessor">data</span>
 &lt;OS_dispatch_data: <span class="preprocessor">data</span>[<span class="number">0x100600b40</span>] = { leaf, size = <span class="number">199520</span>, <span class="keyword">buf </span>= <span class="number">0x100281000</span> }&gt;
 </code></pre><p>用<code>Xcode Memory</code>看下：</p>
-<p><img src="https://private-alipayobjects.alipay.com/alipay-rmsdeploy-image/skylark/png/15777/7383bc2bce9ed97f.png" alt="屏幕快照 2017-06-11 下午3.25.06.png"> </p>
+<p><img src="https://github.com/SatanWoo/BeeHive/blob/master/%E5%B1%8F%E5%B9%95%E5%BF%AB%E7%85%A7%202017-06-11%20%E4%B8%8B%E5%8D%883.25.06.png?raw=true" alt="屏幕快照 2017-06-11 下午3.25.06.png"> </p>
 <p>看起来是没错的。然后由于MacOSX本身是小端序的，<code>CFFAEDFE</code>这样的数据会被自动解析成<code>FE ED FA CF</code>。所以这样是有问题的。因此，<code>class-dump</code>采用了<code>OSReadBigInt32</code>的方式去解析：</p>
 <pre><code><span class="constant">OS_INLINE</span>
 <span class="constant">UInt32</span>

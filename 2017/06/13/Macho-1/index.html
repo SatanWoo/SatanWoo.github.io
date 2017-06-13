@@ -18,7 +18,7 @@
 <meta property="og:image" content="http://cc.cocimg.com/api/uploads/20150122/1421892661838860.gif">
 <meta property="og:image" content="https://github.com/SatanWoo/BeeHive/blob/master/%E5%B1%8F%E5%B9%95%E5%BF%AB%E7%85%A7%202017-06-11%20%E4%B8%8B%E5%8D%883.12.33.png?raw=true">
 <meta property="og:image" content="https://github.com/SatanWoo/BeeHive/blob/master/%E5%B1%8F%E5%B9%95%E5%BF%AB%E7%85%A7%202017-06-11%20%E4%B8%8B%E5%8D%883.13.47.png?raw=true">
-<meta property="og:image" content="https://private-alipayobjects.alipay.com/alipay-rmsdeploy-image/skylark/png/15777/7383bc2bce9ed97f.png">
+<meta property="og:image" content="https://github.com/SatanWoo/BeeHive/blob/master/%E5%B1%8F%E5%B9%95%E5%BF%AB%E7%85%A7%202017-06-11%20%E4%B8%8B%E5%8D%883.25.06.png?raw=true">
 <meta property="og:image" content="https://github.com/SatanWoo/BeeHive/blob/master/%E5%B1%8F%E5%B9%95%E5%BF%AB%E7%85%A7%202017-06-12%20%E4%B8%8A%E5%8D%8810.48.21.png?raw=true">
 <meta property="og:image" content="https://github.com/SatanWoo/BeeHive/blob/master/%E5%B1%8F%E5%B9%95%E5%BF%AB%E7%85%A7%202017-06-12%20%E4%B8%8A%E5%8D%8810.40.50.png?raw=true">
 <meta property="og:image" content="https://github.com/SatanWoo/BeeHive/blob/master/%E5%B1%8F%E5%B9%95%E5%BF%AB%E7%85%A7%202017-06-13%20%E4%B8%8B%E5%8D%883.47.50.png?raw=true">
@@ -27,7 +27,7 @@
 <meta property="og:image" content="https://github.com/SatanWoo/BeeHive/blob/master/%E5%B1%8F%E5%B9%95%E5%BF%AB%E7%85%A7%202017-06-13%20%E4%B8%8B%E5%8D%884.04.04.png?raw=true">
 <meta property="og:image" content="https://github.com/SatanWoo/BeeHive/blob/master/%E5%B1%8F%E5%B9%95%E5%BF%AB%E7%85%A7%202017-06-13%20%E4%B8%8B%E5%8D%884.04.28.png?raw=true">
 <meta property="og:image" content="https://github.com/SatanWoo/BeeHive/blob/master/%E5%B1%8F%E5%B9%95%E5%BF%AB%E7%85%A7%202017-06-13%20%E4%B8%8B%E5%8D%884.04.33.png?raw=true">
-<meta property="og:updated_time" content="2017-06-13T15:32:57.000Z">
+<meta property="og:updated_time" content="2017-06-13T15:34:48.000Z">
 <meta name="twitter:card" content="summary">
 <meta name="twitter:title" content="深入剖析Macho (1)">
 <meta name="twitter:description" content="起因最近在公司里和一些同事搞了一些东西，略微底层。于是希望借这个机会好好把Macho相关的知识点梳理下。
@@ -185,7 +185,7 @@ _magic = [cursor readBigInt32];
 <pre><code>(lldb) po _<span class="preprocessor">data</span>
 &lt;OS_dispatch_data: <span class="preprocessor">data</span>[<span class="number">0x100600b40</span>] = { leaf, size = <span class="number">199520</span>, <span class="keyword">buf </span>= <span class="number">0x100281000</span> }&gt;
 </code></pre><p>用<code>Xcode Memory</code>看下：</p>
-<p><img src="https://private-alipayobjects.alipay.com/alipay-rmsdeploy-image/skylark/png/15777/7383bc2bce9ed97f.png" alt="屏幕快照 2017-06-11 下午3.25.06.png"> </p>
+<p><img src="https://github.com/SatanWoo/BeeHive/blob/master/%E5%B1%8F%E5%B9%95%E5%BF%AB%E7%85%A7%202017-06-11%20%E4%B8%8B%E5%8D%883.25.06.png?raw=true" alt="屏幕快照 2017-06-11 下午3.25.06.png"> </p>
 <p>看起来是没错的。然后由于MacOSX本身是小端序的，<code>CFFAEDFE</code>这样的数据会被自动解析成<code>FE ED FA CF</code>。所以这样是有问题的。因此，<code>class-dump</code>采用了<code>OSReadBigInt32</code>的方式去解析：</p>
 <pre><code><span class="constant">OS_INLINE</span>
 <span class="constant">UInt32</span>
@@ -334,7 +334,7 @@ _magic = [cursor readBigInt32];
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2017/06/13/Macho-1/" data-id="cj3vq8pee001hqli1anakfro5" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2017/06/13/Macho-1/" data-id="cj3vqaxov001hs4i1g2iiesdy" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2017/06/13/Macho-1/#disqus_thread" class="article-comment-link">Comments</a>
       
