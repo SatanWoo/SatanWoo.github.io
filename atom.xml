@@ -4,7 +4,7 @@
   
   <link href="/atom.xml" rel="self"/>
   <link href="http://satanwoo.github.io/"/>
-  <updated>2017-06-13T15:34:48.000Z</updated>
+  <updated>2017-06-29T15:36:31.000Z</updated>
   <id>http://satanwoo.github.io/</id>
   
   <author>
@@ -13,6 +13,265 @@
   </author>
   
   <generator uri="http://hexo.io/">Hexo</generator>
+  
+  <entry>
+    <title><![CDATA[深入理解Macho文件（二）- 消失的__OBJC段与新生的__DATA段]]></title>
+    <link href="http://satanwoo.github.io/2017/06/29/Macho-2/"/>
+    <id>http://satanwoo.github.io/2017/06/29/Macho-2/</id>
+    <published>2017-06-29T15:22:32.000Z</published>
+    <updated>2017-06-29T15:36:31.000Z</updated>
+    <content type="html"><![CDATA[<p>在上文中，我们提到了有个神秘的<code>__OBJC</code>段，Runtime的许多机制就是依赖于它。但是无论我怎么搜索网上相关的资料、苹果的官方文档，都发现找不到这个段了。</p>
+<p>一脸懵逼。没事，打开class-dump，看看它怎么处理的。嘿嘿，果不其然，在Class-Dump的代码里，有着如下注释：</p>
+<blockquote>
+<p>@0xced Old ABI has an <strong>OBJC segment. New ABI has a </strong>DATA,__objc_info section</p>
+</blockquote>
+<p>通俗解释来说，我们先如今使用的都是Objective-C2.0，所以原先的<code>__OBJC</code>段的东西都不存在了，而是存入了<code>__DATA</code>段里。所以，我们就以如下这张图来探究下这些与Runtime加载有关的节。</p>
+<p><img src="https://github.com/SatanWoo/BeeHive/blob/master/mach2_1.png?raw=true" alt=""></p>
+<h4 id="__objc_imageinfo节"><code>__objc_imageinfo</code>节</h4><p>这个节可以看作是区别Objective-C 1.0与2.0的区别。从苹果的<strong>OBJC源码</strong>中能看到这个节的数据结构定义（去除Swift相关）如下：</p>
+<pre><code><span class="keyword">typedef</span> <span class="keyword">struct</span> {
+    <span class="keyword">uint32_t</span> version; <span class="comment">// currently 0</span>
+    <span class="keyword">uint32_t</span> flags;
+} objc_image_info;
+</code></pre><p>其中<code>version</code>这个字段目前永远为0。<code>flags</code>是用于做表示需要支持的特性的，比如是否需要/支持 <code>Garbage Collection</code>。</p>
+<pre><code>SupportsGC          = <span class="number">1</span>&lt;&lt;<span class="number">1</span>,  <span class="comment">// image supports GC</span>
+  RequiresGC          = <span class="number">1</span>&lt;&lt;<span class="number">2</span>,  <span class="comment">// image requires GC</span>
+
+<span class="keyword">if</span> (ii.flags &amp; (<span class="number">1</span>&lt;&lt;<span class="number">1</span>)) {
+    <span class="comment">// App wants GC. </span>
+    <span class="comment">// Don't return yet because we need to </span>
+    <span class="comment">// check the AppleScriptObjC exception.</span>
+    wantsGC = YES;
+}
+</code></pre><h4 id="__objc__classlist节"><code>__objc _classlist</code>节</h4><p>这个节列出了所有的<code>class</code>（<strong>metaclass自身也是一种class</strong>）。</p>
+<p>以计算器举例：我们先从<strong>MachoView</strong>找出一段数据，这个数据代表的就是class结构体所在的地址，如下图：</p>
+<p><img src="https://github.com/SatanWoo/BeeHive/blob/master/mach2_2.png?raw=true" alt=""></p>
+<p>通过hopper查看地址：<code>000000010002A128</code>，得到如下结果：</p>
+<p><img src="https://github.com/SatanWoo/BeeHive/blob/master/mach2_3.png?raw=true" alt=""></p>
+<p>内存地址（还没rebase过）中包含一个类本身的含义是什么意思呢？这都需要从Runtime里面来说起。</p>
+<p>我们假设说我们有个类A，其父类为AA。有两个A类型的实例<code>a1, a2</code>。</p>
+<p>我们都知道在真正调用<code>[a haha]</code>的方法的时候，实质上是通过<code>objc_msgSend</code>执行一系列的函数查询来找到真正的函数IMP，进而产生函数调用的。</p>
+<p>由于objc_msgSend的调用返回值是不确定的，需要根据不同的状态来返回，比如ARM64下的<a href="http://satanwoo.github.io/2017/04/23/ARM64IndirectReturn/">Indirect Result Location</a>。因此其本身的实现需要通过汇编来，我们截取最终要的一段ARM64的汇编如下：</p>
+<pre><code><span class="comment">// 1. 定义全局函数符号 _objc_msgSend</span>
+ENTRY _objc_msgSend
+
+<span class="comment">// 2. 为Exception做准备</span>
+UNWIND _objc_msgSend, NoFrame
+MESSENGER_START
+
+<span class="comment">// 3. 逻辑实现体</span>
+cmp    x0, #<span class="number">0</span>            <span class="comment">// nil check and tagged pointer check</span>
+<span class="tag">b</span><span class="class">.le</span>    LNilOrTagged        <span class="comment">//  (MSB tagged pointer looks negative)</span>
+ldr    x13, [x0]        <span class="comment">// x13 = isa</span>
+and    x16, x13, <span class="id">#ISA_MASK</span>    <span class="comment">// x16 = class    </span>
+LGetIsaDone:
+    CacheLookup NORMAL        <span class="comment">// calls imp or objc_msgSend_uncached</span>
+</code></pre><ul>
+<li>X0是函数调用者，即Self，比较其和nil的关系，如果是nil（或者tagged pointer）就走另外一种分支。<strong><span style="color:red">通过此，我们也不难理解为什么可以对nil发送消息了</span></strong></li>
+<li>根据self所在的地址，取其成员变量<code>isa</code>。</li>
+<li><code>x16 = x13 &amp; MASK</code>，也就意味着<code>x16</code>指向了内存里面的对应<code>A class</code>对象（<div style="color:red">注意：不是A class的实例对象）</div></li>
+<li>上述为什么要对<code>ISA</code>进行一个mask的位与操作，主要原因和Tagged Pointer类似，理由就不再赘述。</li>
+<li><p>执行<code>CacheLookUp</code>，具体的代码流程简要如下：</p>
+<pre><code><span class="class">.macro</span> CacheLookup
+<span class="comment">// x1 = SEL, x16 = isa</span>
+ldp    x10, x11, [x16, <span class="hexcolor">#CAC</span>HE]    <span class="comment">// x10 = buckets, x11 = occupied|mask</span>
+and    w12, w1, w11        <span class="comment">// x12 = _cmd &amp; mask</span>
+add    x12, x10, x12, LSL #<span class="number">4</span>    <span class="comment">// x12 = buckets + ((_cmd &amp; mask)&lt;&lt;4)</span>
+<span class="comment">// x9 = key, x17 = _imp</span>
+ldp    x9, x17, [x12]        <span class="comment">// {x9, x17} = *bucket</span>
+<span class="number">1</span>:    cmp    x9, x1            <span class="comment">// if (bucket-&gt;sel != _cmd)</span>
+    <span class="tag">b</span><span class="class">.ne</span>    <span class="number">2</span>f            <span class="comment">//     scan more</span>
+    CacheHit $<span class="number">0</span>            <span class="comment">// call or return imp</span>
+
+<span class="number">2</span>:    <span class="comment">// not hit: x12 = not-hit bucket</span>
+    CheckMiss $<span class="number">0</span>            <span class="comment">// miss if bucket-&gt;sel == 0</span>
+    cmp    x12, x10        <span class="comment">// wrap if bucket == buckets</span>
+    <span class="tag">b</span><span class="class">.eq</span>    <span class="number">3</span>f
+    ldp    x9, x17, [x12, #-<span class="number">16</span>]!    <span class="comment">// {x9, x17} = *--bucket</span>
+    <span class="tag">b</span>    <span class="number">1</span>b            <span class="comment">// loop</span>
+
+<span class="number">3</span>:    <span class="comment">// wrap: x12 = first bucket, w11 = mask</span>
+    add    x12, x12, w11, UXTW #<span class="number">4</span>    <span class="comment">// x12 = buckets+(mask&lt;&lt;4)</span>
+
+<span class="comment">// Clone scanning loop to miss instead of hang when cache is corrupt.</span>
+<span class="comment">// The slow path may detect any corruption and halt later.</span>
+
+ldp    x9, x17, [x12]        <span class="comment">// {x9, x17} = *bucket</span>
+<span class="number">1</span>:    cmp    x9, x1            <span class="comment">// if (bucket-&gt;sel != _cmd)</span>
+    <span class="tag">b</span><span class="class">.ne</span>    <span class="number">2</span>f            <span class="comment">//     scan more</span>
+    CacheHit $<span class="number">0</span>            <span class="comment">// call or return imp</span>
+
+<span class="number">2</span>:    <span class="comment">// not hit: x12 = not-hit bucket</span>
+    CheckMiss $<span class="number">0</span>            <span class="comment">// miss if bucket-&gt;sel == 0</span>
+    cmp    x12, x10        <span class="comment">// wrap if bucket == buckets</span>
+    <span class="tag">b</span><span class="class">.eq</span>    <span class="number">3</span>f
+    ldp    x9, x17, [x12, #-<span class="number">16</span>]!    <span class="comment">// {x9, x17} = *--bucket</span>
+    <span class="tag">b</span>    <span class="number">1</span>b            <span class="comment">// loop</span>
+
+<span class="number">3</span>:    <span class="comment">// double wrap</span>
+    JumpMiss $<span class="number">0</span>
+
+.endmacro
+</code></pre></li>
+</ul>
+<p>我们接着再来读读这段汇编。</p>
+<ul>
+<li><code>x16</code>承接上段汇编，是<code>A class</code>的实体，取出其<code>cache</code>成员变量。</li>
+<li><p>按照<code>_cmd</code>和<code>mask</code>的位运算，找出其在bucket数组中的偏移量。取出的数据结构是个<code>bucket_t</code>，如下：</p>
+<pre><code><span class="keyword">struct</span> <span class="keyword">bucket_t</span> {
+<span class="keyword">private</span>:
+    <span class="keyword">cache_key_t</span> _key;
+    IMP _imp;
+}
+</code></pre></li>
+<li><p>从上述数据结构不难理解，<code>cache</code>对象里面存了一个bucket数组，用于进行<code>SEL</code>对应的<code>IMP</code>，缓存。<code>key</code>是<code>SEL</code>对应的地址。</p>
+</li>
+<li>如果地址相同，就代表命中，执行<strong>CacheHit</strong>，其实就是简单的<code>br x17</code>。由于此时<code>x17</code>是IMP，即对应的函数地址，直接跳过去就完事了，这个分支下的<code>objc_msgSend</code>就执行完成了。</li>
+<li>那如果不相同，即命中的bucket里面不是我们要的<code>SEL</code>，就检查这个命中的桶是不是没有<code>SEL</code>，如果是空的，执行<code>__objc_msgSend_uncached</code>。这步后续开始就是去查找类方法列表-&gt;父类方法列表了。</li>
+<li>如果不为空，否则就执行循环，进行查询。</li>
+</ul>
+<p>**<span style="color:red"><br>一些细节知识：  </span></p>
+<ol>
+<li>.macro可以在汇编里面定义一段可以被复用的代码段。   </li>
+<li>.1b 代表的是向回找label定义为1的代码片段起始；1f代表向下找label定义为1的代码片段起始。  </li>
+<li>为什么在计算isa的时候先要位与一个mask，其原因在于现在的isa是一个兼具多种含义的指针。<br>**</li>
+</ol>
+<blockquote>
+<p>本文重点不在讲述Runtime上，所以objc_msgSend的细节就不去更深入的探究了。</p>
+</blockquote>
+<p>所以，按照上述步骤来理解，我们可以发现，苹果实例对象的<code>objc_msgSend</code>的机制可以简要抽象如下图例子：</p>
+<h4 id="__objc__catlist节"><code>__objc _catlist</code>节</h4><p>该节顾名思义，代表的就是程序里面有哪些<code>Category</code>。我们还是通过MachoView和Hopper来看一看：</p>
+<p><img src="https://github.com/SatanWoo/BeeHive/blob/master/mach2_4.png?raw=true" alt=""></p>
+<p><img src="https://github.com/SatanWoo/BeeHive/blob/master/mach2_5.png?raw=trueg" alt=""></p>
+<p>从Hopper里面看出的内容我们不难得到，<code>catlist</code>也对应着一个<code>Category_t</code>的实体，会在程序运行的过程中存在于内存中。这个结构体的数据定义如下：</p>
+<pre><code><span class="keyword">struct</span> <span class="keyword">category_t</span> {
+    <span class="keyword">const</span> <span class="keyword">char</span> *name;
+    <span class="keyword">classref_t</span> cls;
+    <span class="keyword">struct</span> <span class="keyword">method_list_t</span> *instanceMethods;
+    <span class="keyword">struct</span> <span class="keyword">method_list_t</span> *classMethods;
+    <span class="keyword">struct</span> <span class="keyword">protocol_list_t</span> *protocols;
+    <span class="keyword">struct</span> <span class="keyword">property_list_t</span> *instanceProperties;
+    <span class="comment">// Fields below this point are not always present on disk.</span>
+    <span class="keyword">struct</span> <span class="keyword">property_list_t</span> *_classProperties;
+}
+</code></pre><h4 id="__objc_protolist"><code>__objc_protolist</code></h4><p>该节的理解也非常简单，代表的就是程序里面有哪些<code>Protocol</code>。数据结构定义如下：</p>
+<pre><code><span class="keyword">struct</span> <span class="keyword">protocol_t</span> : objc_object {
+    <span class="keyword">const</span> <span class="keyword">char</span> *mangledName;
+    <span class="keyword">struct</span> <span class="keyword">protocol_list_t</span> *protocols;
+    <span class="keyword">method_list_t</span> *instanceMethods;
+    <span class="keyword">method_list_t</span> *classMethods;
+    <span class="keyword">method_list_t</span> *optionalInstanceMethods;
+    <span class="keyword">method_list_t</span> *optionalClassMethods;
+    <span class="keyword">property_list_t</span> *instanceProperties;
+    <span class="keyword">uint32_t</span> size;   <span class="comment">// sizeof(protocol_t)</span>
+    <span class="keyword">uint32_t</span> flags;
+    <span class="comment">// Fields below this point are not always present on disk.</span>
+    <span class="keyword">const</span> <span class="keyword">char</span> **_extendedMethodTypes;
+    <span class="keyword">const</span> <span class="keyword">char</span> *_demangledName;
+    <span class="keyword">property_list_t</span> *_classProperties;
+}
+</code></pre><h4 id="__objc_classrefs"><code>__objc_classrefs</code></h4><p>一开始这个节的意义我实在是没看懂。实在不理解在已经存在classlist这个数据节的情况下，为啥还是需要用这个类。后来经过一番实验发现，该节的目的是为了标记这个类究竟有没有被引用</p>
+<p>那有没有被引用的意义是什么？<strong><span style="color:red">可以包瘦身。如果在MachoView中都能直观告诉我们没有引用的类甚至是方法，都可以直接剔除了。</span></strong></p>
+<blockquote>
+<p>但是，作为一名经常奋战在包瘦身一线的同学，我可以直接告诉你，上述的想法是大错特错的。苹果这种可以利用字符串拼接从而调用大量runtime的方法，绝对坑哭了做包瘦身的人。</p>
+</blockquote>
+<p><strong><span style="color:blue">嘿嘿，不过其实这样也没啥难度，下一篇我会写一个基于Macho的包瘦身方案，绝对轻便简洁，不用基于AST来分析各种调用关系，这里卖个关子。</span></strong></p>
+<h4 id="__objc_selrefs"><code>__objc_selrefs</code></h4><p>这节的原理同上，告诉你究竟有哪些SEL对应的字符串被引用了。</p>
+<h4 id="__objc_superrefs"><code>__objc_superrefs</code></h4><p>这节虽然中字面意义上我们知道，是对超类（即父类）的引用，但是没理解啊，为什么要有这么一个破玩意。<br>不懂就一点点摸索，从MachoView里面来看，数据对应的地址还是指向一个个在classlist出现的类实体。</p>
+<p>通过和classlist里面出现的数据进行diff对比，如下图所示：</p>
+<p><img src="https://github.com/SatanWoo/BeeHive/blob/master/mach2_5.png?raw=true" alt=""></p>
+<p><img src="https://github.com/SatanWoo/BeeHive/blob/master/mach2_6.png?raw=true" alt=""></p>
+<p>可以发现，所有出现的<code>objc_superrefs</code>都是会被继承的类。那么，为什么要单独设计这样一个来存放这样的信息呢？</p>
+<p><strong><div style="color:red">哈哈哈：我上面的分析都是错的！！！！</div></strong><br><strong><div style="color:red">哈哈哈：我上面的分析都是错的！！！！</div></strong><br><strong><div style="color:red">哈哈哈：我上面的分析都是错的！！！！</div></strong></p>
+<p>真正的原因如下：<br>我们知道，我们在子类调用一个方法的时候，为了调用上层的父类的实现（如果有），常常会写出一个<code>[super message]</code>的代码。而这样的代码，在底层是会转换成调用<code>objc_msgSendSuper2</code>。而其接受的参数，第一个为结构体<code>objc_super2</code>，第二个为<code>SEL</code>。其中<code>objc_super2</code>的定义如下：</p>
+<pre><code><span class="class"><span class="keyword">struct</span> <span class="title">objc_super2</span> </span>{
+    id receiver;
+    Class current_class;
+};
+</code></pre><p>为了构造这样的数据结构体，在汇编层面会将<code>[super message]</code>转换成如下的汇编指令：</p>
+<p><img src="https://github.com/SatanWoo/BeeHive/blob/master/mach2_7.png?raw=true" alt=""></p>
+<p>注意看红框内的汇编代码，我们来分步骤解释下整体的汇编结构：</p>
+<ul>
+<li>首先在调用<code>[ViewController viewDidLoad]</code>的时候，x0是self（ViewController的实例），x1是@selector（viewDidLoad）。</li>
+<li>0x1000046c0 偏移的地方将<code>sp</code>向下申请了<code>48</code>(0x30)bytes的空间。</li>
+<li>0x1000046c4 将<code>SP</code>的地址存到的<code>x8</code>寄存器中。 <div style="color:red">这个X8寄存器会很关键</div></li>
+<li>0x1000046d0 通过<strong>adrp</strong>指令加载内存数据中的一个page，根据这个page的offset找到对应的<code>viewDidLoad</code>方法的ref。存入<code>x9</code>。</li>
+<li>0x1000046f8 通过<code>x9</code>寄存器中ref指向的地址，以该地址为内存读取真正的SEL，存入<code>x1</code>。</li>
+</ul>
+<p><strong><span style="color:red">至此，调用objc_msgSendSuper2的第二个参数准备完毕</span></strong>，我们再来看看第一个的参数是如何设置的。</p>
+<ul>
+<li><p>0x1000046d8 同样的方式，加载一个page的0x78的偏移位置的数据，点进去会发现是个class地址，存到<code>x10</code>中。<br><img src="https://github.com/SatanWoo/BeeHive/blob/master/mach2_8.png?raw=true" alt=""></p>
+</li>
+<li><p>然后，就轮到我们的栈空间出场了。我们先把<code>x0</code>存到sp处，然后再把<code>x10</code>，也就是上面说的class地址存入<code>sp+8 (str x10, [sp, #0x8]</code>。</p>
+</li>
+<li>最后，还记得我们之前提到的<code>x8</code>寄存器吗？我们之前可是将<code>sp</code>的值赋予了<code>x8</code>了。所以，在<code>1000046fc x0, x8</code>这个地方，我们将<code>x8</code>的值赋予了<code>x0</code>。<strong><span style="color:red">至此，调用objc_msgSendSuper2的第一个参数也准备完毕</span></strong></li>
+</ul>
+<p>最后附上<code>objc_msgSendSuper2</code>的代码供参考，逻辑非常简单，不再赘述。</p>
+<pre><code>ENTRY _objc_msgSendSuper2
+    UNWIND _objc_msgSendSuper2, NoFrame
+    MESSENGER_START
+
+    ldp    x0, x16, <span class="attr_selector">[x0]</span>        <span class="comment">// x0 = real receiver, x16 = class</span>
+    ldr    x16, <span class="attr_selector">[x16, #SUPERCLASS]</span>    <span class="comment">// x16 = class-&gt;superclass</span>
+    CacheLookup <span class="attribute">NORMAL</span>
+
+    END_ENTRY _objc_msgSendSuper2
+</code></pre><p><strong><span style="color:red">等等，心急的读者会问：你说了那么一大堆，你还是没解释到底为什么要存在superrefs?</span></strong></p>
+<p><strong>在Objective-C的设计里面，函数就是函数，它并不知道自己属于哪个类里面。换句通俗的话来说，必须是你（编译器）说去哪个class实体的方法列表里面寻找调用，才会真正的去找对应的方法，函数自身不知道是父类还是子类。同时，由于苹果的设计原因，一个类初始化的实例，是不具备了解superclass的条件的，只有通过isa对应的类实体才能获得。因此，在构建<code>objc_msgSendSuper2</code>的第一个参数的时候，就不如指在编译期定其对应的<code>current_class</code>，以方便后续的<code>superclass</code>方法列表查找。</strong></p>
+<p><strong><span style="color:red">而且，也必须在编译期间，根据当前的类，去定义<code>current_class</code>这个字段的值，不然当我们有多个层级的继承关系时，在运行时如何从单一的self参数构建正确的向上查找层级，就当前的OC设计里，就做不到了。</span></strong></p>
+<p><img src="https://github.com/SatanWoo/BeeHive/blob/master/mach2_9.png?raw=true" alt=""></p>
+<blockquote>
+<p>C++里面，对于函数来说，是可以明确知道对应的所属类的。究其原因，在于C++的不同类，都是不同的命名空间，调用父类的方法时，需明确指定父类的命名空间，如BASE::method。</p>
+</blockquote>
+<h4 id="__objc_const"><code>__objc_const</code></h4><p>这个节的含义是所有初始化的常量的都显示在这。但是很多人都对此节有着巨大的误解，认为<strong><span style="color:red"><code>const int k = 5</code></span></strong>对应的数据会存放在<code>__objc_const</code>节中。</p>
+<p>但是这是大错特错的，在代码里声明的<code>const</code>类型，实质上都属于<code>__TEXT</code>段，并属于其中的<code>const</code>节。而在<code>__objc_const</code>中存放的，是一些需要在类加载过程中用到的<code>readonly data</code>。具体这个<code>readonly data</code>包含了如下（但不限于）的数据结构：</p>
+<pre><code><span class="comment">// 只读数据</span>
+<span class="keyword">struct</span> <span class="keyword">class_ro_t</span> {
+    <span class="keyword">uint32_t</span> flags;
+    <span class="keyword">uint32_t</span> instanceStart;
+    <span class="keyword">uint32_t</span> instanceSize;
+<span class="preprocessor">#<span class="keyword">ifdef</span> __LP64__</span>
+    <span class="keyword">uint32_t</span> reserved;
+<span class="preprocessor">#<span class="keyword">endif</span></span>
+
+    <span class="keyword">const</span> <span class="keyword">uint8_t</span> * ivarLayout;
+
+    <span class="keyword">const</span> <span class="keyword">char</span> * name;
+    <span class="keyword">method_list_t</span> * baseMethodList;
+    <span class="keyword">protocol_list_t</span> * baseProtocols;
+    <span class="keyword">const</span> <span class="keyword">ivar_list_t</span> * ivars;
+
+    <span class="keyword">const</span> <span class="keyword">uint8_t</span> * weakIvarLayout;
+    <span class="keyword">property_list_t</span> *baseProperties;
+
+    <span class="keyword">method_list_t</span> *baseMethods() <span class="keyword">const</span> {
+        <span class="keyword">return</span> baseMethodList;
+    }
+};
+
+<span class="comment">// 方法列表</span>
+<span class="keyword">struct</span> <span class="keyword">method_list_t</span>:entsize_list_tt {
+     <span class="keyword">uint32_t</span> entsizeAndFlags;
+     <span class="keyword">uint32_t</span> count;
+     Element first;
+}
+
+<span class="comment">// 方法实体</span>
+<span class="keyword">struct</span> <span class="keyword">method_t</span> {
+    SEL name;
+    <span class="keyword">const</span> <span class="keyword">char</span> *types;
+    IMP imp;
+}
+</code></pre><p>关于<code>readonly data</code>后续会再开一个章节单独讲解。</p>
+<h3 id="结尾">结尾</h3><p>基本上MachO 关于Runtime涉及的主要的类就分析到这了，下一次继续剖析其他细枝末节。</p>
+]]></content>
+    <summary type="html">
+    <![CDATA[<p>在上文中，我们提到了有个神秘的<code>__OBJC</code>段，Runtime的许多机制就是依赖于它。但是无论我怎么搜索网上相关的资料、苹果的官方文档，都发现找不到这个段了。</p>
+<p>一脸懵逼。没事，打开class-dump，看看它怎么处理的。嘿嘿，果不其然，]]>
+    </summary>
+    
+      <category term="iOS" scheme="http://satanwoo.github.io/tags/iOS/"/>
+    
+  </entry>
   
   <entry>
     <title><![CDATA[深入剖析Macho (1)]]></title>
@@ -2692,97 +2951,6 @@ fi
     <summary type="html">
     <![CDATA[<p>开发过iOS的app已经不计其数了，在不同的项目中采用的架构也各不相同，有传统的<strong>MVC</strong>，简化的<strong>VIPER</strong>，以及一些简单的<strong>MVVM</strong>。</p>
 <p>这其中，我最不推荐的就是<]]>
-    </summary>
-    
-      <category term="iOS" scheme="http://satanwoo.github.io/tags/iOS/"/>
-    
-  </entry>
-  
-  <entry>
-    <title><![CDATA[DGRunKeeperSwitch 源码解析]]></title>
-    <link href="http://satanwoo.github.io/2016/02/05/DGRunKeeperSwitch/"/>
-    <id>http://satanwoo.github.io/2016/02/05/DGRunKeeperSwitch/</id>
-    <published>2016-02-05T14:35:57.000Z</published>
-    <updated>2016-02-05T14:38:35.000Z</updated>
-    <content type="html"><![CDATA[<p>DGRunKeeperSwitch是非常有趣的自定义的<em>Segment Control</em>的实现，从其Github上的展现效果来看，可以发现在 <em>同一个</em> UILabel中的文本竟然可以展现出两种不同的颜色，是不是很奇妙？今天就让我们来看看它是如何实现的。</p>
-<p><img src="https://raw.githubusercontent.com/gontovnik/DGRunkeeperSwitch/master/DGRunkeeperSwitch.gif" alt=""></p>
-<h3 id="源码分析">源码分析</h3><p>打开项目，发现这个项目真的很简单，就一个文件，<code>DGRunkeeperSwitch.swift</code>，并且实现也只有接近260行左右。</p>
-<p>既然这个项目是个UI的开源库，我们主要还是先从界面层级入手。和<a href="http:glowing.com" target="_blank" rel="external">Glow的开源库(GLCalendar)</a>不同，这个是纯手写的控件，因此无法从<strong>.xib</strong>文件来快速了解，所以我们把目标首先投向相关的UIKit子属性，包括如下：</p>
-<pre><code><span class="comment">// 1. </span>
-private <span class="tag">var</span> titleLabelsContentView = <span class="function"><span class="title">UIView</span><span class="params">()</span></span>
-private <span class="tag">var</span> leftTitleLabel = <span class="function"><span class="title">UILabel</span><span class="params">()</span></span>
-private <span class="tag">var</span> rightTitleLabel = <span class="function"><span class="title">UILabel</span><span class="params">()</span></span>
-
-<span class="comment">// 2.</span>
-private <span class="tag">var</span> selectedTitleLabelsContentView = <span class="function"><span class="title">UIView</span><span class="params">()</span></span>
-private <span class="tag">var</span> selectedLeftTitleLabel = <span class="function"><span class="title">UILabel</span><span class="params">()</span></span>
-private <span class="tag">var</span> selectedRightTitleLabel = <span class="function"><span class="title">UILabel</span><span class="params">()</span></span>
-
-<span class="comment">// 3.</span>
-<span class="function"><span class="title">private</span><span class="params">(set)</span></span> <span class="tag">var</span> selectedBackgroundView = <span class="function"><span class="title">UIView</span><span class="params">()</span></span> 
-private <span class="tag">var</span> titleMaskView: UIView = <span class="function"><span class="title">UIView</span><span class="params">()</span></span>
-</code></pre><p>其中第一部分我们一看命名就很容易理解了，有一个<code>ContentView</code>作为<code>container</code>，包含了<code>segment control</code>对应的左右两个Label。</p>
-<p>然后来看第二部分，第二部分从命名上也很直观，感觉上和第一部分是一致的，但是却<strong>可能代表的是选中的状态</strong>。不过我们很奇怪，作者为什么要构建一个一模一样的来表征不同的状态呢，直接用一个变量比如 <code>var selected = false</code> 进行样式的控制不可以吗？</p>
-<p>好，先别急，这里卖个关子，我们继续往下看。</p>
-<p>第三部分，<code>selectedBackgroundView</code>和<code>titleMaskView</code>，从名字看，也不能一下子了解含义，我们先全局搜索下相关连的代码，与<code>titleMaskView</code>相关的内容如下：</p>
-<pre><code>titleMaskView<span class="class">.backgroundColor</span> = .<span class="function"><span class="title">blackColor</span><span class="params">()</span></span>
-selectedTitleLabelsContentView<span class="class">.layer</span><span class="class">.mask</span> = titleMaskView.layer
-</code></pre><p>看起来是用<code>titleMaskView</code>给之前<strong>可能的选中状态的</strong><code>selectedTitleLabelsContentView</code>加了一层遮罩。</p>
-<p>由于遮罩是白色的地方不显示，黑色的地方（准确来说是非白色的区域）显示，因此我们可以理解上述代码是通过<code>titleMaskView</code>来显示<code>selectedTitleLabelsContentView</code>中的内容（<strong>也就是两个UILabel</strong>），非<code>titleMaskView</code>区域自动隐藏了。</p>
-<pre><code>addObserver(<span class="keyword">self</span>, forKeyPath: <span class="string">"selectedBackgroundView.frame"</span>, options: .<span class="type">New</span>, context: <span class="literal">nil</span>)
-
-<span class="keyword">override</span> public <span class="func"><span class="keyword">func</span> <span class="title">observeValueForKeyPath</span><span class="params">(keyPath: String?, ofObject object: AnyObject?, change: [String : AnyObject]?, context: UnsafeMutablePointer&lt;Void&gt;)</span></span> {
-    <span class="keyword">if</span> keyPath == <span class="string">"selectedBackgroundView.frame"</span> {
-        titleMaskView.frame = selectedBackgroundView.frame
-    }
-}
-</code></pre><p>哦，看完上述这段代码，我开始有点恍然大悟了，通过监听<code>selectedBackgroundView.frame</code>，我们实时改变<code>titleMaskView</code>的<code>frame</code>。而通过实际运行项目，我们可以很容易理解<code>selectedBackgroundView</code>就是用户可拖拽的选项高亮条。</p>
-<p>到这，我渐渐有点理解作者为什么要构建两个完全一样的contentView，并都包含左右两个UILabel了。</p>
-<p>作者应该是对于<code>titleLabelsContentView</code>设定为普通状态的Label，左右两个Label都是未选中的颜色状态，同时将<code>selectedTitleLabelsContentView</code>设定为选定状态，左右Label都使用了选中时候的颜色状态，然后通过<code>titleMaskView</code>进行遮罩，这样，<code>selectedTitleLabelsContentView</code>其余部分就被隐藏，会显示出下部<code>titleLabelsContentView</code>普通状态的Label颜色。</p>
-<p>嘿嘿，读一下剩下的源代码，和我的猜测一致，不得不说，<strong>我真是太聪明了</strong>，这个思路真是太赞了。</p>
-<h3 id="如何真正实现一个好的UI库">如何真正实现一个好的UI库</h3><p>看到这个小标题，可能有人会产生疑惑，实现好一个UI库不就是功能正确，效果正常吗？错！</p>
-<p>我认为这只是基本的两点，还有如下几点需要包含：</p>
-<ul>
-<li>使用正确的类型</li>
-<li>在正确的函数中做正确的事</li>
-<li>暴露不过多也不过少的属性</li>
-<li>抛出、监听相对应的事件</li>
-<li>根据不同屏幕大小、屏幕方向进行适配</li>
-<li>横竖屏情况都能展示良好</li>
-</ul>
-<ol>
-<li><p>第一，从DGRunkeeperSwitch来看，首先由于其模仿的是UISegmentControl，所以自然而然的应该继承与<strong>UIControl</strong>而不是UIView。有人要问有啥区别，简单来说就是<strong>UIControl将UIView中能接受的Touch事件，转换成了更高级的UIEvent，比如UITouchUpInside。</strong></p>
-</li>
-<li><p>第二，作者通过init函数进行初始化，通过layoutSubview进行页面布局，而不是像很多人自己写代码时将很多东西一窝蜂的堆到了init中。</p>
-</li>
-<li><p>提供了颜色、字体、边距以及动画弹性等属性给外部调用，同时将不应该暴露的内部UIKit变量进行私有化，并将<code>selectedIndex</code>通过<code>private(set)</code>对外设置为只读。</p>
-</li>
-<li><p>在切换Segment选择后，抛出了相应的<code>sendActionsForControlEvents(.ValueChanged)</code> 用于给外部监听。</p>
-</li>
-</ol>
-<h3 id="效果之外的重点">效果之外的重点</h3><p>作者在实现这个项目之中，有几点是比较值得注意的：</p>
-<h4 id="利用元组同时赋值多个属性">利用元组同时赋值多个属性</h4><pre><code><span class="keyword">public</span> var leftTitle: <span class="keyword">String</span> {
-    <span class="built_in">set</span> { (leftTitleLabel.<span class="built_in">text</span>, selectedLeftTitleLabel.<span class="built_in">text</span>) = (newValue, newValue) }
-    <span class="built_in">get</span> { <span class="keyword">return</span> leftTitleLabel.<span class="built_in">text</span>! }
-}
-</code></pre><p>在Swift中引入了一个元组的新类型，我们可以利用这个数据结构同时给多个属性赋值。</p>
-<h4 id="private(set)">private(set)</h4><pre><code><span class="keyword">private</span>(<span class="keyword">set</span>) <span class="keyword">public</span> <span class="variable"><span class="keyword">var</span> selectedIndex</span>: <span class="typename">Int</span> = <span class="number">0</span>
-</code></pre><p>作者在实现过程中保留了一个<code>selectedIndex</code> 变量，但是这个类对外只读，对内可以读写，因此用了<strong>private(set)</strong>。</p>
-<p><strong>这相当于在Objective-C时代，我们在.h文件中声明  <code>@property(nonatomic, strong, readonly) Class *A</code><br>然后又在.m文件中，声明  <code>@property(nonatomic, strong, readwrite) Class *A</code></strong></p>
-<h4 id="UIView和CALayer">UIView和CALayer</h4><p>很多人写iOS的时候，分不清UIView和CALayer之间的区别，很多人都理解成了继承的关系。大错特错！</p>
-<ul>
-<li>实际上UIView里面有个成员变量是CALayer，而CALayer的delegate是UIView(这会涉及到很多的隐式动画之类的，不展开了)</li>
-<li>UIView可以接受Touch事件，而Layer不行</li>
-<li>UIView有个layerClass的类型方法，可以被复写，用于改变这个UIView对应的基础Layer类型，比如你可以将赋值CAGradientLayer给这个View</li>
-</ul>
-<p>在本项目中，作者复写了layerClass，如下：</p>
-<pre><code><span class="keyword">override</span> <span class="keyword">public</span> <span class="class"><span class="keyword">class</span> <span class="title">func</span> <span class="title">layerClass</span>() -&gt; <span class="title">AnyClass</span> </span>{
-    <span class="keyword">return</span> DGRunkeeperSwitchRoundedLayer.self
-}
-</code></pre><p>好啦，今天就差不多到这啦~下周再见。</p>
-]]></content>
-    <summary type="html">
-    <![CDATA[<p>DGRunKeeperSwitch是非常有趣的自定义的<em>Segment Control</em>的实现，从其Github上的展现效果来看，可以发现在 <em>同一个</em> UILabel中的文本竟然可以展现出两种不同的颜色，是不是很奇妙？今天就让我们来看看它是如何]]>
     </summary>
     
       <category term="iOS" scheme="http://satanwoo.github.io/tags/iOS/"/>

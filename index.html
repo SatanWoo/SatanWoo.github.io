@@ -62,6 +62,309 @@
       <div class="outer">
         <section id="main">
   
+    <article id="post-Macho-2" class="article article-type-post" itemscope itemprop="blogPost">
+  <div class="article-meta">
+    <a href="/2017/06/29/Macho-2/" class="article-date">
+  <time datetime="2017-06-29T15:22:32.000Z" itemprop="datePublished">2017-06-29</time>
+</a>
+    
+  </div>
+  <div class="article-inner">
+    
+    
+      <header class="article-header">
+        
+  
+    <h1 itemprop="name">
+      <a class="article-title" href="/2017/06/29/Macho-2/">深入理解Macho文件（二）- 消失的__OBJC段与新生的__DATA段</a>
+    </h1>
+  
+
+      </header>
+    
+    <div class="article-entry" itemprop="articleBody">
+      
+        <p>在上文中，我们提到了有个神秘的<code>__OBJC</code>段，Runtime的许多机制就是依赖于它。但是无论我怎么搜索网上相关的资料、苹果的官方文档，都发现找不到这个段了。</p>
+<p>一脸懵逼。没事，打开class-dump，看看它怎么处理的。嘿嘿，果不其然，在Class-Dump的代码里，有着如下注释：</p>
+<blockquote>
+<p>@0xced Old ABI has an <strong>OBJC segment. New ABI has a </strong>DATA,__objc_info section</p>
+</blockquote>
+<p>通俗解释来说，我们先如今使用的都是Objective-C2.0，所以原先的<code>__OBJC</code>段的东西都不存在了，而是存入了<code>__DATA</code>段里。所以，我们就以如下这张图来探究下这些与Runtime加载有关的节。</p>
+<p><img src="https://github.com/SatanWoo/BeeHive/blob/master/mach2_1.png?raw=true" alt=""></p>
+<h4 id="__objc_imageinfo节"><code>__objc_imageinfo</code>节</h4><p>这个节可以看作是区别Objective-C 1.0与2.0的区别。从苹果的<strong>OBJC源码</strong>中能看到这个节的数据结构定义（去除Swift相关）如下：</p>
+<pre><code><span class="keyword">typedef</span> <span class="keyword">struct</span> {
+    <span class="keyword">uint32_t</span> version; <span class="comment">// currently 0</span>
+    <span class="keyword">uint32_t</span> flags;
+} objc_image_info;
+</code></pre><p>其中<code>version</code>这个字段目前永远为0。<code>flags</code>是用于做表示需要支持的特性的，比如是否需要/支持 <code>Garbage Collection</code>。</p>
+<pre><code>SupportsGC          = <span class="number">1</span>&lt;&lt;<span class="number">1</span>,  <span class="comment">// image supports GC</span>
+  RequiresGC          = <span class="number">1</span>&lt;&lt;<span class="number">2</span>,  <span class="comment">// image requires GC</span>
+
+<span class="keyword">if</span> (ii.flags &amp; (<span class="number">1</span>&lt;&lt;<span class="number">1</span>)) {
+    <span class="comment">// App wants GC. </span>
+    <span class="comment">// Don't return yet because we need to </span>
+    <span class="comment">// check the AppleScriptObjC exception.</span>
+    wantsGC = YES;
+}
+</code></pre><h4 id="__objc__classlist节"><code>__objc _classlist</code>节</h4><p>这个节列出了所有的<code>class</code>（<strong>metaclass自身也是一种class</strong>）。</p>
+<p>以计算器举例：我们先从<strong>MachoView</strong>找出一段数据，这个数据代表的就是class结构体所在的地址，如下图：</p>
+<p><img src="https://github.com/SatanWoo/BeeHive/blob/master/mach2_2.png?raw=true" alt=""></p>
+<p>通过hopper查看地址：<code>000000010002A128</code>，得到如下结果：</p>
+<p><img src="https://github.com/SatanWoo/BeeHive/blob/master/mach2_3.png?raw=true" alt=""></p>
+<p>内存地址（还没rebase过）中包含一个类本身的含义是什么意思呢？这都需要从Runtime里面来说起。</p>
+<p>我们假设说我们有个类A，其父类为AA。有两个A类型的实例<code>a1, a2</code>。</p>
+<p>我们都知道在真正调用<code>[a haha]</code>的方法的时候，实质上是通过<code>objc_msgSend</code>执行一系列的函数查询来找到真正的函数IMP，进而产生函数调用的。</p>
+<p>由于objc_msgSend的调用返回值是不确定的，需要根据不同的状态来返回，比如ARM64下的<a href="http://satanwoo.github.io/2017/04/23/ARM64IndirectReturn/">Indirect Result Location</a>。因此其本身的实现需要通过汇编来，我们截取最终要的一段ARM64的汇编如下：</p>
+<pre><code><span class="comment">// 1. 定义全局函数符号 _objc_msgSend</span>
+ENTRY _objc_msgSend
+
+<span class="comment">// 2. 为Exception做准备</span>
+UNWIND _objc_msgSend, NoFrame
+MESSENGER_START
+
+<span class="comment">// 3. 逻辑实现体</span>
+cmp    x0, #<span class="number">0</span>            <span class="comment">// nil check and tagged pointer check</span>
+<span class="tag">b</span><span class="class">.le</span>    LNilOrTagged        <span class="comment">//  (MSB tagged pointer looks negative)</span>
+ldr    x13, [x0]        <span class="comment">// x13 = isa</span>
+and    x16, x13, <span class="id">#ISA_MASK</span>    <span class="comment">// x16 = class    </span>
+LGetIsaDone:
+    CacheLookup NORMAL        <span class="comment">// calls imp or objc_msgSend_uncached</span>
+</code></pre><ul>
+<li>X0是函数调用者，即Self，比较其和nil的关系，如果是nil（或者tagged pointer）就走另外一种分支。<strong><span style="color:red">通过此，我们也不难理解为什么可以对nil发送消息了</span></strong></li>
+<li>根据self所在的地址，取其成员变量<code>isa</code>。</li>
+<li><code>x16 = x13 &amp; MASK</code>，也就意味着<code>x16</code>指向了内存里面的对应<code>A class</code>对象（<div style="color:red">注意：不是A class的实例对象）</div></li>
+<li>上述为什么要对<code>ISA</code>进行一个mask的位与操作，主要原因和Tagged Pointer类似，理由就不再赘述。</li>
+<li><p>执行<code>CacheLookUp</code>，具体的代码流程简要如下：</p>
+<pre><code><span class="class">.macro</span> CacheLookup
+<span class="comment">// x1 = SEL, x16 = isa</span>
+ldp    x10, x11, [x16, <span class="hexcolor">#CAC</span>HE]    <span class="comment">// x10 = buckets, x11 = occupied|mask</span>
+and    w12, w1, w11        <span class="comment">// x12 = _cmd &amp; mask</span>
+add    x12, x10, x12, LSL #<span class="number">4</span>    <span class="comment">// x12 = buckets + ((_cmd &amp; mask)&lt;&lt;4)</span>
+<span class="comment">// x9 = key, x17 = _imp</span>
+ldp    x9, x17, [x12]        <span class="comment">// {x9, x17} = *bucket</span>
+<span class="number">1</span>:    cmp    x9, x1            <span class="comment">// if (bucket-&gt;sel != _cmd)</span>
+    <span class="tag">b</span><span class="class">.ne</span>    <span class="number">2</span>f            <span class="comment">//     scan more</span>
+    CacheHit $<span class="number">0</span>            <span class="comment">// call or return imp</span>
+
+<span class="number">2</span>:    <span class="comment">// not hit: x12 = not-hit bucket</span>
+    CheckMiss $<span class="number">0</span>            <span class="comment">// miss if bucket-&gt;sel == 0</span>
+    cmp    x12, x10        <span class="comment">// wrap if bucket == buckets</span>
+    <span class="tag">b</span><span class="class">.eq</span>    <span class="number">3</span>f
+    ldp    x9, x17, [x12, #-<span class="number">16</span>]!    <span class="comment">// {x9, x17} = *--bucket</span>
+    <span class="tag">b</span>    <span class="number">1</span>b            <span class="comment">// loop</span>
+
+<span class="number">3</span>:    <span class="comment">// wrap: x12 = first bucket, w11 = mask</span>
+    add    x12, x12, w11, UXTW #<span class="number">4</span>    <span class="comment">// x12 = buckets+(mask&lt;&lt;4)</span>
+
+<span class="comment">// Clone scanning loop to miss instead of hang when cache is corrupt.</span>
+<span class="comment">// The slow path may detect any corruption and halt later.</span>
+
+ldp    x9, x17, [x12]        <span class="comment">// {x9, x17} = *bucket</span>
+<span class="number">1</span>:    cmp    x9, x1            <span class="comment">// if (bucket-&gt;sel != _cmd)</span>
+    <span class="tag">b</span><span class="class">.ne</span>    <span class="number">2</span>f            <span class="comment">//     scan more</span>
+    CacheHit $<span class="number">0</span>            <span class="comment">// call or return imp</span>
+
+<span class="number">2</span>:    <span class="comment">// not hit: x12 = not-hit bucket</span>
+    CheckMiss $<span class="number">0</span>            <span class="comment">// miss if bucket-&gt;sel == 0</span>
+    cmp    x12, x10        <span class="comment">// wrap if bucket == buckets</span>
+    <span class="tag">b</span><span class="class">.eq</span>    <span class="number">3</span>f
+    ldp    x9, x17, [x12, #-<span class="number">16</span>]!    <span class="comment">// {x9, x17} = *--bucket</span>
+    <span class="tag">b</span>    <span class="number">1</span>b            <span class="comment">// loop</span>
+
+<span class="number">3</span>:    <span class="comment">// double wrap</span>
+    JumpMiss $<span class="number">0</span>
+
+.endmacro
+</code></pre></li>
+</ul>
+<p>我们接着再来读读这段汇编。</p>
+<ul>
+<li><code>x16</code>承接上段汇编，是<code>A class</code>的实体，取出其<code>cache</code>成员变量。</li>
+<li><p>按照<code>_cmd</code>和<code>mask</code>的位运算，找出其在bucket数组中的偏移量。取出的数据结构是个<code>bucket_t</code>，如下：</p>
+<pre><code><span class="keyword">struct</span> <span class="keyword">bucket_t</span> {
+<span class="keyword">private</span>:
+    <span class="keyword">cache_key_t</span> _key;
+    IMP _imp;
+}
+</code></pre></li>
+<li><p>从上述数据结构不难理解，<code>cache</code>对象里面存了一个bucket数组，用于进行<code>SEL</code>对应的<code>IMP</code>，缓存。<code>key</code>是<code>SEL</code>对应的地址。</p>
+</li>
+<li>如果地址相同，就代表命中，执行<strong>CacheHit</strong>，其实就是简单的<code>br x17</code>。由于此时<code>x17</code>是IMP，即对应的函数地址，直接跳过去就完事了，这个分支下的<code>objc_msgSend</code>就执行完成了。</li>
+<li>那如果不相同，即命中的bucket里面不是我们要的<code>SEL</code>，就检查这个命中的桶是不是没有<code>SEL</code>，如果是空的，执行<code>__objc_msgSend_uncached</code>。这步后续开始就是去查找类方法列表-&gt;父类方法列表了。</li>
+<li>如果不为空，否则就执行循环，进行查询。</li>
+</ul>
+<p>**<span style="color:red"><br>一些细节知识：  </span></p>
+<ol>
+<li>.macro可以在汇编里面定义一段可以被复用的代码段。   </li>
+<li>.1b 代表的是向回找label定义为1的代码片段起始；1f代表向下找label定义为1的代码片段起始。  </li>
+<li>为什么在计算isa的时候先要位与一个mask，其原因在于现在的isa是一个兼具多种含义的指针。<br>**</li>
+</ol>
+<blockquote>
+<p>本文重点不在讲述Runtime上，所以objc_msgSend的细节就不去更深入的探究了。</p>
+</blockquote>
+<p>所以，按照上述步骤来理解，我们可以发现，苹果实例对象的<code>objc_msgSend</code>的机制可以简要抽象如下图例子：</p>
+<h4 id="__objc__catlist节"><code>__objc _catlist</code>节</h4><p>该节顾名思义，代表的就是程序里面有哪些<code>Category</code>。我们还是通过MachoView和Hopper来看一看：</p>
+<p><img src="https://github.com/SatanWoo/BeeHive/blob/master/mach2_4.png?raw=true" alt=""></p>
+<p><img src="https://github.com/SatanWoo/BeeHive/blob/master/mach2_5.png?raw=trueg" alt=""></p>
+<p>从Hopper里面看出的内容我们不难得到，<code>catlist</code>也对应着一个<code>Category_t</code>的实体，会在程序运行的过程中存在于内存中。这个结构体的数据定义如下：</p>
+<pre><code><span class="keyword">struct</span> <span class="keyword">category_t</span> {
+    <span class="keyword">const</span> <span class="keyword">char</span> *name;
+    <span class="keyword">classref_t</span> cls;
+    <span class="keyword">struct</span> <span class="keyword">method_list_t</span> *instanceMethods;
+    <span class="keyword">struct</span> <span class="keyword">method_list_t</span> *classMethods;
+    <span class="keyword">struct</span> <span class="keyword">protocol_list_t</span> *protocols;
+    <span class="keyword">struct</span> <span class="keyword">property_list_t</span> *instanceProperties;
+    <span class="comment">// Fields below this point are not always present on disk.</span>
+    <span class="keyword">struct</span> <span class="keyword">property_list_t</span> *_classProperties;
+}
+</code></pre><h4 id="__objc_protolist"><code>__objc_protolist</code></h4><p>该节的理解也非常简单，代表的就是程序里面有哪些<code>Protocol</code>。数据结构定义如下：</p>
+<pre><code><span class="keyword">struct</span> <span class="keyword">protocol_t</span> : objc_object {
+    <span class="keyword">const</span> <span class="keyword">char</span> *mangledName;
+    <span class="keyword">struct</span> <span class="keyword">protocol_list_t</span> *protocols;
+    <span class="keyword">method_list_t</span> *instanceMethods;
+    <span class="keyword">method_list_t</span> *classMethods;
+    <span class="keyword">method_list_t</span> *optionalInstanceMethods;
+    <span class="keyword">method_list_t</span> *optionalClassMethods;
+    <span class="keyword">property_list_t</span> *instanceProperties;
+    <span class="keyword">uint32_t</span> size;   <span class="comment">// sizeof(protocol_t)</span>
+    <span class="keyword">uint32_t</span> flags;
+    <span class="comment">// Fields below this point are not always present on disk.</span>
+    <span class="keyword">const</span> <span class="keyword">char</span> **_extendedMethodTypes;
+    <span class="keyword">const</span> <span class="keyword">char</span> *_demangledName;
+    <span class="keyword">property_list_t</span> *_classProperties;
+}
+</code></pre><h4 id="__objc_classrefs"><code>__objc_classrefs</code></h4><p>一开始这个节的意义我实在是没看懂。实在不理解在已经存在classlist这个数据节的情况下，为啥还是需要用这个类。后来经过一番实验发现，该节的目的是为了标记这个类究竟有没有被引用</p>
+<p>那有没有被引用的意义是什么？<strong><span style="color:red">可以包瘦身。如果在MachoView中都能直观告诉我们没有引用的类甚至是方法，都可以直接剔除了。</span></strong></p>
+<blockquote>
+<p>但是，作为一名经常奋战在包瘦身一线的同学，我可以直接告诉你，上述的想法是大错特错的。苹果这种可以利用字符串拼接从而调用大量runtime的方法，绝对坑哭了做包瘦身的人。</p>
+</blockquote>
+<p><strong><span style="color:blue">嘿嘿，不过其实这样也没啥难度，下一篇我会写一个基于Macho的包瘦身方案，绝对轻便简洁，不用基于AST来分析各种调用关系，这里卖个关子。</span></strong></p>
+<h4 id="__objc_selrefs"><code>__objc_selrefs</code></h4><p>这节的原理同上，告诉你究竟有哪些SEL对应的字符串被引用了。</p>
+<h4 id="__objc_superrefs"><code>__objc_superrefs</code></h4><p>这节虽然中字面意义上我们知道，是对超类（即父类）的引用，但是没理解啊，为什么要有这么一个破玩意。<br>不懂就一点点摸索，从MachoView里面来看，数据对应的地址还是指向一个个在classlist出现的类实体。</p>
+<p>通过和classlist里面出现的数据进行diff对比，如下图所示：</p>
+<p><img src="https://github.com/SatanWoo/BeeHive/blob/master/mach2_5.png?raw=true" alt=""></p>
+<p><img src="https://github.com/SatanWoo/BeeHive/blob/master/mach2_6.png?raw=true" alt=""></p>
+<p>可以发现，所有出现的<code>objc_superrefs</code>都是会被继承的类。那么，为什么要单独设计这样一个来存放这样的信息呢？</p>
+<p><strong><div style="color:red">哈哈哈：我上面的分析都是错的！！！！</div></strong><br><strong><div style="color:red">哈哈哈：我上面的分析都是错的！！！！</div></strong><br><strong><div style="color:red">哈哈哈：我上面的分析都是错的！！！！</div></strong></p>
+<p>真正的原因如下：<br>我们知道，我们在子类调用一个方法的时候，为了调用上层的父类的实现（如果有），常常会写出一个<code>[super message]</code>的代码。而这样的代码，在底层是会转换成调用<code>objc_msgSendSuper2</code>。而其接受的参数，第一个为结构体<code>objc_super2</code>，第二个为<code>SEL</code>。其中<code>objc_super2</code>的定义如下：</p>
+<pre><code><span class="class"><span class="keyword">struct</span> <span class="title">objc_super2</span> </span>{
+    id receiver;
+    Class current_class;
+};
+</code></pre><p>为了构造这样的数据结构体，在汇编层面会将<code>[super message]</code>转换成如下的汇编指令：</p>
+<p><img src="https://github.com/SatanWoo/BeeHive/blob/master/mach2_7.png?raw=true" alt=""></p>
+<p>注意看红框内的汇编代码，我们来分步骤解释下整体的汇编结构：</p>
+<ul>
+<li>首先在调用<code>[ViewController viewDidLoad]</code>的时候，x0是self（ViewController的实例），x1是@selector（viewDidLoad）。</li>
+<li>0x1000046c0 偏移的地方将<code>sp</code>向下申请了<code>48</code>(0x30)bytes的空间。</li>
+<li>0x1000046c4 将<code>SP</code>的地址存到的<code>x8</code>寄存器中。 <div style="color:red">这个X8寄存器会很关键</div></li>
+<li>0x1000046d0 通过<strong>adrp</strong>指令加载内存数据中的一个page，根据这个page的offset找到对应的<code>viewDidLoad</code>方法的ref。存入<code>x9</code>。</li>
+<li>0x1000046f8 通过<code>x9</code>寄存器中ref指向的地址，以该地址为内存读取真正的SEL，存入<code>x1</code>。</li>
+</ul>
+<p><strong><span style="color:red">至此，调用objc_msgSendSuper2的第二个参数准备完毕</span></strong>，我们再来看看第一个的参数是如何设置的。</p>
+<ul>
+<li><p>0x1000046d8 同样的方式，加载一个page的0x78的偏移位置的数据，点进去会发现是个class地址，存到<code>x10</code>中。<br><img src="https://github.com/SatanWoo/BeeHive/blob/master/mach2_8.png?raw=true" alt=""></p>
+</li>
+<li><p>然后，就轮到我们的栈空间出场了。我们先把<code>x0</code>存到sp处，然后再把<code>x10</code>，也就是上面说的class地址存入<code>sp+8 (str x10, [sp, #0x8]</code>。</p>
+</li>
+<li>最后，还记得我们之前提到的<code>x8</code>寄存器吗？我们之前可是将<code>sp</code>的值赋予了<code>x8</code>了。所以，在<code>1000046fc x0, x8</code>这个地方，我们将<code>x8</code>的值赋予了<code>x0</code>。<strong><span style="color:red">至此，调用objc_msgSendSuper2的第一个参数也准备完毕</span></strong></li>
+</ul>
+<p>最后附上<code>objc_msgSendSuper2</code>的代码供参考，逻辑非常简单，不再赘述。</p>
+<pre><code>ENTRY _objc_msgSendSuper2
+    UNWIND _objc_msgSendSuper2, NoFrame
+    MESSENGER_START
+
+    ldp    x0, x16, <span class="attr_selector">[x0]</span>        <span class="comment">// x0 = real receiver, x16 = class</span>
+    ldr    x16, <span class="attr_selector">[x16, #SUPERCLASS]</span>    <span class="comment">// x16 = class-&gt;superclass</span>
+    CacheLookup <span class="attribute">NORMAL</span>
+
+    END_ENTRY _objc_msgSendSuper2
+</code></pre><p><strong><span style="color:red">等等，心急的读者会问：你说了那么一大堆，你还是没解释到底为什么要存在superrefs?</span></strong></p>
+<p><strong>在Objective-C的设计里面，函数就是函数，它并不知道自己属于哪个类里面。换句通俗的话来说，必须是你（编译器）说去哪个class实体的方法列表里面寻找调用，才会真正的去找对应的方法，函数自身不知道是父类还是子类。同时，由于苹果的设计原因，一个类初始化的实例，是不具备了解superclass的条件的，只有通过isa对应的类实体才能获得。因此，在构建<code>objc_msgSendSuper2</code>的第一个参数的时候，就不如指在编译期定其对应的<code>current_class</code>，以方便后续的<code>superclass</code>方法列表查找。</strong></p>
+<p><strong><span style="color:red">而且，也必须在编译期间，根据当前的类，去定义<code>current_class</code>这个字段的值，不然当我们有多个层级的继承关系时，在运行时如何从单一的self参数构建正确的向上查找层级，就当前的OC设计里，就做不到了。</span></strong></p>
+<p><img src="https://github.com/SatanWoo/BeeHive/blob/master/mach2_9.png?raw=true" alt=""></p>
+<blockquote>
+<p>C++里面，对于函数来说，是可以明确知道对应的所属类的。究其原因，在于C++的不同类，都是不同的命名空间，调用父类的方法时，需明确指定父类的命名空间，如BASE::method。</p>
+</blockquote>
+<h4 id="__objc_const"><code>__objc_const</code></h4><p>这个节的含义是所有初始化的常量的都显示在这。但是很多人都对此节有着巨大的误解，认为<strong><span style="color:red"><code>const int k = 5</code></span></strong>对应的数据会存放在<code>__objc_const</code>节中。</p>
+<p>但是这是大错特错的，在代码里声明的<code>const</code>类型，实质上都属于<code>__TEXT</code>段，并属于其中的<code>const</code>节。而在<code>__objc_const</code>中存放的，是一些需要在类加载过程中用到的<code>readonly data</code>。具体这个<code>readonly data</code>包含了如下（但不限于）的数据结构：</p>
+<pre><code><span class="comment">// 只读数据</span>
+<span class="keyword">struct</span> <span class="keyword">class_ro_t</span> {
+    <span class="keyword">uint32_t</span> flags;
+    <span class="keyword">uint32_t</span> instanceStart;
+    <span class="keyword">uint32_t</span> instanceSize;
+<span class="preprocessor">#<span class="keyword">ifdef</span> __LP64__</span>
+    <span class="keyword">uint32_t</span> reserved;
+<span class="preprocessor">#<span class="keyword">endif</span></span>
+
+    <span class="keyword">const</span> <span class="keyword">uint8_t</span> * ivarLayout;
+
+    <span class="keyword">const</span> <span class="keyword">char</span> * name;
+    <span class="keyword">method_list_t</span> * baseMethodList;
+    <span class="keyword">protocol_list_t</span> * baseProtocols;
+    <span class="keyword">const</span> <span class="keyword">ivar_list_t</span> * ivars;
+
+    <span class="keyword">const</span> <span class="keyword">uint8_t</span> * weakIvarLayout;
+    <span class="keyword">property_list_t</span> *baseProperties;
+
+    <span class="keyword">method_list_t</span> *baseMethods() <span class="keyword">const</span> {
+        <span class="keyword">return</span> baseMethodList;
+    }
+};
+
+<span class="comment">// 方法列表</span>
+<span class="keyword">struct</span> <span class="keyword">method_list_t</span>:entsize_list_tt {
+     <span class="keyword">uint32_t</span> entsizeAndFlags;
+     <span class="keyword">uint32_t</span> count;
+     Element first;
+}
+
+<span class="comment">// 方法实体</span>
+<span class="keyword">struct</span> <span class="keyword">method_t</span> {
+    SEL name;
+    <span class="keyword">const</span> <span class="keyword">char</span> *types;
+    IMP imp;
+}
+</code></pre><p>关于<code>readonly data</code>后续会再开一个章节单独讲解。</p>
+<h3 id="结尾">结尾</h3><p>基本上MachO 关于Runtime涉及的主要的类就分析到这了，下一次继续剖析其他细枝末节。</p>
+
+      
+    </div>
+    <footer class="article-footer">
+      <a data-url="http://satanwoo.github.io/2017/06/29/Macho-2/" data-id="cj4ileswq001h8di1ai37zlvx" class="article-share-link">Share</a>
+      
+        <a href="http://satanwoo.github.io/2017/06/29/Macho-2/#disqus_thread" class="article-comment-link">Comments</a>
+      
+      
+  <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
+
+    </footer>
+  </div>
+  
+</article>
+
+<div id="disqus_thread"></div>
+<script>
+
+/**
+*  RECOMMENDED CONFIGURATION VARIABLES: EDIT AND UNCOMMENT THE SECTION BELOW TO INSERT DYNAMIC VALUES FROM YOUR PLATFORM OR CMS.
+*  LEARN WHY DEFINING THESE VARIABLES IS IMPORTANT: https://disqus.com/admin/universalcode/#configuration-variables*/
+/*
+var disqus_config = function () {
+this.page.url = PAGE_URL;  // Replace PAGE_URL with your page's canonical URL variable
+this.page.identifier = PAGE_IDENTIFIER; // Replace PAGE_IDENTIFIER with your page's unique identifier variable
+};
+*/
+(function() { // DON'T EDIT BELOW THIS LINE
+var d = document, s = d.createElement('script');
+s.src = 'https://satanwoo-2.disqus.com/embed.js';
+s.setAttribute('data-timestamp', +new Date());
+(d.head || d.body).appendChild(s);
+})();
+</script>
+<noscript>Please enable JavaScript to view the <a href="https://disqus.com/?ref_noscript">comments powered by Disqus.</a></noscript>
+                                
+  
     <article id="post-Macho-1" class="article article-type-post" itemscope itemprop="blogPost">
   <div class="article-meta">
     <a href="/2017/06/13/Macho-1/" class="article-date">
@@ -317,7 +620,7 @@ _magic = [cursor readBigInt32];
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2017/06/13/Macho-1/" data-id="cj3vqaxov001hs4i1g2iiesdy" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2017/06/13/Macho-1/" data-id="cj4ileswv001j8di199vjzahw" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2017/06/13/Macho-1/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -579,7 +882,7 @@ _attribute__((section (<span class="string">"__DATA, MinyiSpecific"</span>))) <s
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2017/06/01/FBTweak/" data-id="cj3vqaxpn0021s4i1sqft9odt" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2017/06/01/FBTweak/" data-id="cj4ilesxn00238di1uqvxulrh" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2017/06/01/FBTweak/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -719,7 +1022,7 @@ foo(&amp;s, <span class="number">1</span>, <span class="number">2</span>);
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2017/04/23/ARM64IndirectReturn/" data-id="cj3vqaxq0002is4i1ckf5u1go" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2017/04/23/ARM64IndirectReturn/" data-id="cj4ilesy1002k8di1t0l5d3xg" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2017/04/23/ARM64IndirectReturn/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -890,7 +1193,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2017/04/18/CalculateTwoArrayDiff/" data-id="cj3vqaxpy002es4i1ttamx0vt" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2017/04/18/CalculateTwoArrayDiff/" data-id="cj4ilesxy002g8di1nh3bzx6l" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2017/04/18/CalculateTwoArrayDiff/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -1080,7 +1383,7 @@ dispatch_group_create(<span class="keyword">void</span>)
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2017/01/07/DispatchGroupCrash/" data-id="cj3vqaxps0025s4i1icj6escw" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2017/01/07/DispatchGroupCrash/" data-id="cj4ilesxr00278di1fi46dequ" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2017/01/07/DispatchGroupCrash/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -1328,7 +1631,7 @@ func <span class="function"><span class="title">resultFromBatchObjects</span><sp
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2017/01/07/JSONRPCKit/" data-id="cj3vqaxpc001ts4i1cemxni82" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2017/01/07/JSONRPCKit/" data-id="cj4ilesxb001v8di13lqd0j08" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2017/01/07/JSONRPCKit/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -1612,7 +1915,7 @@ dispatch_sync(dq, ^{
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/10/23/multithread-dangling-pointer/" data-id="cj3vqaxnd0007s4i1xrnn9fch" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/10/23/multithread-dangling-pointer/" data-id="cj4ilesv000078di1zsdbxd5q" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/10/23/multithread-dangling-pointer/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -1768,7 +2071,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/09/17/uiwindow-iOS/" data-id="cj3vqaxn50003s4i181nkswgv" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/09/17/uiwindow-iOS/" data-id="cj4ilesuh00038di121u01jbo" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/09/17/uiwindow-iOS/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -1928,7 +2231,7 @@ OSSpinUnlock(&amp;_lock)<span class="comment">;</span>
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/07/10/immutable-thread/" data-id="cj3vqaxnh0009s4i19a8x3wel" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/07/10/immutable-thread/" data-id="cj4ilesv300098di11g7ydwqb" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/07/10/immutable-thread/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -2052,7 +2355,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/05/02/Spotify/" data-id="cj3vqaxoe0010s4i17df5dnkz" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/05/02/Spotify/" data-id="cj4ilesw600108di1rh6iituu" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/05/02/Spotify/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -2180,7 +2483,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/04/26/blank-space-in-html/" data-id="cj3vqaxny000os4i16oq0y1ge" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/04/26/blank-space-in-html/" data-id="cj4ilesvp000o8di1gj1vd2gy" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/04/26/blank-space-in-html/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -2438,7 +2741,7 @@ Elapsed application CPU <span class="keyword">time</span> (seconds): <span class
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/04/11/dispatch-once/" data-id="cj3vqaxnl000es4i1mn2sc6zb" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/04/11/dispatch-once/" data-id="cj4ilesv9000e8di1jh5ollhc" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/04/11/dispatch-once/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -2655,7 +2958,7 @@ a4.<span class="function"><span class="title">staticInfo</span><span class="para
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/03/22/dispatch-in-swift/" data-id="cj3vqaxno000gs4i1rdt1o8jg" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/03/22/dispatch-in-swift/" data-id="cj4ilesvc000g8di1i560wwyj" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/03/22/dispatch-in-swift/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -2769,7 +3072,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/03/14/RxSwift/" data-id="cj3vqaxoj0016s4i1pef7g2b7" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/03/14/RxSwift/" data-id="cj4ileswb00168di1m1y2mp09" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/03/14/RxSwift/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -2879,7 +3182,7 @@ val = edx(<span class="literal">true</span>)
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/03/14/SizeUp/" data-id="cj3vqaxoh0013s4i19sz2n2vb" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/03/14/SizeUp/" data-id="cj4ilesw900138di1xj4hkj4z" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/03/14/SizeUp/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -3041,7 +3344,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/03/14/DXXcodeConsoleUnicodePlugin/" data-id="cj3vqaxpv002as4i175zq8pxw" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/03/14/DXXcodeConsoleUnicodePlugin/" data-id="cj4ilesxu002c8di10nqta9ca" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/03/14/DXXcodeConsoleUnicodePlugin/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -3140,7 +3443,7 @@ fi
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/02/27/check-manifest/" data-id="cj3vqaxnt000ls4i14t2esmfx" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/02/27/check-manifest/" data-id="cj4ilesvj000l8di1eqca3ne2" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/02/27/check-manifest/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -3272,7 +3575,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/02/27/pod-install-plugin/" data-id="cj3vqaxna0005s4i1pr7pkwsy" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/02/27/pod-install-plugin/" data-id="cj4ilesux00058di1h2b87ank" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/02/27/pod-install-plugin/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -3550,7 +3853,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/02/27/FBKVOController/" data-id="cj3vqaxpr0023s4i1x9xbkzdp" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/02/27/FBKVOController/" data-id="cj4ilesxp00258di1vk4lykl8" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/02/27/FBKVOController/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -3686,7 +3989,7 @@ selectedTitleLabelsContentView<span class="class">.layer</span><span class="clas
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/02/05/DGRunKeeperSwitch/" data-id="cj3vqaxpx002cs4i1tyucxr4o" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/02/05/DGRunKeeperSwitch/" data-id="cj4ilesxw002e8di1xpr9u6rb" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/02/05/DGRunKeeperSwitch/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -3964,7 +4267,7 @@ NSLayoutConstraint *constraint = [NSLayoutConstraint <span class="string">constr
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/02/05/PureLayout/" data-id="cj3vqaxoq001ds4i1whs54hl7" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/02/05/PureLayout/" data-id="cj4ileswj001d8di160n7xugv" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/02/05/PureLayout/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -4312,7 +4615,7 @@ extension Task {
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/12/30/Refactor-Mega-ViewController/" data-id="cj3vqaxoo001bs4i12w4aoak8" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/12/30/Refactor-Mega-ViewController/" data-id="cj4ileswh001b8di1ymwo49s8" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2015/12/30/Refactor-Mega-ViewController/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -4485,7 +4788,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/12/20/Learn-R-2/" data-id="cj3vqaxoz001js4i1r2zw2nee" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/12/20/Learn-R-2/" data-id="cj4ileswy001l8di1rv7lohfq" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2015/12/20/Learn-R-2/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -4561,7 +4864,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/12/15/Regression-Model-1/" data-id="cj3vqaxol0018s4i1279iqkii" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/12/15/Regression-Model-1/" data-id="cj4ileswe00188di170m4bxwn" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2015/12/15/Regression-Model-1/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -4726,7 +5029,7 @@ $foo
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/12/13/Learn-R-1/" data-id="cj3vqaxp1001ms4i14va2j1oa" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/12/13/Learn-R-1/" data-id="cj4ilesx1001o8di18tstbs86" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2015/12/13/Learn-R-1/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -4854,7 +5157,7 @@ frame <span class="preprocessor">#<span class="number">20</span>: libdyld.dylib`
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/12/11/LLDB-1/" data-id="cj3vqaxpa001rs4i131ptdrzl" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/12/11/LLDB-1/" data-id="cj4ilesx8001t8di1smw1l15c" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2015/12/11/LLDB-1/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -5175,7 +5478,7 @@ TBBoundingBox TBBoundingBoxMake(<span class="built_in">double</span> x0, <span c
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/12/11/TBAnnotationClustering/" data-id="cj3vqaxo3000ss4i1i8c6tycc" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/12/11/TBAnnotationClustering/" data-id="cj4ilesvu000s8di1iwxbzh1g" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2015/12/11/TBAnnotationClustering/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -5422,7 +5725,7 @@ BOOL success = class_addMethod(<span class="keyword">class</span>, originalSelec
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/11/26/FDFullScreenPopGesture-Source-Code/" data-id="cj3vqaxpl001zs4i1cs2vs87n" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/11/26/FDFullScreenPopGesture-Source-Code/" data-id="cj4ilesxk00218di1udg40ppj" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2015/11/26/FDFullScreenPopGesture-Source-Code/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -5554,237 +5857,9 @@ replicationLayer.instanceDelay = <span class="number">0.3</span>
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/11/17/Fun-of-CAReplicationLayer/" data-id="cj3vqaxpi001xs4i1ulay8815" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/11/17/Fun-of-CAReplicationLayer/" data-id="cj4ilesxf001z8di15skcjg1b" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2015/11/17/Fun-of-CAReplicationLayer/#disqus_thread" class="article-comment-link">Comments</a>
-      
-      
-  <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Swift/">Swift</a></li></ul>
-
-    </footer>
-  </div>
-  
-</article>
-
-<div id="disqus_thread"></div>
-<script>
-
-/**
-*  RECOMMENDED CONFIGURATION VARIABLES: EDIT AND UNCOMMENT THE SECTION BELOW TO INSERT DYNAMIC VALUES FROM YOUR PLATFORM OR CMS.
-*  LEARN WHY DEFINING THESE VARIABLES IS IMPORTANT: https://disqus.com/admin/universalcode/#configuration-variables*/
-/*
-var disqus_config = function () {
-this.page.url = PAGE_URL;  // Replace PAGE_URL with your page's canonical URL variable
-this.page.identifier = PAGE_IDENTIFIER; // Replace PAGE_IDENTIFIER with your page's unique identifier variable
-};
-*/
-(function() { // DON'T EDIT BELOW THIS LINE
-var d = document, s = d.createElement('script');
-s.src = 'https://satanwoo-2.disqus.com/embed.js';
-s.setAttribute('data-timestamp', +new Date());
-(d.head || d.body).appendChild(s);
-})();
-</script>
-<noscript>Please enable JavaScript to view the <a href="https://disqus.com/?ref_noscript">comments powered by Disqus.</a></noscript>
-                                
-  
-    <article id="post-Swift-UITransition-iOS8" class="article article-type-post" itemscope itemprop="blogPost">
-  <div class="article-meta">
-    <a href="/2015/11/12/Swift-UITransition-iOS8/" class="article-date">
-  <time datetime="2015-11-11T18:33:50.000Z" itemprop="datePublished">2015-11-12</time>
-</a>
-    
-  </div>
-  <div class="article-inner">
-    
-    
-      <header class="article-header">
-        
-  
-    <h1 itemprop="name">
-      <a class="article-title" href="/2015/11/12/Swift-UITransition-iOS8/">Swift每日一练：自定义转场在iOS8中的那些坑</a>
-    </h1>
-  
-
-      </header>
-    
-    <div class="article-entry" itemprop="articleBody">
-      
-        <p>之前因为面试的缘故发现了自己在自定义转场这块有点欠缺，今天拿Swift练下手，实现一个自定义转场的效果。<em>没耐心的话请直接翻到最后吧，我前面都是铺垫呢。</em></p>
-<p>首先让我们先来看看最后实现的效果：<br><img src="http://7lrzqz.com1.z0.glb.clouddn.com/WZCustomTransition.gif"></p>
-<p>下面就让我们一步步来看看是如何实现这个效果的。</p>
-<h3 id="自定义转场">自定义转场</h3><p>要实现自定义转场动画，比较重要的就是三个部分。</p>
-<ul>
-<li><p>UIViewControllerContextTransition</p>
-<p>这个接口主要用来提供切换上下文给开发者使用，包含了从哪个VC到哪个VC等各类信息，一般不需要开发者自己实现。</p>
-<p>本文关注的包含了如下一些内容：</p>
-<pre><code><span class="number">1.</span> - (<span class="built_in">UIView</span> *)containerView; 
-<span class="comment">// VC切换所发生的view容器    </span>
-
-<span class="number">2.</span> - (<span class="built_in">UIViewController</span> *)viewControllerForKey:(<span class="built_in">NSString</span> *)key;
-<span class="comment">// 根据UITransitionContextFromViewControllerKey和UITransitionContextToViewControllerKey两种，分别返回将要切出和切入的ViewController。</span>
-
-<span class="number">3.</span> - (<span class="keyword">void</span>)completeTransition:(<span class="built_in">BOOL</span>)didComplete; 
-<span class="comment">// 报告切换已经完成。</span>
-</code></pre></li>
-<li><p>UIViewControllerAnimatedTransition</p>
-<p>这个接口主要用来定义如何完成转场动画，同时定义转场动画的持续时间。（在本文中我们不考虑交互式的转场）</p>
-<pre><code><span class="number">1.</span> - (<span class="built_in">NSTimeInterval</span>)transitionDuration:(<span class="keyword">id</span> &lt; <span class="built_in">UIViewControllerContextTransitioning</span> &gt;)transitionContext; 
-<span class="comment">// 返回转场动画持续的时间</span>
-
-<span class="number">2.</span> - (<span class="keyword">void</span>)animateTransition:(<span class="keyword">id</span> &lt; <span class="built_in">UIViewControllerContextTransitioning</span> &gt;)transitionContext; 
-<span class="comment">// 我们自定义的转场要在这里完成</span>
-</code></pre></li>
-<li><p>UIViewControllerTransitionDelegate    </p>
-<p>这个接口主要用于指定，我们希望采用哪种转场效果（比如你可以根据不同的状态，切换不同的自定义专场效果）</p>
-<pre><code><span class="number">1.</span> - (<span class="keyword">id</span>&lt; <span class="built_in">UIViewControllerAnimatedTransitioning</span> &gt;)animationControllerForPresentedController:(<span class="built_in">UIViewController</span> *)presented presentingController:(<span class="built_in">UIViewController</span> *)presenting sourceController:(<span class="built_in">UIViewController</span> *)source;
-<span class="comment">// 当弹出模态窗口的时候，使用什么转场效果</span>
-
-<span class="number">2.</span> - (<span class="keyword">id</span>&lt; <span class="built_in">UIViewControllerAnimatedTransitioning</span> &gt;)animationControllerForDismissedController:(<span class="built_in">UIViewController</span> *)dismissed;
-<span class="comment">// 当关闭模态窗口的时候，使用什么转场效果</span>
-</code></pre></li>
-</ul>
-<h3 id="实现">实现</h3><p>知道了转场动画需要的必要条件，我们可以很轻松分别实现三个部分。</p>
-<p>第一部分UIViewControllerContextTransition在本文中并没有特殊定制化的地方，直接完成。</p>
-<p>第二部分关于UIViewControllerAnimatedTransition的代码如下：</p>
-<pre><code>class SwipeAnimator: <span class="built_in">NSObject</span>, <span class="built_in">UIViewControllerAnimatedTransitioning</span> {
-    <span class="keyword">enum</span> SwipeTo {
-        <span class="keyword">case</span> Main
-        <span class="keyword">case</span> Modal
-    };
-
-    var transitonTo:SwipeTo = <span class="variable">.Main</span>
-
-    <span class="comment">// 0. 返回动画时间</span>
-    func transitionDuration(transitionContext: <span class="built_in">UIViewControllerContextTransitioning</span>) -&gt; <span class="built_in">NSTimeInterval</span> {
-        <span class="keyword">return</span> <span class="number">1.0</span>
-    }
-
-    func animateTransition(transitionContext: <span class="built_in">UIViewControllerContextTransitioning</span>) {
-        <span class="comment">// 1. 获取相关资源</span>
-        let fromVC = transitionContext<span class="variable">.viewControllerForKey</span>(<span class="built_in">UITransitionContextFromViewControllerKey</span>)!
-
-        let toView = transitionContext<span class="variable">.viewForKey</span>(<span class="built_in">UITransitionContextToViewKey</span>)
-
-        <span class="comment">// 2. 弹出模态</span>
-        <span class="keyword">if</span> (<span class="keyword">self</span><span class="variable">.transitonTo</span> == <span class="variable">.Modal</span>) {
-            <span class="keyword">if</span> toView != <span class="literal">nil</span> {
-                transitionContext<span class="variable">.containerView</span>()<span class="variable">.addSubview</span>(toView!)
-
-                toView!<span class="variable">.alpha</span> = <span class="number">0.0</span>
-
-                <span class="comment">// 2.1 以左上角为锚点旋转</span>
-                fromVC<span class="variable">.view</span><span class="variable">.layer</span><span class="variable">.anchorPoint</span> = <span class="built_in">CGPoint</span>(x: <span class="number">0</span>, y: <span class="number">0</span>)
-                fromVC<span class="variable">.view</span><span class="variable">.layer</span><span class="variable">.position</span> = <span class="built_in">CGPointMake</span>(<span class="number">0</span>, <span class="number">0</span>)
-
-                <span class="built_in">UIView</span><span class="variable">.animateWithDuration</span>(<span class="number">1.0</span>, animations: { () -&gt; Void <span class="keyword">in</span>
-                    fromVC<span class="variable">.view</span><span class="variable">.transform</span> = <span class="built_in">CGAffineTransformMakeRotation</span>(<span class="built_in">CGFloat</span>(-M_PI/<span class="number">2</span>))
-                    toView!<span class="variable">.alpha</span> = <span class="number">1.0</span>
-                }, completion: { (completion:Bool) -&gt; Void <span class="keyword">in</span>
-                    <span class="comment">// 2.2 报告转场动画完成</span>
-                    transitionContext<span class="variable">.completeTransition</span>(!transitionContext<span class="variable">.transitionWasCancelled</span>())
-                })
-            }
-        } <span class="keyword">else</span> {
-            <span class="comment">// 3. 关闭模态</span>
-            <span class="keyword">if</span> fromView != <span class="literal">nil</span> {
-                fromView!<span class="variable">.alpha</span> = <span class="number">1.0</span>
-                <span class="built_in">UIView</span><span class="variable">.animateWithDuration</span>(<span class="number">1.0</span>, animations: { () -&gt; Void <span class="keyword">in</span>
-                    toVC<span class="variable">.view</span><span class="variable">.transform</span> = <span class="built_in">CGAffineTransformMakeRotation</span>(<span class="number">0</span>)
-                    fromView!<span class="variable">.alpha</span> = <span class="number">0.0</span>
-                }, completion: { (completion:Bool) -&gt; Void <span class="keyword">in</span>
-                    transitionContext<span class="variable">.completeTransition</span>(!transitionContext<span class="variable">.transitionWasCancelled</span>())
-                })
-            }
-        }
-    }
-}
-</code></pre><p>实现非常简单，我们来一步步看下。</p>
-<ul>
-<li><ol>
-<li>根据UIViewControllerAnimatedTransition协议返回动画时间</li>
-</ol>
-</li>
-<li><ol>
-<li>根据UIViewControllerContextTransition获取我们需要操作的即将切出的ViewController(fromVC)以及即将切入的页面(toView)，<strong>为什么要用这种获取方式，稍微在重点分析会指出</strong></li>
-</ol>
-</li>
-<li><ol>
-<li>当遇到是弹出模态窗口转场的时候，我们首先将toView加入到转场过程提供的一个containView中，然后改变fromVC的锚点，进行旋转，同时我们对toView进行了一个淡入淡出。当转场动画完成以后，<strong>在回调的closure中报告转场动画已经完成</strong>。</li>
-</ol>
-</li>
-<li><ol>
-<li>当关闭模态转场的时候，这个时候转场的出和入就正好和弹出的时候截然相反。原先的fromVC成了现在的toVC，因此我们在这里将toVC旋转回原来的位置。当然别忘了我们的淡入淡出啦，原理是一样的，只要改变fromView的alpha即可。动画完成后，依然要报告我们的转场完成了。</li>
-</ol>
-</li>
-</ul>
-<p>第三部分，UIViewControllerTransitionDelegate的实现依然非常简单，我们仅仅需要告知转场发生时，我们具体要采用哪种转场效果就好了。</p>
-<pre><code><span class="func"><span class="keyword">func</span> <span class="title">animationControllerForPresentedController</span><span class="params">(presented: UIViewController, presentingController presenting: UIViewController, sourceController source: UIViewController)</span></span> -&gt; <span class="type">UIViewControllerAnimatedTransitioning</span>? {
-    <span class="keyword">self</span>.animator.transitonTo = .<span class="type">Modal</span>
-    <span class="keyword">return</span> <span class="keyword">self</span>.animator
-}
-
-<span class="func"><span class="keyword">func</span> <span class="title">animationControllerForDismissedController</span><span class="params">(dismissed: UIViewController)</span></span> -&gt; <span class="type">UIViewControllerAnimatedTransitioning</span>? {
-    <span class="keyword">self</span>.animator.transitonTo = .<span class="type">Main</span>
-    <span class="keyword">return</span> <span class="keyword">self</span>.animator
-}
-</code></pre><p>在这里，我们复用了同一个转场效果，通过不同的transitionTo参数进行控制。你当然也可以给两个转场分别生成对应不同的转场效果。</p>
-<h3 id="iOS8的坑">iOS8的坑</h3><p>嘿嘿，重头戏来了，千万别错过。</p>
-<p>一开始实现这个转场效果的时候，压根没想到这么复杂，但是，突然发现了一个很大的问题：</p>
-<p><strong>当弹出模态窗口的时候，转场效果正常，最后成功显示模态界面。但是当关闭模态窗口的时候，转场效果依然正确，但是转场结束后，整个屏幕都黑了。</strong></p>
-<p><em>What the F*ck!!!</em></p>
-<p>我以为是我自己实现有问题，但是我去Github上找了几个著名的转场效果跑了下，都存在这个问题，那我就百思不得其解了呀！！！</p>
-<h4 id="误打误撞">误打误撞</h4><p>从网上搜寻了很久之后，我还是没有头绪，于是我首先尝试将如下代码中</p>
-<pre><code><span class="tag">var</span> modalVC = <span class="function"><span class="title">UIStoryboard</span><span class="params">(name: <span class="string">"Main"</span>, bundle: nil)</span></span>.<span class="function"><span class="title">instantiateViewControllerWithIdentifier</span><span class="params">(<span class="string">"ModalViewController"</span>)</span></span> as! UIViewController
-modalVC<span class="class">.transitioningDelegate</span> = self
-modalVC<span class="class">.modalPresentationStyle</span> = <span class="class">.Custom</span>
-<span class="function"><span class="title">presentViewController</span><span class="params">(modalVC, animated: true, completion: nil)</span></span>
-</code></pre><p><strong>modalVC.modalPresentationStyle = .Custom</strong>中的.Custom改成了.FullScreen。<br>这一下子就给我整好了！</p>
-<p>所以，给大家提个醒，如果遇到相似的问题，解决方法很简单，就是.FullScreen即可。</p>
-<h4 id="深层原因">深层原因</h4><p>作为一个站在红旗下的三好学生，弄懂问题的深层原因才是最主要的，通过不过的debug，我终于弄懂了。</p>
-<p><strong>首先，我们要强调一个基本知识。一个UIView的superview最多只能由一个。当一个本身处于别的UIView下的subView被添加到另一个UIView上的时候，它就自动被从前一个UIView的Hierarchy中移除了。</strong></p>
-<p>还记得我们之前一个很奇怪的写法吗？<br>根据UIViewControllerContextTransition获取我们需要操作的即将切出的ViewController(fromVC)以及即将切入的页面(toView)</p>
-<p>我们这么写的原因就是因为我们刚刚强调的基本知识，别急，让我们一步步来解析。</p>
-<p>在iOS8中，苹果提供了一个新的API：</p>
-<pre><code><span class="constant">@availability</span>(iOS, introduced=<span class="number">8.0</span>)
-<span class="function"><span class="keyword">func</span> <span class="title">viewForKey</span><span class="params">(key: String)</span> -&gt; <span class="title">UIView</span>?</span>
-</code></pre><p>并且在文档中明确强调了一点：</p>
-<pre><code><span class="comment">// Currently only two keys are defined by the</span>
-<span class="comment">// system - UITransitionContextToViewControllerKey, and</span>
-<span class="comment">// UITransitionContextFromViewControllerKey. </span>
-<span class="comment">// Animators should not directly manipulate a view controller's views and should</span>
-<span class="comment">// use viewForKey: to get views instead.</span>
-<span class="func"><span class="keyword">func</span> <span class="title">viewControllerForKey</span><span class="params">(key: String)</span></span> -&gt; <span class="type">UIViewController</span>?
-</code></pre><p>什么意思呢？<br>之前在iOS7中，开发者需要通过<strong>viewControllerForKey</strong>这个方法获取切入切出的ViewController，并直接操作ViewController对应的View来编写转场动画。而在iOS8以后，苹果规定必须使用<strong>viewForKey</strong>来获取fromView和toView来进行转场动画的操作。</p>
-<p>那这个API的更改和黑屏有什么关联呢？</p>
-<ul>
-<li>在整个转场过程中，我们都依赖于转场上下文transitonContext提供的containerView容器进行view动画的操作。这是因为在转场完成前，即将<strong>切入</strong>的viewcontroller都不存在于当前的可视界面的视图层级内(View Hierarchy)。因此，苹果提供了一个过渡的容器给我们使用（如果大家debug下的话，就会发现在转场过程之中，UIWindow上多了一个UITransitionView，就是切换上下文的containerView）。</li>
-<li>在iOS7的实现中，我们需要将fromVC.view和toVC.view都通过addSubView的方式添加到容器View上进行动画展示。<strong>由于是直接操作了ViewController的view，因此，fromVC的view会被从当前的视图层级中移除</strong></li>
-<li><strong>但是，iOS7中，会在转场动画完成后，自动将fromVC的view添加回原先fromVC从属的父视图中</strong></li>
-<li>iOS8中不会</li>
-<li>在本文的初版实现中，在转场过程中当判断transitionTo == .Main的时候，将此时toViewController.view (也就是原先的主窗口) 添加到了containerView上。因此，当转场结束的时候，containerView从window可见视图层级中移除了，因此就变得不可见，从而变成黑屏了。</li>
-</ul>
-<p>那么为什么模态窗口在转场过程后可见呢？</p>
-<ul>
-<li>因为这个特性依然正确。</li>
-</ul>
-<p>containerView到底是啥?</p>
-<ul>
-<li>就是一个过渡的UITransitionView，一个转场效果对应生成一个（会复用）。</li>
-<li>在转场结束后自动从视图层级中移除，因此不需要大家手动进行removeFromSuperView。</li>
-</ul>
-<p>那么viewForKey和viewControlelrForKey直接操纵view的区别呢？</p>
-<ul>
-<li>viewForKey很可能返回的是一个完全克隆VC的view的对象。</li>
-</ul>
-<p>到这，相信大家都弄懂了吧，我真是太佩服我自己了。</p>
-
-      
-    </div>
-    <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/11/12/Swift-UITransition-iOS8/" data-id="cj3vqaxo7000us4i17c3vfq9r" class="article-share-link">Share</a>
-      
-        <a href="http://satanwoo.github.io/2015/11/12/Swift-UITransition-iOS8/#disqus_thread" class="article-comment-link">Comments</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Swift/">Swift</a></li></ul>
@@ -5831,7 +5906,7 @@ s.setAttribute('data-timestamp', +new Date());
   <div class="widget-wrap">
     <h3 class="widget-title">Tags</h3>
     <div class="widget">
-      <ul class="tag-list"><li class="tag-list-item"><a class="tag-list-link" href="/tags/Android/">Android</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Growth/">Growth</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/JavaScript/">JavaScript</a><span class="tag-list-count">3</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Math/">Math</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Performance/">Performance</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/R/">R</a><span class="tag-list-count">2</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Reverse-Engineering/">Reverse Engineering</a><span class="tag-list-count">3</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Swift/">Swift</a><span class="tag-list-count">6</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/iOS/">iOS</a><span class="tag-list-count">24</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/shell/">shell</a><span class="tag-list-count">1</span></li></ul>
+      <ul class="tag-list"><li class="tag-list-item"><a class="tag-list-link" href="/tags/Android/">Android</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Growth/">Growth</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/JavaScript/">JavaScript</a><span class="tag-list-count">3</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Math/">Math</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Performance/">Performance</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/R/">R</a><span class="tag-list-count">2</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Reverse-Engineering/">Reverse Engineering</a><span class="tag-list-count">3</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Swift/">Swift</a><span class="tag-list-count">6</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/iOS/">iOS</a><span class="tag-list-count">25</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/shell/">shell</a><span class="tag-list-count">1</span></li></ul>
     </div>
   </div>
 
@@ -5849,7 +5924,7 @@ s.setAttribute('data-timestamp', +new Date());
   <div class="widget-wrap">
     <h3 class="widget-title">Archives</h3>
     <div class="widget">
-      <ul class="archive-list"><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/06/">June 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/04/">April 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/01/">January 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/10/">October 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/09/">September 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/07/">July 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/05/">May 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/04/">April 2016</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/03/">March 2016</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/02/">February 2016</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/12/">December 2015</a><span class="archive-list-count">6</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/11/">November 2015</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/10/">October 2015</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/09/">September 2015</a><span class="archive-list-count">4</span></li></ul>
+      <ul class="archive-list"><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/06/">June 2017</a><span class="archive-list-count">3</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/04/">April 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/01/">January 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/10/">October 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/09/">September 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/07/">July 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/05/">May 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/04/">April 2016</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/03/">March 2016</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/02/">February 2016</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/12/">December 2015</a><span class="archive-list-count">6</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/11/">November 2015</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/10/">October 2015</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/09/">September 2015</a><span class="archive-list-count">4</span></li></ul>
     </div>
   </div>
 
@@ -5859,6 +5934,10 @@ s.setAttribute('data-timestamp', +new Date());
     <h3 class="widget-title">Recents</h3>
     <div class="widget">
       <ul>
+        
+          <li>
+            <a href="/2017/06/29/Macho-2/">深入理解Macho文件（二）- 消失的__OBJC段与新生的__DATA段</a>
+          </li>
         
           <li>
             <a href="/2017/06/13/Macho-1/">深入剖析Macho (1)</a>
@@ -5874,10 +5953,6 @@ s.setAttribute('data-timestamp', +new Date());
         
           <li>
             <a href="/2017/04/18/CalculateTwoArrayDiff/">快速计算两组数据源的变化的方法 - Doppelganger 源码剖析</a>
-          </li>
-        
-          <li>
-            <a href="/2017/01/07/DispatchGroupCrash/">iOS疑难问题排查之深入探究dispatch_group crash</a>
           </li>
         
       </ul>
