@@ -62,6 +62,297 @@
       <div class="outer">
         <section id="main">
   
+    <article id="post-xlog" class="article article-type-post" itemscope itemprop="blogPost">
+  <div class="article-meta">
+    <a href="/2017/07/30/xlog/" class="article-date">
+  <time datetime="2017-07-30T02:05:14.000Z" itemprop="datePublished">2017-07-30</time>
+</a>
+    
+  </div>
+  <div class="article-inner">
+    
+    
+      <header class="article-header">
+        
+  
+    <h1 itemprop="name">
+      <a class="article-title" href="/2017/07/30/xlog/">微信高性能线上日志系统xlog剖析</a>
+    </h1>
+  
+
+      </header>
+    
+    <div class="article-entry" itemprop="articleBody">
+      
+        <h3 id="微信高性能线上日志系统xlog剖析">微信高性能线上日志系统xlog剖析</h3><p>做移动开发的同学经常会遇到一个头疼的问题，就是当用户反馈一些问题，又比较冷僻难以复现的时候（不是Crash），常常就会陷入一筹莫展的境地。因此，很多人就研发了相关的监控系统，比如一些知名的APM来监测帧率、内存、电量等等，将这些数据进行采集、合并再上报至专门的平台供开发测试同学查看。但是这些APM往往都是粗粒度的监控，究其原因就在于如果特别精细的进行监控，线上的性能会吃不消，一些监控反而影响了用户的正常使用。</p>
+<p>说了这么多，抛开获取数据方面的难度不提，线上监控的本质还是在于信息（日志）记录，而端上的日志记录存在一个社会主义初级阶段的供需矛盾：</p>
+<p><strong>即实时细粒度的日志记录的性能落差和日志的完整不丢失无法兼顾。</strong></p>
+<p>如果你要高性能、细粒度的记录日志，那你势必大量使用内存。而大量使用使用内存，万一没电了、程序突然崩了，这些中间态的日志还没持久化，就相当于白费了精力；而如果你想保证可靠性，那你就需要经常实时落盘。我们知道，写磁盘的行为是会设计用户态和内核态的切换，在高流畅性的要求下是绝对会影响性能了，而且这还不是你开多线程能够解决的问题。</p>
+<h3 id="写磁盘为什么会非常慢">写磁盘为什么会非常慢</h3><p>现如今、几乎所有的操作系统在管理内存的时候，基本采用了页式管理的策略。即将连续的内存空间（注意空间，不是地址）换成了一个个页式大小。这样的好处有几点：</p>
+<ol>
+<li>按页这种大小进行管理、可以有效的减少内存碎片的粒度。</li>
+<li>按页加载，可以充分利用磁盘上的交换空间，使得程序使用的空间能大大超过内存限制。</li>
+</ol>
+<blockquote>
+<p>当然，iOS设备上不存在交换空间，但是也依然按照页式结构进行内存管理。</p>
+</blockquote>
+<p>回到为什么写磁盘会慢的问题上。我们一般会把内存中的数据进行持久化储存到磁盘上。但是写入磁盘并不是你想写就立刻写的，数据是通过flush的方式从内存写回到磁盘，一般有如下几种情况：</p>
+<ol>
+<li>通过页的<code>flag</code>标记为有改动，操作系统定时将这种脏页写回到磁盘上，时机不可控。</li>
+<li>调用用户态的写接口-&gt;触发内核态的<code>sys_write</code>-&gt;文件系统将数据写回磁盘。</li>
+</ol>
+<p><strong><b style="color:red">乍一看上述第二种方式非常适合写日志，但是其包含两个非常明显的问题：</b></strong></p>
+<ul>
+<li>文件系统处于效率不会立刻将数据写回到磁盘（比如磁道寻址由于机械操作的原因相对非常耗时），而是以Block块的形式缓存在队列中，经过排序、合并到达一定比例之后再写回磁盘。</li>
+<li>这种方式在将数据写回到磁盘时，需要经历两次拷贝。一次是把数据从用户态拷贝到内核态，需要经历上下文切换；还有一次是内核空间到硬盘上真正的数据拷贝。当切换次数过于频繁，整体性能也会下降。</li>
+</ul>
+<p>基于上述这些问题，<code>xlog</code>采用了<code>mmap</code>的方案进行日志系统的设计：</p>
+<blockquote>
+<p>mmap 是使用逻辑内存对磁盘文件进行映射，中间只是进行映射没有任何拷贝操作，避免了写文件的数据拷贝。操作内存就相当于在操作文件，避免了内核空间和用户空间的频繁切换。</p>
+</blockquote>
+<p>除了系能耐，使用mmap还能保证日志的完整性，因为如下这些情况下回自动回写磁盘：</p>
+<ul>
+<li>内存不足</li>
+<li>进程 crash</li>
+<li>调用 msync 或者 munmap</li>
+<li>不设置 MAP_NOSYNC 情况下 30s-60s(仅限FreeBSD)</li>
+</ul>
+<h3 id="xlog源码分析">xlog源码分析</h3><p><code>xlog</code>的代码主要分为两块，面向上层的使用封装<code>xlogger</code>，暴露了一系列的借口。以及核心的<code>appender</code>和<code>log</code>等。</p>
+<h4 id="log_buffer">log_buffer</h4><p><code>log_buffer</code>其目的是封装了一个对mmap/传统内存操作的数据结构。其核心思想就是将上层的操作转换对实际开辟出来的日志缓存地址进行读写（也封装了加密压缩操作等等）。我们以写操作为例子进行剖析：</p>
+<pre><code><span class="keyword">bool</span> LogBuffer::Write(<span class="keyword">const</span> <span class="keyword">void</span>* _data, <span class="keyword">size_t</span> _length) {
+    <span class="comment">// 一些异常处理，不说了</span>
+    <span class="keyword">if</span> (<span class="literal">NULL</span> == _data || <span class="number">0</span> == _length) {
+        <span class="keyword">return</span> <span class="literal">false</span>;
+    }
+
+    <span class="keyword">if</span> (buff_.Length() == <span class="number">0</span>) {
+        <span class="keyword">if</span> (!__Reset()) <span class="keyword">return</span> <span class="literal">false</span>;
+    }
+
+    <span class="keyword">size_t</span> before_len = buff_.Length();
+    <span class="keyword">size_t</span> write_len = _length;
+
+    <span class="keyword">if</span> (is_compress_) {
+        <span class="comment">// 是否开启压缩</span>
+        cstream_.avail_in = (uInt)_length;
+        cstream_.next_in = (Bytef*)_data;
+
+        uInt avail_out = (uInt)(buff_.MaxLength() - buff_.Length());
+        cstream_.next_out = (Bytef*)buff_.PosPtr();
+        cstream_.avail_out = avail_out;
+
+        <span class="keyword">if</span> (Z_OK != deflate(&amp;cstream_, Z_SYNC_FLUSH)) {
+            <span class="keyword">return</span> <span class="literal">false</span>;
+        }
+
+        write_len = avail_out - cstream_.avail_out;
+    } <span class="keyword">else</span> {
+          <span class="comment">// 1. 写入数据到mmap文件或者内存当中</span>
+        buff_.Write(_data, _length);
+    }
+
+    <span class="comment">// 2. 检查之前尝试加密但是还剩的未能成功加密的数据长度</span>
+    before_len -= remain_nocrypt_len_;
+
+    AutoBuffer out_buffer;
+    <span class="keyword">size_t</span> last_remain_len = remain_nocrypt_len_;
+
+    <span class="comment">// 3. 异步加密，更新未能加密的数据长度</span>
+    log_crypt_-&gt;CryptAsyncLog((<span class="keyword">char</span>*)buff_.Ptr() + before_len, write_len + remain_nocrypt_len_, out_buffer, remain_nocrypt_len_);
+
+    <span class="comment">// 4. 将加密的文本重新写入到之前最后一次加密的数据结尾位置</span>
+    buff_.Write(out_buffer.Ptr(), out_buffer.Length(), before_len);
+
+    <span class="comment">// 5. 更新数据</span>
+    before_len += out_buffer.Length();
+    buff_.Length(before_len, before_len);
+
+    <span class="comment">// 6. 添加一下加密的长度之类的辅助信息补充在真实数据之后，主要用于解密时候用</span>
+    log_crypt_-&gt;UpdateLogLen((<span class="keyword">char</span>*)buff_.Ptr(), (<span class="keyword">uint32_t</span>)(out_buffer.Length() - last_remain_len));
+
+    <span class="keyword">return</span> <span class="literal">true</span>;
+}
+</code></pre><p>不难看出，整体上就是对写入的数据进行加密，如果有压缩的需求同时进行压缩。并将修改后的数据存入真正的mmap文件/内存缓存中。</p>
+<p>如果不能理解的话，可以看下我画的这幅图进行表示：</p>
+<p><img src="https://raw.githubusercontent.com/SatanWoo/BeeHive/master/%E5%B1%8F%E5%B9%95%E5%BF%AB%E7%85%A7%202017-07-30%20%E4%B8%8A%E5%8D%889.58.00.png?raw=true" alt=""></p>
+<h4 id="appender">appender</h4><p><code>xlog</code>方案真正的核心实际上只有一个appender文件，本质上的思路都比较清晰，将添加日志分为同步写和异步写。异步写的方式比较常用，下文会基于这个分析。</p>
+<p><strong><span style="color:red">首先是日志系统的初始化配置</span></strong></p>
+<pre><code>assert(_dir);
+assert(_nameprefix);
+
+<span class="keyword">if</span> (!sg_log_close) {
+    __writetips2file(<span class="string">"appender has already been opened. _dir:%s _nameprefix:%s"</span>, _dir, _nameprefix);
+    <span class="keyword">return</span>;
+}
+
+ <span class="comment">// 1. 设置真正的添加log信息函数，供上层调用</span>
+xlogger_SetAppender(&amp;xlogger_appender);
+
+<span class="comment">//mkdir(_dir, S_IRWXU|S_IRWXG|S_IRWXO);</span>
+boost::filesystem::create_directories(_dir);
+<span class="keyword">tickcount_t</span> tick;
+tick.gettickcount();
+__del_timeout_file(_dir);
+
+<span class="keyword">tickcountdiff_t</span> del_timeout_file_time = <span class="keyword">tickcount_t</span>().gettickcount() - tick;
+
+tick.gettickcount();
+
+<span class="keyword">char</span> mmap_file_path[<span class="number">512</span>] = {<span class="number">0</span>};
+<span class="built_in">snprintf</span>(mmap_file_path, <span class="keyword">sizeof</span>(mmap_file_path), <span class="string">"%s/%s.mmap2"</span>, sg_cache_logdir.empty()?_dir:sg_cache_logdir.c_str(), _nameprefix);
+
+<span class="keyword">bool</span> use_mmap = <span class="literal">false</span>;
+<span class="comment">// 2. 尝试使用mmap</span>
+<span class="keyword">if</span> (OpenMmapFile(mmap_file_path, kBufferBlockLength, sg_mmmap_file))  {
+    sg_log_buff = <span class="keyword">new</span> LogBuffer(sg_mmmap_file.data(), kBufferBlockLength, <span class="literal">true</span>, _pub_key);
+    use_mmap = <span class="literal">true</span>;
+} <span class="keyword">else</span> {
+    <span class="comment">// 3. 失败了回退到普通内存的方案</span>
+    <span class="keyword">char</span>* buffer = <span class="keyword">new</span> <span class="keyword">char</span>[kBufferBlockLength];
+    sg_log_buff = <span class="keyword">new</span> LogBuffer(buffer, kBufferBlockLength, <span class="literal">true</span>, _pub_key);
+    use_mmap = <span class="literal">false</span>;
+}
+
+ <span class="number">4.</span> 注意点<span class="number">1</span>!!!!!!!!!!!!!!!!!!!!
+<span class="keyword">if</span> (<span class="literal">NULL</span> == sg_log_buff-&gt;GetData().Ptr()) {
+    <span class="keyword">if</span> (use_mmap &amp;&amp; sg_mmmap_file.is_open())  CloseMmapFile(sg_mmmap_file);
+    <span class="keyword">return</span>;
+}
+
+
+<span class="number">5.</span> 注意点<span class="number">2</span>!!!!!!!!!!!!!!!!
+AutoBuffer buffer;
+sg_log_buff-&gt;Flush(buffer);
+
+<span class="function">ScopedLock <span class="title">lock</span><span class="params">(sg_mutex_log_file)</span></span>;
+sg_logdir = _dir;
+sg_logfileprefix = _nameprefix;
+sg_log_close = <span class="literal">false</span>;
+appender_setmode(_mode);
+lock.unlock();
+
+<span class="keyword">char</span> mark_info[<span class="number">512</span>] = {<span class="number">0</span>};
+get_mark_info(mark_info, <span class="keyword">sizeof</span>(mark_info));
+
+<span class="keyword">if</span> (buffer.Ptr()) {
+    __writetips2file(<span class="string">"~~~~~ begin of mmap ~~~~~\n"</span>);
+    __log2file(buffer.Ptr(), buffer.Length());
+    __writetips2file(<span class="string">"~~~~~ end of mmap ~~~~~%s\n"</span>, mark_info);
+}
+
+ <span class="number">6.</span> 添加一些关于xlog自身的信息
+<span class="keyword">tickcountdiff_t</span> get_mmap_time = <span class="keyword">tickcount_t</span>().gettickcount() - tick;
+
+
+<span class="keyword">char</span> appender_info[<span class="number">728</span>] = {<span class="number">0</span>};
+<span class="built_in">snprintf</span>(appender_info, <span class="keyword">sizeof</span>(appender_info), <span class="string">"^^^^^^^^^^"</span> __DATE__ <span class="string">"^^^"</span> __TIME__ <span class="string">"^^^^^^^^^^%s"</span>, mark_info);
+
+xlogger_appender(<span class="literal">NULL</span>, appender_info);
+<span class="keyword">char</span> logmsg[<span class="number">64</span>] = {<span class="number">0</span>};
+<span class="built_in">snprintf</span>(logmsg, <span class="keyword">sizeof</span>(logmsg), <span class="string">"del time out files time: %"</span> PRIu64, (<span class="keyword">int64_t</span>)del_timeout_file_time);
+xlogger_appender(<span class="literal">NULL</span>, logmsg);
+
+<span class="built_in">snprintf</span>(logmsg, <span class="keyword">sizeof</span>(logmsg), <span class="string">"get mmap time: %"</span> PRIu64, (<span class="keyword">int64_t</span>)get_mmap_time);
+xlogger_appender(<span class="literal">NULL</span>, logmsg);
+
+xlogger_appender(<span class="literal">NULL</span>, <span class="string">"MARS_URL: "</span> MARS_URL);
+xlogger_appender(<span class="literal">NULL</span>, <span class="string">"MARS_PATH: "</span> MARS_PATH);
+xlogger_appender(<span class="literal">NULL</span>, <span class="string">"MARS_REVISION: "</span> MARS_REVISION);
+xlogger_appender(<span class="literal">NULL</span>, <span class="string">"MARS_BUILD_TIME: "</span> MARS_BUILD_TIME);
+xlogger_appender(<span class="literal">NULL</span>, <span class="string">"MARS_BUILD_JOB: "</span> MARS_TAG);
+
+<span class="built_in">snprintf</span>(logmsg, <span class="keyword">sizeof</span>(logmsg), <span class="string">"log appender mode:%d, use mmap:%d"</span>, (<span class="keyword">int</span>)_mode, use_mmap);
+xlogger_appender(<span class="literal">NULL</span>, logmsg);
+
+BOOT_RUN_EXIT(appender_close);
+</code></pre><p><strong>有几点需要特别注意点：</strong></p>
+<ul>
+<li>注意点1:    如果我们尝试打开mmap成功了，但是mmap对应的数据地址是NULL，那我们必须停止映射。因为NULL所代表的地址处于内核态，一旦映射了，势必造成Crash。</li>
+<li>注意点2：使用mmap的情况下，如果上次应用断电了、Crash，日志的信息还是存在的，但是并不一定能及时的转换成我们想要的日志文件。因此我们首先检查下mmap文件里面有没有数据，有的话先把这部分转换成日志。</li>
+</ul>
+<p>而通过上层添加的日志，都会通过之前的<code>xlogger_appender</code>进行调用，进而往下层的<code>__appender_async</code> 记录日志。</p>
+<h4 id="__appender_async">__appender_async</h4><p><code>__appender_async</code> 需要和其异步dump线程一起搭配看，是两段非常有意思的代码，它涉及了一个将mmap/内存数据写回到磁盘的策略。</p>
+<p><strong><span style="color:red">首先是添加日志：</span></strong></p>
+<pre><code><span class="keyword">static</span> void __appender_async(<span class="keyword">const</span> XLoggerInfo* _info, <span class="keyword">const</span> <span class="keyword">char</span>* _log) {
+    ScopedLock lock(sg_mutex_buffer_async);
+    <span class="keyword">if</span> (NULL == sg_log_buff) <span class="keyword">return</span>;
+
+    <span class="keyword">char</span> temp[<span class="number">16</span>*<span class="number">1024</span>] = {<span class="number">0</span>};       <span class="comment">//tell perry,ray if you want modify size.</span>
+    PtrBuffer log_buff(temp, <span class="number">0</span>, <span class="keyword">sizeof</span>(temp));
+    log_formater(_info, _log, log_buff);
+
+    <span class="keyword">if</span> (sg_log_buff-&gt;GetData().Length() &gt;= kBufferBlockLength*<span class="number">4</span>/<span class="number">5</span>) {
+       <span class="keyword">int</span> ret = snprintf(temp, <span class="keyword">sizeof</span>(temp), <span class="string">"[F][ sg_buffer_async.Length() &gt;= BUFFER_BLOCK_LENTH*4/5, len: %d\n"</span>, (<span class="keyword">int</span>)sg_log_buff-&gt;GetData().Length());
+       log_buff.Length(ret, ret);
+    }
+
+    <span class="keyword">if</span> (!sg_log_buff-&gt;Write(log_buff.Ptr(), (unsigned <span class="keyword">int</span>)log_buff.Length())) <span class="keyword">return</span>;
+
+     <span class="comment">// mmap/内存超出一定限度就写通知异步线程写回到文件中。</span>
+    <span class="keyword">if</span> (sg_log_buff-&gt;GetData().Length() &gt;= kBufferBlockLength*<span class="number">1</span>/<span class="number">3</span> || (NULL!=_info &amp;&amp; kLevelFatal == _info-&gt;level)) {
+       sg_cond_buffer_async.notifyAll();
+    }
+}
+</code></pre><p><strong><span style="color:red">其次是异步线程Dump成日志</span></strong></p>
+<pre><code><span class="keyword">static</span> <span class="keyword">void</span> __async_log_thread() {
+    <span class="keyword">while</span> (<span class="literal">true</span>) {
+
+        <span class="function">ScopedLock <span class="title">lock_buffer</span><span class="params">(sg_mutex_buffer_async)</span></span>;
+
+        <span class="keyword">if</span> (<span class="literal">NULL</span> == sg_log_buff) <span class="keyword">break</span>;
+
+        AutoBuffer tmp;
+        sg_log_buff-&gt;Flush(tmp);
+        lock_buffer.unlock();
+
+        <span class="keyword">if</span> (<span class="literal">NULL</span> != tmp.Ptr())  __log2file(tmp.Ptr(), tmp.Length());
+
+        <span class="keyword">if</span> (sg_log_close) <span class="keyword">break</span>;
+
+        sg_cond_buffer_async.wait(<span class="number">15</span> * <span class="number">60</span> *<span class="number">1000</span>);
+    }
+}
+</code></pre><p>不难看出，整个日志的主要策略就是利用mmap将日志写入到磁盘映射上，当超过三分之一的时候通知异步线程去写日志。</p>
+<p>这样就利用了mmap的实时性、完整性打造了一个逻辑非常清晰易懂的日志，整体架构图如下：</p>
+<p><img src="https://blog.desmondyao.com/image/mars-xlog/xlog.jpg" alt=""></p>
+
+      
+    </div>
+    <footer class="article-footer">
+      <a data-url="http://satanwoo.github.io/2017/07/30/xlog/" data-id="cj5q37evc0003asi1l2mx1v9h" class="article-share-link">Share</a>
+      
+        <a href="http://satanwoo.github.io/2017/07/30/xlog/#disqus_thread" class="article-comment-link">Comments</a>
+      
+      
+  <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/C/">C</a></li><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
+
+    </footer>
+  </div>
+  
+</article>
+
+<div id="disqus_thread"></div>
+<script>
+
+/**
+*  RECOMMENDED CONFIGURATION VARIABLES: EDIT AND UNCOMMENT THE SECTION BELOW TO INSERT DYNAMIC VALUES FROM YOUR PLATFORM OR CMS.
+*  LEARN WHY DEFINING THESE VARIABLES IS IMPORTANT: https://disqus.com/admin/universalcode/#configuration-variables*/
+/*
+var disqus_config = function () {
+this.page.url = PAGE_URL;  // Replace PAGE_URL with your page's canonical URL variable
+this.page.identifier = PAGE_IDENTIFIER; // Replace PAGE_IDENTIFIER with your page's unique identifier variable
+};
+*/
+(function() { // DON'T EDIT BELOW THIS LINE
+var d = document, s = d.createElement('script');
+s.src = 'https://satanwoo-2.disqus.com/embed.js';
+s.setAttribute('data-timestamp', +new Date());
+(d.head || d.body).appendChild(s);
+})();
+</script>
+<noscript>Please enable JavaScript to view the <a href="https://disqus.com/?ref_noscript">comments powered by Disqus.</a></noscript>
+                                
+  
     <article id="post-Macho-2" class="article article-type-post" itemscope itemprop="blogPost">
   <div class="article-meta">
     <a href="/2017/06/29/Macho-2/" class="article-date">
@@ -193,7 +484,7 @@ ldp    x9, x17, [x12]        <span class="comment">// {x9, x17} = *bucket</span>
 <li>那如果不相同，即命中的bucket里面不是我们要的<code>SEL</code>，就检查这个命中的桶是不是没有<code>SEL</code>，如果是空的，执行<code>__objc_msgSend_uncached</code>。这步后续开始就是去查找类方法列表-&gt;父类方法列表了。</li>
 <li>如果不为空，否则就执行循环，进行查询。</li>
 </ul>
-<p>**<span style="color:red"><br>一些细节知识：  </span></p>
+<p>**<span style="color:red">一些细节知识：  </span></p>
 <ol>
 <li>.macro可以在汇编里面定义一段可以被复用的代码段。   </li>
 <li>.1b 代表的是向回找label定义为1的代码片段起始；1f代表向下找label定义为1的代码片段起始。  </li>
@@ -331,7 +622,7 @@ ldp    x9, x17, [x12]        <span class="comment">// {x9, x17} = *bucket</span>
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2017/06/29/Macho-2/" data-id="cj4ileswq001h8di1ai37zlvx" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2017/06/29/Macho-2/" data-id="cj5q37exc001lasi129kant9h" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2017/06/29/Macho-2/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -620,7 +911,7 @@ _magic = [cursor readBigInt32];
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2017/06/13/Macho-1/" data-id="cj4ileswv001j8di199vjzahw" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2017/06/13/Macho-1/" data-id="cj5q37exe001nasi1fx77c64l" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2017/06/13/Macho-1/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -882,7 +1173,7 @@ _attribute__((section (<span class="string">"__DATA, MinyiSpecific"</span>))) <s
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2017/06/01/FBTweak/" data-id="cj4ilesxn00238di1uqvxulrh" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2017/06/01/FBTweak/" data-id="cj5q37eyf0027asi15tgduvyp" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2017/06/01/FBTweak/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -1022,7 +1313,7 @@ foo(&amp;s, <span class="number">1</span>, <span class="number">2</span>);
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2017/04/23/ARM64IndirectReturn/" data-id="cj4ilesy1002k8di1t0l5d3xg" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2017/04/23/ARM64IndirectReturn/" data-id="cj5q37eyr002oasi1t3yveakx" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2017/04/23/ARM64IndirectReturn/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -1193,7 +1484,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2017/04/18/CalculateTwoArrayDiff/" data-id="cj4ilesxy002g8di1nh3bzx6l" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2017/04/18/CalculateTwoArrayDiff/" data-id="cj5q37eyp002kasi1ltdqg936" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2017/04/18/CalculateTwoArrayDiff/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -1383,7 +1674,7 @@ dispatch_group_create(<span class="keyword">void</span>)
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2017/01/07/DispatchGroupCrash/" data-id="cj4ilesxr00278di1fi46dequ" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2017/01/07/DispatchGroupCrash/" data-id="cj5q37eyi002basi1zzpu1gu6" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2017/01/07/DispatchGroupCrash/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -1631,7 +1922,7 @@ func <span class="function"><span class="title">resultFromBatchObjects</span><sp
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2017/01/07/JSONRPCKit/" data-id="cj4ilesxb001v8di13lqd0j08" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2017/01/07/JSONRPCKit/" data-id="cj5q37exv001zasi1193agq8p" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2017/01/07/JSONRPCKit/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -1915,7 +2206,7 @@ dispatch_sync(dq, ^{
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/10/23/multithread-dangling-pointer/" data-id="cj4ilesv000078di1zsdbxd5q" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/10/23/multithread-dangling-pointer/" data-id="cj5q37evu000basi1wn2jfaz3" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/10/23/multithread-dangling-pointer/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -2071,7 +2362,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/09/17/uiwindow-iOS/" data-id="cj4ilesuh00038di121u01jbo" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/09/17/uiwindow-iOS/" data-id="cj5q37evo0007asi1dx43lmvk" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/09/17/uiwindow-iOS/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -2231,7 +2522,7 @@ OSSpinUnlock(&amp;_lock)<span class="comment">;</span>
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/07/10/immutable-thread/" data-id="cj4ilesv300098di11g7ydwqb" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/07/10/immutable-thread/" data-id="cj5q37evw000dasi15y6jph04" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/07/10/immutable-thread/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -2355,7 +2646,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/05/02/Spotify/" data-id="cj4ilesw600108di1rh6iituu" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/05/02/Spotify/" data-id="cj5q37ews0014asi1v6ide5g9" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/05/02/Spotify/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -2483,7 +2774,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/04/26/blank-space-in-html/" data-id="cj4ilesvp000o8di1gj1vd2gy" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/04/26/blank-space-in-html/" data-id="cj5q37ewg000sasi1en7kkw9x" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/04/26/blank-space-in-html/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -2741,7 +3032,7 @@ Elapsed application CPU <span class="keyword">time</span> (seconds): <span class
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/04/11/dispatch-once/" data-id="cj4ilesv9000e8di1jh5ollhc" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/04/11/dispatch-once/" data-id="cj5q37ew2000iasi1ckxg3yy7" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/04/11/dispatch-once/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -2958,7 +3249,7 @@ a4.<span class="function"><span class="title">staticInfo</span><span class="para
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/03/22/dispatch-in-swift/" data-id="cj4ilesvc000g8di1i560wwyj" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/03/22/dispatch-in-swift/" data-id="cj5q37ew4000kasi1kcnxvzuq" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/03/22/dispatch-in-swift/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -3072,7 +3363,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/03/14/RxSwift/" data-id="cj4ileswb00168di1m1y2mp09" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/03/14/RxSwift/" data-id="cj5q37ewy001aasi1ai9ln3te" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/03/14/RxSwift/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -3182,7 +3473,7 @@ val = edx(<span class="literal">true</span>)
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/03/14/SizeUp/" data-id="cj4ilesw900138di1xj4hkj4z" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/03/14/SizeUp/" data-id="cj5q37ewv0017asi1cklorl1m" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/03/14/SizeUp/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -3344,7 +3635,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/03/14/DXXcodeConsoleUnicodePlugin/" data-id="cj4ilesxu002c8di10nqta9ca" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/03/14/DXXcodeConsoleUnicodePlugin/" data-id="cj5q37eym002gasi1yayyxz8z" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/03/14/DXXcodeConsoleUnicodePlugin/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -3443,7 +3734,7 @@ fi
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/02/27/check-manifest/" data-id="cj4ilesvj000l8di1eqca3ne2" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/02/27/check-manifest/" data-id="cj5q37ewd000pasi1ljdx34at" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/02/27/check-manifest/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -3575,7 +3866,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/02/27/pod-install-plugin/" data-id="cj4ilesux00058di1h2b87ank" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/02/27/pod-install-plugin/" data-id="cj5q37evr0009asi1msccwb26" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/02/27/pod-install-plugin/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -3853,7 +4144,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/02/27/FBKVOController/" data-id="cj4ilesxp00258di1vk4lykl8" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/02/27/FBKVOController/" data-id="cj5q37eyh0029asi1ry443cuh" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/02/27/FBKVOController/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -3989,7 +4280,7 @@ selectedTitleLabelsContentView<span class="class">.layer</span><span class="clas
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/02/05/DGRunKeeperSwitch/" data-id="cj4ilesxw002e8di1xpr9u6rb" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/02/05/DGRunKeeperSwitch/" data-id="cj5q37eyo002iasi1m75y5y0t" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/02/05/DGRunKeeperSwitch/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -4267,7 +4558,7 @@ NSLayoutConstraint *constraint = [NSLayoutConstraint <span class="string">constr
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/02/05/PureLayout/" data-id="cj4ileswj001d8di160n7xugv" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/02/05/PureLayout/" data-id="cj5q37ex5001hasi1f266kw63" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/02/05/PureLayout/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -4615,7 +4906,7 @@ extension Task {
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/12/30/Refactor-Mega-ViewController/" data-id="cj4ileswh001b8di1ymwo49s8" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/12/30/Refactor-Mega-ViewController/" data-id="cj5q37ex3001fasi1h223vm2s" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2015/12/30/Refactor-Mega-ViewController/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -4788,7 +5079,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/12/20/Learn-R-2/" data-id="cj4ileswy001l8di1rv7lohfq" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/12/20/Learn-R-2/" data-id="cj5q37exj001pasi1ixwdkopk" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2015/12/20/Learn-R-2/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -4864,7 +5155,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/12/15/Regression-Model-1/" data-id="cj4ileswe00188di170m4bxwn" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/12/15/Regression-Model-1/" data-id="cj5q37ex0001casi1h73hvcr9" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2015/12/15/Regression-Model-1/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -5029,7 +5320,7 @@ $foo
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/12/13/Learn-R-1/" data-id="cj4ilesx1001o8di18tstbs86" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/12/13/Learn-R-1/" data-id="cj5q37exn001sasi182218xkk" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2015/12/13/Learn-R-1/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -5157,7 +5448,7 @@ frame <span class="preprocessor">#<span class="number">20</span>: libdyld.dylib`
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/12/11/LLDB-1/" data-id="cj4ilesx8001t8di1smw1l15c" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/12/11/LLDB-1/" data-id="cj5q37exs001xasi1ml30ify6" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2015/12/11/LLDB-1/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -5478,7 +5769,7 @@ TBBoundingBox TBBoundingBoxMake(<span class="built_in">double</span> x0, <span c
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/12/11/TBAnnotationClustering/" data-id="cj4ilesvu000s8di1iwxbzh1g" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/12/11/TBAnnotationClustering/" data-id="cj5q37ewl000wasi1ahl5zmq7" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2015/12/11/TBAnnotationClustering/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -5725,144 +6016,12 @@ BOOL success = class_addMethod(<span class="keyword">class</span>, originalSelec
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/11/26/FDFullScreenPopGesture-Source-Code/" data-id="cj4ilesxk00218di1udg40ppj" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/11/26/FDFullScreenPopGesture-Source-Code/" data-id="cj5q37eyd0025asi1mqptttte" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2015/11/26/FDFullScreenPopGesture-Source-Code/#disqus_thread" class="article-comment-link">Comments</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
-
-    </footer>
-  </div>
-  
-</article>
-
-<div id="disqus_thread"></div>
-<script>
-
-/**
-*  RECOMMENDED CONFIGURATION VARIABLES: EDIT AND UNCOMMENT THE SECTION BELOW TO INSERT DYNAMIC VALUES FROM YOUR PLATFORM OR CMS.
-*  LEARN WHY DEFINING THESE VARIABLES IS IMPORTANT: https://disqus.com/admin/universalcode/#configuration-variables*/
-/*
-var disqus_config = function () {
-this.page.url = PAGE_URL;  // Replace PAGE_URL with your page's canonical URL variable
-this.page.identifier = PAGE_IDENTIFIER; // Replace PAGE_IDENTIFIER with your page's unique identifier variable
-};
-*/
-(function() { // DON'T EDIT BELOW THIS LINE
-var d = document, s = d.createElement('script');
-s.src = 'https://satanwoo-2.disqus.com/embed.js';
-s.setAttribute('data-timestamp', +new Date());
-(d.head || d.body).appendChild(s);
-})();
-</script>
-<noscript>Please enable JavaScript to view the <a href="https://disqus.com/?ref_noscript">comments powered by Disqus.</a></noscript>
-                                
-  
-    <article id="post-Fun-of-CAReplicationLayer" class="article article-type-post" itemscope itemprop="blogPost">
-  <div class="article-meta">
-    <a href="/2015/11/17/Fun-of-CAReplicationLayer/" class="article-date">
-  <time datetime="2015-11-16T17:54:05.000Z" itemprop="datePublished">2015-11-17</time>
-</a>
-    
-  </div>
-  <div class="article-inner">
-    
-    
-      <header class="article-header">
-        
-  
-    <h1 itemprop="name">
-      <a class="article-title" href="/2015/11/17/Fun-of-CAReplicationLayer/">Swift每日一练：妙用CAReplicationLayer</a>
-    </h1>
-  
-
-      </header>
-    
-    <div class="article-entry" itemprop="articleBody">
-      
-        <p>今天我们来学习一下一个在iOS常常被忽视的类 - CAReplicationLayer。我们要使用这个类来完成两个开起来很炫酷的加载效果。</p>
-<p>老样子，先上具体的效果一看<br><img src="http://7lrzqz.com1.z0.glb.clouddn.com/LearnCAReplicationLayer.gif"></p>
-<p>怎么样，效果还不错吧。一个是看起来有渐变效果的圆形加载，另外一个则是模仿Apple Music的柱状图加载。</p>
-<p>接下来，就让我们一起揭开实现的面纱吧！</p>
-<h3 id="CAReplicationLayer">CAReplicationLayer</h3><p>CAReplicationLayer是CALayer的子类，它与传统的CALayer系列不同，它基本不直接承担诸多效果，而是更多的承担一种“容器”的职责。</p>
-<p>怎么理解呢？大家可以把CAReplicationLayer看成一个工厂，你提供给他一个产品的模型，它就可以为了源源不断的复制出纺织品。回到iOS中来说就是，你提供一个CALayer给CAReplicationLayer，并告诉它你希望它复制几份，就打造出多个具有效果样式的Layer。<strong>不仅如此，动画效果也会被一同复制</strong></p>
-<p>因此，对于CAReplicationLayer，我们有几个特别需要关注的参数。</p>
-<ul>
-<li>instanceCount： 代表你希望将你提供它的Layer复制几份</li>
-<li>instanceDelay： 这个参数在编写动画的前提下特别有用，它表明对每一个复制(或者原生)出来的Layer，启动动画之间的时间差在多少。</li>
-<li>instanceTransform： 这个参数表示对于每一个Layer，它们之间的<strong>形变</strong>差距是多少。比如，每个Layer需要有相同的间隔。</li>
-</ul>
-<h3 id="渐变效果的圆形加载">渐变效果的圆形加载</h3><p>了解完CAReplicationLayer的基本知识以后，我们首先来看看圆形加载效果怎么实现。</p>
-<p>第一步，毫无疑问的，需要构建一个CAReplicationLayer。</p>
-<pre><code>let replicationLayer2 = <span class="function"><span class="title">CAReplicatorLayer</span><span class="params">()</span></span>
-</code></pre><p>第二部，需要一个样品，让我们的CAReplicationLayer复制生产</p>
-<pre><code>let circle = <span class="function"><span class="title">CAShapeLayer</span><span class="params">()</span></span>
-circle<span class="class">.path</span> = <span class="function"><span class="title">UIBezierPath</span><span class="params">(ovalInRect: CGRect(x: <span class="number">0</span>, y: <span class="number">0</span>, width: <span class="number">10</span>, height: <span class="number">10</span>)</span></span>)<span class="class">.CGPath</span>
-circle<span class="class">.lineWidth</span> = <span class="number">1</span>
-circle<span class="class">.fillColor</span> = UIColor.<span class="function"><span class="title">whiteColor</span><span class="params">()</span></span><span class="class">.CGColor</span>
-circle<span class="class">.transform</span> = <span class="function"><span class="title">CATransform3DMakeScale</span><span class="params">(<span class="number">0.1</span>, <span class="number">0.1</span>, <span class="number">0.1</span>)</span></span>
-</code></pre><p>在这里，我们构建了一个白色小球，把初始大小设置为了0.1。</p>
-<p>接下去，我们需要然CAReplicationLayer开始复制了，</p>
-<pre><code>replicationLayer2<span class="class">.instanceCount</span> = <span class="number">12</span>
-replicationLayer2<span class="class">.instanceTransform</span> = <span class="function"><span class="title">CATransform3DMakeRotation</span><span class="params">(CGFloat(<span class="number">2</span> * M_PI/<span class="number">12.0</span>)</span></span>, <span class="number">0.0</span>, <span class="number">0.0</span>, <span class="number">1.0</span>)
-</code></pre><p>从上述代码我们可以看出，我们首先构建了<strong>12</strong>个复制体，然后将这12个小球通过instanceTransform绕<strong>Z</strong>轴均匀的分度在圆周上。</p>
-<p>现在赶快run一下你的app，看看效果是不是正如我所说的！</p>
-<p>现在万事具备，只欠动画了！</p>
-<p>首先我们来定义如例子中的放缩动画</p>
-<pre><code><span class="component">func scaleAnimation() -&gt; CABasicAnimation {
-    let animation = CABasicAnimation(keyPath: "transform<span class="string">.scale")</span>
-    animation<span class="string">.duration</span> = 1.5
-    animation<span class="string">.fromValue</span> = 1.0
-    animation<span class="string">.toValue</span> = 0.1
-    animation<span class="string">.repeatCount</span> = Float<span class="string">.infinity</span>
-
-    return animation
-}</span>
-</code></pre><p>我们定义了一个针对scale属性、时常1.5s的动画，然后我们将这个动画添加到小球上。</p>
-<pre><code>circle.<span class="function"><span class="title">addAnimation</span><span class="params">(scaleAnimation()</span></span>, forKey: <span class="string">"scale"</span>)
-</code></pre><p>现在如果你跑一下代码的话，你会发现，所有的小球都同时启动了动画，和例子的效果不一致，怎么回事呢？</p>
-<p>嘿嘿，还记得我们之前提及的属性<strong>instanceDelay</strong>吗？没错，我们需要借助它的力量。</p>
-<pre><code>replicationLayer2.instanceDelay = <span class="number">1.5</span>/<span class="number">12</span>
-</code></pre><p>现在再看看？哈哈，效果拔群！</p>
-<h3 id="Apple_Music加载效果">Apple Music加载效果</h3><p>下面的代码，很清晰易懂，我就不逐条解析啦，有问题欢迎大家在下方评论！</p>
-<pre><code><span class="comment">// 1. 创建容器ReplicationLayer</span>
-let replicationLayer = CAReplicatorLayer()
-
-<span class="comment">// 2. 创建柱状图</span>
-let bar = CALayer()
-bar.frame = CGRect(<span class="string">x:</span> <span class="number">0</span>, <span class="string">y:</span> <span class="number">0</span>, <span class="string">width:</span> <span class="number">8</span>, <span class="string">height:</span> <span class="number">40</span>)
-bar.position = CGPoint(<span class="string">x:</span> <span class="number">10</span>, <span class="string">y:</span> <span class="number">75</span>)
-bar.backgroundColor = UIColor.purpleColor().CGColor
-
-<span class="comment">// 3. 复制生产3个，并添加水平间隔</span>
-replicationLayer.addSublayer(bar)
-replicationLayer.instanceCount = <span class="number">3</span>
-replicationLayer.instanceTransform = CATransform3DMakeTranslation(<span class="number">20</span>, <span class="number">0</span>, <span class="number">0</span>)
-
-<span class="comment">// 4. 创建动画，构造时间差</span>
-func jumpAnimation(<span class="string">bar:</span>CALayer) -&gt; CABasicAnimation {
-    let animation = CABasicAnimation(<span class="string">keyPath:</span> <span class="string">"position.y"</span>)
-    animation.toValue = bar.position.y - <span class="number">35.0</span>
-    animation.duration = <span class="number">0.45</span>
-    animation.autoreverses = <span class="literal">true</span>
-    animation.repeatCount = Float.infinity
-
-    <span class="keyword">return</span> animation
-}
-
-bar.addAnimation(jumpAnimation(bar), <span class="string">forKey:</span> <span class="string">"jump"</span>)
-replicationLayer.instanceDelay = <span class="number">0.3</span>
-</code></pre>
-      
-    </div>
-    <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/11/17/Fun-of-CAReplicationLayer/" data-id="cj4ilesxf001z8di15skcjg1b" class="article-share-link">Share</a>
-      
-        <a href="http://satanwoo.github.io/2015/11/17/Fun-of-CAReplicationLayer/#disqus_thread" class="article-comment-link">Comments</a>
-      
-      
-  <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Swift/">Swift</a></li></ul>
 
     </footer>
   </div>
@@ -5906,7 +6065,7 @@ s.setAttribute('data-timestamp', +new Date());
   <div class="widget-wrap">
     <h3 class="widget-title">Tags</h3>
     <div class="widget">
-      <ul class="tag-list"><li class="tag-list-item"><a class="tag-list-link" href="/tags/Android/">Android</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Growth/">Growth</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/JavaScript/">JavaScript</a><span class="tag-list-count">3</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Math/">Math</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Performance/">Performance</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/R/">R</a><span class="tag-list-count">2</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Reverse-Engineering/">Reverse Engineering</a><span class="tag-list-count">3</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Swift/">Swift</a><span class="tag-list-count">6</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/iOS/">iOS</a><span class="tag-list-count">25</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/shell/">shell</a><span class="tag-list-count">1</span></li></ul>
+      <ul class="tag-list"><li class="tag-list-item"><a class="tag-list-link" href="/tags/Android/">Android</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/C/">C</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Growth/">Growth</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/JavaScript/">JavaScript</a><span class="tag-list-count">3</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Math/">Math</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Performance/">Performance</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/R/">R</a><span class="tag-list-count">2</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Reverse-Engineering/">Reverse Engineering</a><span class="tag-list-count">3</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Swift/">Swift</a><span class="tag-list-count">6</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/iOS/">iOS</a><span class="tag-list-count">26</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/shell/">shell</a><span class="tag-list-count">1</span></li></ul>
     </div>
   </div>
 
@@ -5915,7 +6074,7 @@ s.setAttribute('data-timestamp', +new Date());
   <div class="widget-wrap">
     <h3 class="widget-title">Tag Cloud</h3>
     <div class="widget tagcloud">
-      <a href="/tags/Android/" style="font-size: 10px;">Android</a> <a href="/tags/Growth/" style="font-size: 10px;">Growth</a> <a href="/tags/JavaScript/" style="font-size: 15px;">JavaScript</a> <a href="/tags/Math/" style="font-size: 10px;">Math</a> <a href="/tags/Performance/" style="font-size: 10px;">Performance</a> <a href="/tags/R/" style="font-size: 12.5px;">R</a> <a href="/tags/Reverse-Engineering/" style="font-size: 15px;">Reverse Engineering</a> <a href="/tags/Swift/" style="font-size: 17.5px;">Swift</a> <a href="/tags/iOS/" style="font-size: 20px;">iOS</a> <a href="/tags/shell/" style="font-size: 10px;">shell</a>
+      <a href="/tags/Android/" style="font-size: 10px;">Android</a> <a href="/tags/C/" style="font-size: 10px;">C</a> <a href="/tags/Growth/" style="font-size: 10px;">Growth</a> <a href="/tags/JavaScript/" style="font-size: 15px;">JavaScript</a> <a href="/tags/Math/" style="font-size: 10px;">Math</a> <a href="/tags/Performance/" style="font-size: 10px;">Performance</a> <a href="/tags/R/" style="font-size: 12.5px;">R</a> <a href="/tags/Reverse-Engineering/" style="font-size: 15px;">Reverse Engineering</a> <a href="/tags/Swift/" style="font-size: 17.5px;">Swift</a> <a href="/tags/iOS/" style="font-size: 20px;">iOS</a> <a href="/tags/shell/" style="font-size: 10px;">shell</a>
     </div>
   </div>
 
@@ -5924,7 +6083,7 @@ s.setAttribute('data-timestamp', +new Date());
   <div class="widget-wrap">
     <h3 class="widget-title">Archives</h3>
     <div class="widget">
-      <ul class="archive-list"><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/06/">June 2017</a><span class="archive-list-count">3</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/04/">April 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/01/">January 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/10/">October 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/09/">September 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/07/">July 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/05/">May 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/04/">April 2016</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/03/">March 2016</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/02/">February 2016</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/12/">December 2015</a><span class="archive-list-count">6</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/11/">November 2015</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/10/">October 2015</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/09/">September 2015</a><span class="archive-list-count">4</span></li></ul>
+      <ul class="archive-list"><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/07/">July 2017</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/06/">June 2017</a><span class="archive-list-count">3</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/04/">April 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/01/">January 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/10/">October 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/09/">September 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/07/">July 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/05/">May 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/04/">April 2016</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/03/">March 2016</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/02/">February 2016</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/12/">December 2015</a><span class="archive-list-count">6</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/11/">November 2015</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/10/">October 2015</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/09/">September 2015</a><span class="archive-list-count">4</span></li></ul>
     </div>
   </div>
 
@@ -5934,6 +6093,10 @@ s.setAttribute('data-timestamp', +new Date());
     <h3 class="widget-title">Recents</h3>
     <div class="widget">
       <ul>
+        
+          <li>
+            <a href="/2017/07/30/xlog/">微信高性能线上日志系统xlog剖析</a>
+          </li>
         
           <li>
             <a href="/2017/06/29/Macho-2/">深入理解Macho文件（二）- 消失的__OBJC段与新生的__DATA段</a>
@@ -5949,10 +6112,6 @@ s.setAttribute('data-timestamp', +new Date());
         
           <li>
             <a href="/2017/04/23/ARM64IndirectReturn/">ARM64下Indirect Result Location摸索</a>
-          </li>
-        
-          <li>
-            <a href="/2017/04/18/CalculateTwoArrayDiff/">快速计算两组数据源的变化的方法 - Doppelganger 源码剖析</a>
           </li>
         
       </ul>

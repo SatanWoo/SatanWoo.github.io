@@ -4,7 +4,7 @@
   
   <link href="/atom.xml" rel="self"/>
   <link href="http://satanwoo.github.io/"/>
-  <updated>2017-06-29T15:36:31.000Z</updated>
+  <updated>2017-07-30T02:08:48.000Z</updated>
   <id>http://satanwoo.github.io/</id>
   
   <author>
@@ -15,11 +15,259 @@
   <generator uri="http://hexo.io/">Hexo</generator>
   
   <entry>
+    <title><![CDATA[微信高性能线上日志系统xlog剖析]]></title>
+    <link href="http://satanwoo.github.io/2017/07/30/xlog/"/>
+    <id>http://satanwoo.github.io/2017/07/30/xlog/</id>
+    <published>2017-07-30T02:05:14.000Z</published>
+    <updated>2017-07-30T02:08:48.000Z</updated>
+    <content type="html"><![CDATA[<h3 id="微信高性能线上日志系统xlog剖析">微信高性能线上日志系统xlog剖析</h3><p>做移动开发的同学经常会遇到一个头疼的问题，就是当用户反馈一些问题，又比较冷僻难以复现的时候（不是Crash），常常就会陷入一筹莫展的境地。因此，很多人就研发了相关的监控系统，比如一些知名的APM来监测帧率、内存、电量等等，将这些数据进行采集、合并再上报至专门的平台供开发测试同学查看。但是这些APM往往都是粗粒度的监控，究其原因就在于如果特别精细的进行监控，线上的性能会吃不消，一些监控反而影响了用户的正常使用。</p>
+<p>说了这么多，抛开获取数据方面的难度不提，线上监控的本质还是在于信息（日志）记录，而端上的日志记录存在一个社会主义初级阶段的供需矛盾：</p>
+<p><strong>即实时细粒度的日志记录的性能落差和日志的完整不丢失无法兼顾。</strong></p>
+<p>如果你要高性能、细粒度的记录日志，那你势必大量使用内存。而大量使用使用内存，万一没电了、程序突然崩了，这些中间态的日志还没持久化，就相当于白费了精力；而如果你想保证可靠性，那你就需要经常实时落盘。我们知道，写磁盘的行为是会设计用户态和内核态的切换，在高流畅性的要求下是绝对会影响性能了，而且这还不是你开多线程能够解决的问题。</p>
+<h3 id="写磁盘为什么会非常慢">写磁盘为什么会非常慢</h3><p>现如今、几乎所有的操作系统在管理内存的时候，基本采用了页式管理的策略。即将连续的内存空间（注意空间，不是地址）换成了一个个页式大小。这样的好处有几点：</p>
+<ol>
+<li>按页这种大小进行管理、可以有效的减少内存碎片的粒度。</li>
+<li>按页加载，可以充分利用磁盘上的交换空间，使得程序使用的空间能大大超过内存限制。</li>
+</ol>
+<blockquote>
+<p>当然，iOS设备上不存在交换空间，但是也依然按照页式结构进行内存管理。</p>
+</blockquote>
+<p>回到为什么写磁盘会慢的问题上。我们一般会把内存中的数据进行持久化储存到磁盘上。但是写入磁盘并不是你想写就立刻写的，数据是通过flush的方式从内存写回到磁盘，一般有如下几种情况：</p>
+<ol>
+<li>通过页的<code>flag</code>标记为有改动，操作系统定时将这种脏页写回到磁盘上，时机不可控。</li>
+<li>调用用户态的写接口-&gt;触发内核态的<code>sys_write</code>-&gt;文件系统将数据写回磁盘。</li>
+</ol>
+<p><strong><b style="color:red">乍一看上述第二种方式非常适合写日志，但是其包含两个非常明显的问题：</b></strong></p>
+<ul>
+<li>文件系统处于效率不会立刻将数据写回到磁盘（比如磁道寻址由于机械操作的原因相对非常耗时），而是以Block块的形式缓存在队列中，经过排序、合并到达一定比例之后再写回磁盘。</li>
+<li>这种方式在将数据写回到磁盘时，需要经历两次拷贝。一次是把数据从用户态拷贝到内核态，需要经历上下文切换；还有一次是内核空间到硬盘上真正的数据拷贝。当切换次数过于频繁，整体性能也会下降。</li>
+</ul>
+<p>基于上述这些问题，<code>xlog</code>采用了<code>mmap</code>的方案进行日志系统的设计：</p>
+<blockquote>
+<p>mmap 是使用逻辑内存对磁盘文件进行映射，中间只是进行映射没有任何拷贝操作，避免了写文件的数据拷贝。操作内存就相当于在操作文件，避免了内核空间和用户空间的频繁切换。</p>
+</blockquote>
+<p>除了系能耐，使用mmap还能保证日志的完整性，因为如下这些情况下回自动回写磁盘：</p>
+<ul>
+<li>内存不足</li>
+<li>进程 crash</li>
+<li>调用 msync 或者 munmap</li>
+<li>不设置 MAP_NOSYNC 情况下 30s-60s(仅限FreeBSD)</li>
+</ul>
+<h3 id="xlog源码分析">xlog源码分析</h3><p><code>xlog</code>的代码主要分为两块，面向上层的使用封装<code>xlogger</code>，暴露了一系列的借口。以及核心的<code>appender</code>和<code>log</code>等。</p>
+<h4 id="log_buffer">log_buffer</h4><p><code>log_buffer</code>其目的是封装了一个对mmap/传统内存操作的数据结构。其核心思想就是将上层的操作转换对实际开辟出来的日志缓存地址进行读写（也封装了加密压缩操作等等）。我们以写操作为例子进行剖析：</p>
+<pre><code><span class="keyword">bool</span> LogBuffer::Write(<span class="keyword">const</span> <span class="keyword">void</span>* _data, <span class="keyword">size_t</span> _length) {
+    <span class="comment">// 一些异常处理，不说了</span>
+    <span class="keyword">if</span> (<span class="literal">NULL</span> == _data || <span class="number">0</span> == _length) {
+        <span class="keyword">return</span> <span class="literal">false</span>;
+    }
+
+    <span class="keyword">if</span> (buff_.Length() == <span class="number">0</span>) {
+        <span class="keyword">if</span> (!__Reset()) <span class="keyword">return</span> <span class="literal">false</span>;
+    }
+
+    <span class="keyword">size_t</span> before_len = buff_.Length();
+    <span class="keyword">size_t</span> write_len = _length;
+
+    <span class="keyword">if</span> (is_compress_) {
+        <span class="comment">// 是否开启压缩</span>
+        cstream_.avail_in = (uInt)_length;
+        cstream_.next_in = (Bytef*)_data;
+
+        uInt avail_out = (uInt)(buff_.MaxLength() - buff_.Length());
+        cstream_.next_out = (Bytef*)buff_.PosPtr();
+        cstream_.avail_out = avail_out;
+
+        <span class="keyword">if</span> (Z_OK != deflate(&amp;cstream_, Z_SYNC_FLUSH)) {
+            <span class="keyword">return</span> <span class="literal">false</span>;
+        }
+
+        write_len = avail_out - cstream_.avail_out;
+    } <span class="keyword">else</span> {
+          <span class="comment">// 1. 写入数据到mmap文件或者内存当中</span>
+        buff_.Write(_data, _length);
+    }
+
+    <span class="comment">// 2. 检查之前尝试加密但是还剩的未能成功加密的数据长度</span>
+    before_len -= remain_nocrypt_len_;
+
+    AutoBuffer out_buffer;
+    <span class="keyword">size_t</span> last_remain_len = remain_nocrypt_len_;
+
+    <span class="comment">// 3. 异步加密，更新未能加密的数据长度</span>
+    log_crypt_-&gt;CryptAsyncLog((<span class="keyword">char</span>*)buff_.Ptr() + before_len, write_len + remain_nocrypt_len_, out_buffer, remain_nocrypt_len_);
+
+    <span class="comment">// 4. 将加密的文本重新写入到之前最后一次加密的数据结尾位置</span>
+    buff_.Write(out_buffer.Ptr(), out_buffer.Length(), before_len);
+
+    <span class="comment">// 5. 更新数据</span>
+    before_len += out_buffer.Length();
+    buff_.Length(before_len, before_len);
+
+    <span class="comment">// 6. 添加一下加密的长度之类的辅助信息补充在真实数据之后，主要用于解密时候用</span>
+    log_crypt_-&gt;UpdateLogLen((<span class="keyword">char</span>*)buff_.Ptr(), (<span class="keyword">uint32_t</span>)(out_buffer.Length() - last_remain_len));
+
+    <span class="keyword">return</span> <span class="literal">true</span>;
+}
+</code></pre><p>不难看出，整体上就是对写入的数据进行加密，如果有压缩的需求同时进行压缩。并将修改后的数据存入真正的mmap文件/内存缓存中。</p>
+<p>如果不能理解的话，可以看下我画的这幅图进行表示：</p>
+<p><img src="https://raw.githubusercontent.com/SatanWoo/BeeHive/master/%E5%B1%8F%E5%B9%95%E5%BF%AB%E7%85%A7%202017-07-30%20%E4%B8%8A%E5%8D%889.58.00.png?raw=true" alt=""></p>
+<h4 id="appender">appender</h4><p><code>xlog</code>方案真正的核心实际上只有一个appender文件，本质上的思路都比较清晰，将添加日志分为同步写和异步写。异步写的方式比较常用，下文会基于这个分析。</p>
+<p><strong><span style="color:red">首先是日志系统的初始化配置</span></strong></p>
+<pre><code>assert(_dir);
+assert(_nameprefix);
+
+<span class="keyword">if</span> (!sg_log_close) {
+    __writetips2file(<span class="string">"appender has already been opened. _dir:%s _nameprefix:%s"</span>, _dir, _nameprefix);
+    <span class="keyword">return</span>;
+}
+
+ <span class="comment">// 1. 设置真正的添加log信息函数，供上层调用</span>
+xlogger_SetAppender(&amp;xlogger_appender);
+
+<span class="comment">//mkdir(_dir, S_IRWXU|S_IRWXG|S_IRWXO);</span>
+boost::filesystem::create_directories(_dir);
+<span class="keyword">tickcount_t</span> tick;
+tick.gettickcount();
+__del_timeout_file(_dir);
+
+<span class="keyword">tickcountdiff_t</span> del_timeout_file_time = <span class="keyword">tickcount_t</span>().gettickcount() - tick;
+
+tick.gettickcount();
+
+<span class="keyword">char</span> mmap_file_path[<span class="number">512</span>] = {<span class="number">0</span>};
+<span class="built_in">snprintf</span>(mmap_file_path, <span class="keyword">sizeof</span>(mmap_file_path), <span class="string">"%s/%s.mmap2"</span>, sg_cache_logdir.empty()?_dir:sg_cache_logdir.c_str(), _nameprefix);
+
+<span class="keyword">bool</span> use_mmap = <span class="literal">false</span>;
+<span class="comment">// 2. 尝试使用mmap</span>
+<span class="keyword">if</span> (OpenMmapFile(mmap_file_path, kBufferBlockLength, sg_mmmap_file))  {
+    sg_log_buff = <span class="keyword">new</span> LogBuffer(sg_mmmap_file.data(), kBufferBlockLength, <span class="literal">true</span>, _pub_key);
+    use_mmap = <span class="literal">true</span>;
+} <span class="keyword">else</span> {
+    <span class="comment">// 3. 失败了回退到普通内存的方案</span>
+    <span class="keyword">char</span>* buffer = <span class="keyword">new</span> <span class="keyword">char</span>[kBufferBlockLength];
+    sg_log_buff = <span class="keyword">new</span> LogBuffer(buffer, kBufferBlockLength, <span class="literal">true</span>, _pub_key);
+    use_mmap = <span class="literal">false</span>;
+}
+
+ <span class="number">4.</span> 注意点<span class="number">1</span>!!!!!!!!!!!!!!!!!!!!
+<span class="keyword">if</span> (<span class="literal">NULL</span> == sg_log_buff-&gt;GetData().Ptr()) {
+    <span class="keyword">if</span> (use_mmap &amp;&amp; sg_mmmap_file.is_open())  CloseMmapFile(sg_mmmap_file);
+    <span class="keyword">return</span>;
+}
+
+
+<span class="number">5.</span> 注意点<span class="number">2</span>!!!!!!!!!!!!!!!!
+AutoBuffer buffer;
+sg_log_buff-&gt;Flush(buffer);
+
+<span class="function">ScopedLock <span class="title">lock</span><span class="params">(sg_mutex_log_file)</span></span>;
+sg_logdir = _dir;
+sg_logfileprefix = _nameprefix;
+sg_log_close = <span class="literal">false</span>;
+appender_setmode(_mode);
+lock.unlock();
+
+<span class="keyword">char</span> mark_info[<span class="number">512</span>] = {<span class="number">0</span>};
+get_mark_info(mark_info, <span class="keyword">sizeof</span>(mark_info));
+
+<span class="keyword">if</span> (buffer.Ptr()) {
+    __writetips2file(<span class="string">"~~~~~ begin of mmap ~~~~~\n"</span>);
+    __log2file(buffer.Ptr(), buffer.Length());
+    __writetips2file(<span class="string">"~~~~~ end of mmap ~~~~~%s\n"</span>, mark_info);
+}
+
+ <span class="number">6.</span> 添加一些关于xlog自身的信息
+<span class="keyword">tickcountdiff_t</span> get_mmap_time = <span class="keyword">tickcount_t</span>().gettickcount() - tick;
+
+
+<span class="keyword">char</span> appender_info[<span class="number">728</span>] = {<span class="number">0</span>};
+<span class="built_in">snprintf</span>(appender_info, <span class="keyword">sizeof</span>(appender_info), <span class="string">"^^^^^^^^^^"</span> __DATE__ <span class="string">"^^^"</span> __TIME__ <span class="string">"^^^^^^^^^^%s"</span>, mark_info);
+
+xlogger_appender(<span class="literal">NULL</span>, appender_info);
+<span class="keyword">char</span> logmsg[<span class="number">64</span>] = {<span class="number">0</span>};
+<span class="built_in">snprintf</span>(logmsg, <span class="keyword">sizeof</span>(logmsg), <span class="string">"del time out files time: %"</span> PRIu64, (<span class="keyword">int64_t</span>)del_timeout_file_time);
+xlogger_appender(<span class="literal">NULL</span>, logmsg);
+
+<span class="built_in">snprintf</span>(logmsg, <span class="keyword">sizeof</span>(logmsg), <span class="string">"get mmap time: %"</span> PRIu64, (<span class="keyword">int64_t</span>)get_mmap_time);
+xlogger_appender(<span class="literal">NULL</span>, logmsg);
+
+xlogger_appender(<span class="literal">NULL</span>, <span class="string">"MARS_URL: "</span> MARS_URL);
+xlogger_appender(<span class="literal">NULL</span>, <span class="string">"MARS_PATH: "</span> MARS_PATH);
+xlogger_appender(<span class="literal">NULL</span>, <span class="string">"MARS_REVISION: "</span> MARS_REVISION);
+xlogger_appender(<span class="literal">NULL</span>, <span class="string">"MARS_BUILD_TIME: "</span> MARS_BUILD_TIME);
+xlogger_appender(<span class="literal">NULL</span>, <span class="string">"MARS_BUILD_JOB: "</span> MARS_TAG);
+
+<span class="built_in">snprintf</span>(logmsg, <span class="keyword">sizeof</span>(logmsg), <span class="string">"log appender mode:%d, use mmap:%d"</span>, (<span class="keyword">int</span>)_mode, use_mmap);
+xlogger_appender(<span class="literal">NULL</span>, logmsg);
+
+BOOT_RUN_EXIT(appender_close);
+</code></pre><p><strong>有几点需要特别注意点：</strong></p>
+<ul>
+<li>注意点1:    如果我们尝试打开mmap成功了，但是mmap对应的数据地址是NULL，那我们必须停止映射。因为NULL所代表的地址处于内核态，一旦映射了，势必造成Crash。</li>
+<li>注意点2：使用mmap的情况下，如果上次应用断电了、Crash，日志的信息还是存在的，但是并不一定能及时的转换成我们想要的日志文件。因此我们首先检查下mmap文件里面有没有数据，有的话先把这部分转换成日志。</li>
+</ul>
+<p>而通过上层添加的日志，都会通过之前的<code>xlogger_appender</code>进行调用，进而往下层的<code>__appender_async</code> 记录日志。</p>
+<h4 id="__appender_async">__appender_async</h4><p><code>__appender_async</code> 需要和其异步dump线程一起搭配看，是两段非常有意思的代码，它涉及了一个将mmap/内存数据写回到磁盘的策略。</p>
+<p><strong><span style="color:red">首先是添加日志：</span></strong></p>
+<pre><code><span class="keyword">static</span> void __appender_async(<span class="keyword">const</span> XLoggerInfo* _info, <span class="keyword">const</span> <span class="keyword">char</span>* _log) {
+    ScopedLock lock(sg_mutex_buffer_async);
+    <span class="keyword">if</span> (NULL == sg_log_buff) <span class="keyword">return</span>;
+
+    <span class="keyword">char</span> temp[<span class="number">16</span>*<span class="number">1024</span>] = {<span class="number">0</span>};       <span class="comment">//tell perry,ray if you want modify size.</span>
+    PtrBuffer log_buff(temp, <span class="number">0</span>, <span class="keyword">sizeof</span>(temp));
+    log_formater(_info, _log, log_buff);
+
+    <span class="keyword">if</span> (sg_log_buff-&gt;GetData().Length() &gt;= kBufferBlockLength*<span class="number">4</span>/<span class="number">5</span>) {
+       <span class="keyword">int</span> ret = snprintf(temp, <span class="keyword">sizeof</span>(temp), <span class="string">"[F][ sg_buffer_async.Length() &gt;= BUFFER_BLOCK_LENTH*4/5, len: %d\n"</span>, (<span class="keyword">int</span>)sg_log_buff-&gt;GetData().Length());
+       log_buff.Length(ret, ret);
+    }
+
+    <span class="keyword">if</span> (!sg_log_buff-&gt;Write(log_buff.Ptr(), (unsigned <span class="keyword">int</span>)log_buff.Length())) <span class="keyword">return</span>;
+
+     <span class="comment">// mmap/内存超出一定限度就写通知异步线程写回到文件中。</span>
+    <span class="keyword">if</span> (sg_log_buff-&gt;GetData().Length() &gt;= kBufferBlockLength*<span class="number">1</span>/<span class="number">3</span> || (NULL!=_info &amp;&amp; kLevelFatal == _info-&gt;level)) {
+       sg_cond_buffer_async.notifyAll();
+    }
+}
+</code></pre><p><strong><span style="color:red">其次是异步线程Dump成日志</span></strong></p>
+<pre><code><span class="keyword">static</span> <span class="keyword">void</span> __async_log_thread() {
+    <span class="keyword">while</span> (<span class="literal">true</span>) {
+
+        <span class="function">ScopedLock <span class="title">lock_buffer</span><span class="params">(sg_mutex_buffer_async)</span></span>;
+
+        <span class="keyword">if</span> (<span class="literal">NULL</span> == sg_log_buff) <span class="keyword">break</span>;
+
+        AutoBuffer tmp;
+        sg_log_buff-&gt;Flush(tmp);
+        lock_buffer.unlock();
+
+        <span class="keyword">if</span> (<span class="literal">NULL</span> != tmp.Ptr())  __log2file(tmp.Ptr(), tmp.Length());
+
+        <span class="keyword">if</span> (sg_log_close) <span class="keyword">break</span>;
+
+        sg_cond_buffer_async.wait(<span class="number">15</span> * <span class="number">60</span> *<span class="number">1000</span>);
+    }
+}
+</code></pre><p>不难看出，整个日志的主要策略就是利用mmap将日志写入到磁盘映射上，当超过三分之一的时候通知异步线程去写日志。</p>
+<p>这样就利用了mmap的实时性、完整性打造了一个逻辑非常清晰易懂的日志，整体架构图如下：</p>
+<p><img src="https://blog.desmondyao.com/image/mars-xlog/xlog.jpg" alt=""></p>
+]]></content>
+    <summary type="html">
+    <![CDATA[<h3 id="微信高性能线上日志系统xlog剖析">微信高性能线上日志系统xlog剖析</h3><p>做移动开发的同学经常会遇到一个头疼的问题，就是当用户反馈一些问题，又比较冷僻难以复现的时候（不是Crash），常常就会陷入一筹莫展的境地。因此，很多人就研发了相关的监控系统，比]]>
+    </summary>
+    
+      <category term="C" scheme="http://satanwoo.github.io/tags/C/"/>
+    
+      <category term="iOS" scheme="http://satanwoo.github.io/tags/iOS/"/>
+    
+  </entry>
+  
+  <entry>
     <title><![CDATA[深入理解Macho文件（二）- 消失的__OBJC段与新生的__DATA段]]></title>
     <link href="http://satanwoo.github.io/2017/06/29/Macho-2/"/>
     <id>http://satanwoo.github.io/2017/06/29/Macho-2/</id>
     <published>2017-06-29T15:22:32.000Z</published>
-    <updated>2017-06-29T15:36:31.000Z</updated>
+    <updated>2017-06-29T15:40:03.000Z</updated>
     <content type="html"><![CDATA[<p>在上文中，我们提到了有个神秘的<code>__OBJC</code>段，Runtime的许多机制就是依赖于它。但是无论我怎么搜索网上相关的资料、苹果的官方文档，都发现找不到这个段了。</p>
 <p>一脸懵逼。没事，打开class-dump，看看它怎么处理的。嘿嘿，果不其然，在Class-Dump的代码里，有着如下注释：</p>
 <blockquote>
@@ -129,7 +377,7 @@ ldp    x9, x17, [x12]        <span class="comment">// {x9, x17} = *bucket</span>
 <li>那如果不相同，即命中的bucket里面不是我们要的<code>SEL</code>，就检查这个命中的桶是不是没有<code>SEL</code>，如果是空的，执行<code>__objc_msgSend_uncached</code>。这步后续开始就是去查找类方法列表-&gt;父类方法列表了。</li>
 <li>如果不为空，否则就执行循环，进行查询。</li>
 </ul>
-<p>**<span style="color:red"><br>一些细节知识：  </span></p>
+<p>**<span style="color:red">一些细节知识：  </span></p>
 <ol>
 <li>.macro可以在汇编里面定义一段可以被复用的代码段。   </li>
 <li>.1b 代表的是向回找label定义为1的代码片段起始；1f代表向下找label定义为1的代码片段起始。  </li>
@@ -2717,240 +2965,6 @@ fi
     <![CDATA[<p>前几天刚刚粗略了学习了一下Xcode的插件开发，一时心痒，就准备做个简单的插件练练手。</p>
 <p>哎哟我擦，正当我准备大展身手的时候，我突然想到我该做个啥呢?  我这真是有了程序员，只差一个好Idea了。</p>
 <p>好吧，正巧这个时候，我发现我和朋友协作的一个iOS]]>
-    </summary>
-    
-      <category term="iOS" scheme="http://satanwoo.github.io/tags/iOS/"/>
-    
-  </entry>
-  
-  <entry>
-    <title><![CDATA[FBKVOController 源码解析]]></title>
-    <link href="http://satanwoo.github.io/2016/02/27/FBKVOController/"/>
-    <id>http://satanwoo.github.io/2016/02/27/FBKVOController/</id>
-    <published>2016-02-27T10:21:55.000Z</published>
-    <updated>2016-02-27T10:24:22.000Z</updated>
-    <content type="html"><![CDATA[<p>开发过iOS的app已经不计其数了，在不同的项目中采用的架构也各不相同，有传统的<strong>MVC</strong>，简化的<strong>VIPER</strong>，以及一些简单的<strong>MVVM</strong>。</p>
-<p>这其中，我最不推荐的就是<strong>VIPER</strong>，谁写谁知道，，绝对是增加了项目的复杂性。<strong>MVVM</strong>由于自己总是受限于传统的<code>Object-Oriented</code>的思路，总是想不出真正的Functional Programming的代码，因此，绝大多数情况，写着写着都回归到了<strong>MVC</strong>。</p>
-<p>其实，相较于网上大家总喜欢提到的<strong>Massive View Controller</strong>问题，我更想说的是这种传统架构中对于信息流的不友好。</p>
-<p>在一个典型的iOS的问题中，我们的代码执行流程，通常都是从View Controller的<strong>生命周期</strong>开始，如果是一个完全基于顺序执行的应用，那整个app的信息流是<strong>单向可跟踪的</strong>。但是往往事情并不会那么简单，我们会包含至少如下这些潜在打乱信息流的<em>坏蛋</em></p>
-<ul>
-<li>Delegate回调</li>
-<li>NSNotification</li>
-<li>UIView控件的Target-Action</li>
-<li>KVO</li>
-</ul>
-<p>在这里，你可能会以为我想谈谈<strong>ReactiveCocoa</strong>和<strong>RxSwift</strong>，那你错啦，那个开源项目我暂时还没有能力去深究，所以我想从KVO事件入手，读一读Facebook出品的<strong>FBKVOController</strong>。</p>
-<h4 id="FBKVOController">FBKVOController</h4><p>简单来说，FBKVOController是对KVO机制的一层封装，同时提供了线程安全的特性和并对如下这个<strong>臭名昭著</strong>的函数进行了封装，提供了干净的block的回调，避免了处理这个函数的逻辑散落的到处都是。</p>
-<pre><code>- (<span class="typename">void</span>)<span class="string">observeValueForKeyPath:</span>(NSString *)keyPath <span class="string">ofObject:</span>(id)object <span class="string">change:</span>(NSDictionary *)change <span class="string">context:</span>(<span class="typename">void</span> *)context
-</code></pre><h4 id="源码分析">源码分析</h4><p>整个项目的结构非常简单，包含如下四个文件：</p>
-<ul>
-<li>FBKVOController.h/.m</li>
-<li>NSObject+FBKVOController.h/.m</li>
-</ul>
-<p>其中，<code>NSObject+FBKVOController</code>只是通过<code>AssociateObject</code>给NSObject提供了一个<code>retain</code>及一个<code>非retain</code>型的KVOController。</p>
-<p>这两种不同类型的KVOController有啥区别，我们稍后再提，我们将重点投向<code>FBKVOController</code>这个文件。</p>
-<p>打开这个<code>FBKVOController.m</code>文件，哎呀，600多行文件，有点蛋疼。没事，配合头文件粗略扫一眼以后，可以发现其中很多方法都是<code>convenience method</code>。</p>
-<p>简单剥离一下数据结构以后，我们可以发现，主要的数据结构有如下三个。</p>
-<ul>
-<li>FBKVOInfo</li>
-<li>FBKVOSharedController</li>
-<li>FBKVOController</li>
-</ul>
-<h4 id="FBKVOController-1">FBKVOController</h4><p>既然我们前面通过<code>NSObject+FBKVOController</code>知道了每个对象都会有其对应的<code>FBKVOController</code>，那我们就先来看看这个类吧。</p>
-<pre><code><span class="comment">//1.</span>
-<span class="class"><span class="keyword">@implementation</span> <span class="title">FBKVOController</span></span>
-{
-  <span class="built_in">NSMapTable</span> *_objectInfosMap;
-  OSSpinLock _lock;
-}
-
-<span class="comment">//2.</span>
-- (instancetype)initWithObserver:(<span class="keyword">id</span>)observer retainObserved:(<span class="built_in">BOOL</span>)retainObserved
-{
-  <span class="keyword">self</span> = [<span class="keyword">super</span> init];
-  <span class="keyword">if</span> (<span class="literal">nil</span> != <span class="keyword">self</span>) {
-    <span class="comment">// 2.</span>
-    _observer = observer;
-
-    <span class="comment">// 3.</span>
-    <span class="built_in">NSPointerFunctionsOptions</span> keyOptions = retainObserved ? <span class="built_in">NSPointerFunctionsStrongMemory</span>|<span class="built_in">NSPointerFunctionsObjectPointerPersonality</span> : <span class="built_in">NSPointerFunctionsWeakMemory</span>|<span class="built_in">NSPointerFunctionsObjectPointerPersonality</span>;
-    _objectInfosMap = [[<span class="built_in">NSMapTable</span> alloc] initWithKeyOptions:keyOptions valueOptions:<span class="built_in">NSPointerFunctionsStrongMemory</span>|<span class="built_in">NSPointerFunctionsObjectPersonality</span> capacity:<span class="number">0</span>];
-
-    <span class="comment">// 4.</span>
-    _lock = OS_SPINLOCK_INIT;
-  }
-  <span class="keyword">return</span> <span class="keyword">self</span>;
-}
-</code></pre><ol>
-<li><p>首先我们看到，这个对象持有一个<code>OSSpinLock</code>及一个<code>NSMapTable</code>。其中<code>OSSpinLock</code>即为自旋锁，当多个线程竞争相同的<strong>critical section</strong>时，起到保护作用。<code>NSMapTable</code>可能大家接触不是很多，我们在后文会详细介绍，这里大家可以先理解为一个高级的NSDictionary。</p>
-</li>
-<li><p>在构造函数中，首先将传入的observer进行<code>weak</code>持有，这主要为了避免<strong>Retain Cycle</strong>。</p>
-</li>
-<li><p>这一段的内容可能大家不太熟悉，<code>NSPointerFunctionsOptions</code>简单来说就是定义<code>NSMapTable</code>中的key和value采用何种内存管理策略，包括<code>strong</code>强引用，<code>weak</code>弱引用以及<code>copy</code>（要支持NSCopying协议）</p>
-</li>
-<li><p>初始化自旋锁  </p>
-</li>
-</ol>
-<p>接下来，使我们通过<code>FBKVOController</code>来对一个对象的某个或者某些keypath进行观察。</p>
-<pre><code>- (<span class="typename">void</span>)<span class="string">observe:</span>(id)object <span class="string">keyPath:</span>(NSString *)keyPath <span class="string">options:</span>(NSKeyValueObservingOptions)options <span class="string">block:</span>(FBKVONotificationBlock)block
-{
-  NSAssert(<span class="number">0</span> != keyPath.length &amp;&amp; NULL != block, @<span class="string">"missing required parameters observe:%@ keyPath:%@ block:%p"</span>, object, keyPath, block);
-  <span class="keyword">if</span> (nil == object || <span class="number">0</span> == keyPath.length || NULL == block) {
-    <span class="keyword">return</span>;
-  }
-
-  <span class="comment">// 1. create info</span>
-  _FBKVOInfo *info = [[_FBKVOInfo alloc] <span class="string">initWithController:</span>self <span class="string">keyPath:</span>keyPath <span class="string">options:</span>options <span class="string">block:</span>block];
-
-  <span class="comment">// 2. observe object with info</span>
-  [self <span class="string">_observe:</span>object <span class="string">info:</span>info];
-}
-</code></pre><ol>
-<li>对于传入的参数，构建一个内部的FBKVOInfo数据结构</li>
-<li>调用<code>[self _observe:object info:info];</code></li>
-</ol>
-<p>接下来，我们来跟踪一下<code>[self _observe:object info:info];</code>，内容如下：</p>
-<pre><code>- (<span class="typename">void</span>)<span class="string">_observe:</span>(id)object <span class="string">info:</span>(_FBKVOInfo *)info
-{
-  <span class="comment">// lock</span>
-  OSSpinLockLock(&amp;_lock);
-
-  <span class="comment">// 1.</span>
-  NSMutableSet *infos = [_objectInfosMap <span class="string">objectForKey:</span>object];
-
-  <span class="comment">// 2. </span>
-  _FBKVOInfo *existingInfo = [infos <span class="string">member:</span>info];
-  <span class="keyword">if</span> (nil != existingInfo) {
-    NSLog(@<span class="string">"observation info already exists %@"</span>, existingInfo);
-
-    <span class="comment">// unlock and return</span>
-    OSSpinLockUnlock(&amp;_lock);
-    <span class="keyword">return</span>;
-  }
-
-  <span class="comment">// lazilly create set of infos</span>
-  <span class="keyword">if</span> (nil == infos) {
-    infos = [NSMutableSet set];
-    [_objectInfosMap <span class="string">setObject:</span>infos <span class="string">forKey:</span>object];
-  }
-
-  <span class="comment">// add info and oberve</span>
-  [infos <span class="string">addObject:</span>info];
-
-  <span class="comment">// unlock prior to callout</span>
-  OSSpinLockUnlock(&amp;_lock);
-
-  <span class="comment">// 3.</span>
-  [[_FBKVOSharedController sharedController] <span class="string">observe:</span>object <span class="string">info:</span>info];
-}
-</code></pre><p>抛开Facebook自身标记的注释，有三处比较值得我们注意：</p>
-<ol>
-<li><p>根据被观察的object获取其对应的<strong>infos set</strong>。这个主要作用在于避免多次对同一个keyPath添加多次观察，避免crash。<strong>因为每调用一次<code>addObserverForKeyPath</code>就要有一个对应的<code>removeObserverForKey</code>。</strong></p>
-</li>
-<li><p>从<strong>infos set</strong>判断是不是已经有了与此次info相同的观察。</p>
-</li>
-<li><p>如果以上都顺利通过，将观察的信息及关系注册到<code>_FBKVOSharedController</code>中。</p>
-</li>
-</ol>
-<p>至此，FBKVOController的任务基本都结束，<code>unObserve</code>相关的任务逻辑大同小异，不再赘述。</p>
-<h4 id="FBKVOSharedController">FBKVOSharedController</h4><p>初次看到这个类的时候，我的脑海中浮现了两个问题，FBKVOSharedController是干嘛的?为什么FBKVOController还需要将观察的信息转交呢？</p>
-<p><strong>其实我个人觉得这一层不是必要的</strong>，但是按照Facebook的理念来说就是将所有的观察信息统一交由一个<code>FBKVOSharedController</code>的<strong>单例</strong>进行维护。如果大家读过Facebook出品的<strong>Flux</strong>架构，也会发现，Facebook经常喜欢维护一个类似于中间件的注册表，在这里，<code>FBKVOSharedController</code>承担的也是类似的职责。</p>
-<p>于是，通过如下方法，我们像使用注册表一样将对KVOInfo注册。</p>
-<pre><code>- (<span class="typename">void</span>)<span class="string">observe:</span>(id)object <span class="string">info:</span>(_FBKVOInfo *)info
-{
-  <span class="keyword">if</span> (nil == info) {
-    <span class="keyword">return</span>;
-  }
-
-  <span class="comment">// register info</span>
-  OSSpinLockLock(&amp;_lock);
-  [_infos <span class="string">addObject:</span>info];
-  OSSpinLockUnlock(&amp;_lock);
-
-  <span class="comment">// 1.</span>
-  [object <span class="string">addObserver:</span>self <span class="string">forKeyPath:</span>info-&gt;_keyPath <span class="string">options:</span>info-&gt;_options <span class="string">context:</span>(<span class="typename">void</span> *)info];
-}
-</code></pre><ol>
-<li>代表所有的观察信息都首先由<code>FBKVOSharedController</code>进行接受，随后进行转发。</li>
-</ol>
-<p>实现<code>observeValueForKeyPath:ofObject:Change:context</code><br>来接收通知。</p>
-<pre><code>- (<span class="keyword">void</span>)observeValueForKeyPath:(<span class="built_in">NSString</span> *)keyPath ofObject:(<span class="keyword">id</span>)object change:(<span class="built_in">NSDictionary</span> *)change context:(<span class="keyword">void</span> *)context
-{
-  <span class="built_in">NSAssert</span>(context, <span class="string">@"missing context keyPath:%@ object:%@ change:%@"</span>, keyPath, object, change);
-
-  _FBKVOInfo *info;
-
-  {
-    <span class="comment">// 1. </span>
-    OSSpinLockLock(&amp;_lock);
-    info = [_infos member:(__bridge <span class="keyword">id</span>)context];
-    OSSpinLockUnlock(&amp;_lock);
-  }
-
-  <span class="keyword">if</span> (<span class="literal">nil</span> != info) {
-
-    <span class="comment">// take strong reference to controller</span>
-    FBKVOController *controller = info-&gt;_controller;
-    <span class="keyword">if</span> (<span class="literal">nil</span> != controller) {
-
-      <span class="comment">// take strong reference to observer</span>
-      <span class="keyword">id</span> observer = controller<span class="variable">.observer</span>;
-      <span class="keyword">if</span> (<span class="literal">nil</span> != observer) {
-
-        <span class="comment">// dispatch custom block or action, fall back to default action</span>
-        <span class="keyword">if</span> (info-&gt;_block) {
-          info-&gt;_block(observer, object, change);
-        } <span class="keyword">else</span> <span class="keyword">if</span> (info-&gt;_action) {
-<span class="preprocessor">#pragma clang diagnostic push</span>
-<span class="preprocessor">#pragma clang diagnostic ignored <span class="title">"-Warc-performSelector-leaks"</span></span>
-          [observer performSelector:info-&gt;_action withObject:change withObject:object];
-<span class="preprocessor">#pragma clang diagnostic pop</span>
-        } <span class="keyword">else</span> {
-          [observer observeValueForKeyPath:keyPath ofObject:object change:change context:info-&gt;_context];
-        }
-      }
-    }
-  }
-}
-</code></pre><ol>
-<li>根据context上下文获取对应的KVOInfo</li>
-<li>判断当前<code>info</code>的<code>observer</code>和<code>controller</code>，是否仍然存在（因为之前我们采用的weak持有）</li>
-<li>根据    <code>info</code>的<code>block</code>或者<code>selector</code>或者<code>override</code>进行消息转发。</li>
-</ol>
-<p>到这里，<code>FBKVOController</code>整体的实现就介绍完了，怎么样，是不是局部看自己都会实现，但是一结合起完整的设计思路，就觉得，不亏是Facebook呢。</p>
-<h3 id="NSMapTable">NSMapTable</h3><p>之前我们在前文中提到了<code>NSMapTable</code>，现在我们来详细介绍他一下。<br>我们在平常的开发中都使用过<code>NSDictionary</code>或者<code>NSMutableDictionary</code>，但是这两种数据结构有其的局限性。</p>
-<p>以<code>NSDictionary</code>为例，<code>NSDictionary</code>将<code>key</code>的<code>hash</code>值作为索引，存储对应的<code>value</code>。因此，<code>key</code>的要求是不能更改。所以，<code>NSDictionary</code>为了确保安全，对于<code>key</code>采用了<strong>copy</strong>的策略。</p>
-<p>默认情况下，支持<strong>NSCopying</strong>协议的类型都可以作为key。但是考虑到copy带来的开销，一般情况下我们都使用简单的诸如数字或者字符串作为key。</p>
-<p>那么，如果要使用<code>Object</code>作为key，想构建<strong>Object to Object</strong>的关系怎么办呢？这个时候就用到<code>NSMapTable</code>。我们可以通过NSFunctionsPointer来分别定义对key和value的储存关系，简单可以分类为<code>strong</code>,<code>weak</code>以及<code>copy</code>。而当利用<code>object</code>作为key的时候，可以定义评判相等的标准，如：<strong>use shifted pointer hash and direct equality, object description或者size</strong>。</p>
-<p>具体你需要去override如下几种方法：</p>
-<pre><code><span class="comment">// pointer personality functions</span>
-<span class="keyword">@property</span> (nullable) <span class="built_in">NSUInteger</span> (*hashFunction)(<span class="keyword">const</span> <span class="keyword">void</span> *item, <span class="built_in">NSUInteger</span> (* __nullable size)(<span class="keyword">const</span> <span class="keyword">void</span> *item));
-<span class="keyword">@property</span> (nullable) <span class="built_in">BOOL</span> (*isEqualFunction)(<span class="keyword">const</span> <span class="keyword">void</span> *item1, <span class="keyword">const</span> <span class="keyword">void</span>*item2, <span class="built_in">NSUInteger</span> (* __nullable size)(<span class="keyword">const</span> <span class="keyword">void</span> *item));
-<span class="keyword">@property</span> (nullable) <span class="built_in">NSUInteger</span> (*sizeFunction)(<span class="keyword">const</span> <span class="keyword">void</span> *item);
-<span class="keyword">@property</span> (nullable) <span class="built_in">NSString</span> * __nullable (*descriptionFunction)(<span class="keyword">const</span> <span class="keyword">void</span> *item);
-</code></pre><p>在<code>FBKVOController</code>自定义的可以作为key的结构<code>FBKVOInfo</code>，就复写了</p>
-<pre><code>- (<span class="type">NSUInteger</span>)hash
-{
-  <span class="keyword">return</span> [_keyPath hash];
-}
-
-- (<span class="type">BOOL</span>)isEqual:(id)<span class="class"><span class="keyword">object</span>
-</span>{
-  <span class="keyword">if</span> (nil == <span class="class"><span class="keyword">object</span>) {</span>
-    <span class="keyword">return</span> <span class="type">NO</span>;
-  }
-  <span class="keyword">if</span> (self == <span class="class"><span class="keyword">object</span>) {</span>
-    <span class="keyword">return</span> <span class="type">YES</span>;
-  }
-  <span class="keyword">if</span> (![<span class="class"><span class="keyword">object</span> <span class="title">isKindOfClass</span>:</span>[self <span class="class"><span class="keyword">class</span>]]) {</span>
-    <span class="keyword">return</span> <span class="type">NO</span>;
-  }
-  <span class="keyword">return</span> [_keyPath isEqualToString:((_FBKVOInfo *)<span class="class"><span class="keyword">object</span>)<span class="title">-&gt;_keyPath</span>];</span>
-}
-</code></pre>]]></content>
-    <summary type="html">
-    <![CDATA[<p>开发过iOS的app已经不计其数了，在不同的项目中采用的架构也各不相同，有传统的<strong>MVC</strong>，简化的<strong>VIPER</strong>，以及一些简单的<strong>MVVM</strong>。</p>
-<p>这其中，我最不推荐的就是<]]>
     </summary>
     
       <category term="iOS" scheme="http://satanwoo.github.io/tags/iOS/"/>
