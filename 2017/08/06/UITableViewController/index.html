@@ -5,27 +5,30 @@
   
   <title>UIKit解剖（-）逆向UITableViewController分析Bug | Hexo</title>
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
-  <meta name="description" content="UIKit解剖（-）逆向UITableViewController分析Bug之前在做XXXSDK的时候，我hook的UITableView的setDelegate:方法。整个SDK在接入手淘、天猫以及闲鱼等其他App的时候都没啥问题。
+  <meta name="description" content="之前在做XXXSDK的时候，我hook的UITableView的setDelegate:方法。整个SDK在接入手淘、天猫以及闲鱼等其他App的时候都没啥问题。
 上周，UC的同学突然找到说，给我说了如下图所示的问题：
 商业保密，不显示了
-卧槽，这下我就懵逼了，看样子是把整个rowHeight给Hook坏了，那这是为什么呢？">
+卧槽，这下我就懵逼了，看样子是把整个rowHeight给Hook坏了，那这是为什么呢？
+从开发UITableView的正向角度来说：我们一般都需要给其提供一个必选的">
 <meta property="og:type" content="article">
 <meta property="og:title" content="UIKit解剖（-）逆向UITableViewController分析Bug">
 <meta property="og:url" content="http://satanwoo.github.io/2017/08/06/UITableViewController/index.html">
 <meta property="og:site_name" content="Hexo">
-<meta property="og:description" content="UIKit解剖（-）逆向UITableViewController分析Bug之前在做XXXSDK的时候，我hook的UITableView的setDelegate:方法。整个SDK在接入手淘、天猫以及闲鱼等其他App的时候都没啥问题。
+<meta property="og:description" content="之前在做XXXSDK的时候，我hook的UITableView的setDelegate:方法。整个SDK在接入手淘、天猫以及闲鱼等其他App的时候都没啥问题。
 上周，UC的同学突然找到说，给我说了如下图所示的问题：
 商业保密，不显示了
-卧槽，这下我就懵逼了，看样子是把整个rowHeight给Hook坏了，那这是为什么呢？">
+卧槽，这下我就懵逼了，看样子是把整个rowHeight给Hook坏了，那这是为什么呢？
+从开发UITableView的正向角度来说：我们一般都需要给其提供一个必选的">
 <meta property="og:image" content="https://raw.githubusercontent.com/SatanWoo/BeeHive/master/delegate.png?raw=true">
 <meta property="og:image" content="https://raw.githubusercontent.com/SatanWoo/BeeHive/master/stack.png?raw=true">
-<meta property="og:updated_time" content="2017-08-06T14:39:16.000Z">
+<meta property="og:updated_time" content="2017-08-06T14:43:12.000Z">
 <meta name="twitter:card" content="summary">
 <meta name="twitter:title" content="UIKit解剖（-）逆向UITableViewController分析Bug">
-<meta name="twitter:description" content="UIKit解剖（-）逆向UITableViewController分析Bug之前在做XXXSDK的时候，我hook的UITableView的setDelegate:方法。整个SDK在接入手淘、天猫以及闲鱼等其他App的时候都没啥问题。
+<meta name="twitter:description" content="之前在做XXXSDK的时候，我hook的UITableView的setDelegate:方法。整个SDK在接入手淘、天猫以及闲鱼等其他App的时候都没啥问题。
 上周，UC的同学突然找到说，给我说了如下图所示的问题：
 商业保密，不显示了
-卧槽，这下我就懵逼了，看样子是把整个rowHeight给Hook坏了，那这是为什么呢？">
+卧槽，这下我就懵逼了，看样子是把整个rowHeight给Hook坏了，那这是为什么呢？
+从开发UITableView的正向角度来说：我们一般都需要给其提供一个必选的">
   
     <link rel="alternative" href="/atom.xml" title="Hexo" type="application/atom+xml">
   
@@ -94,7 +97,7 @@
     
     <div class="article-entry" itemprop="articleBody">
       
-        <h2 id="UIKit解剖（-）逆向UITableViewController分析Bug">UIKit解剖（-）逆向UITableViewController分析Bug</h2><p>之前在做XXXSDK的时候，我hook的<code>UITableView</code>的<code>setDelegate:</code>方法。整个SDK在接入手淘、天猫以及闲鱼等其他App的时候都没啥问题。</p>
+        <p>之前在做XXXSDK的时候，我hook的<code>UITableView</code>的<code>setDelegate:</code>方法。整个SDK在接入手淘、天猫以及闲鱼等其他App的时候都没啥问题。</p>
 <p>上周，UC的同学突然找到说，给我说了如下图所示的问题：</p>
 <p><strong><span style="color:red">商业保密，不显示了</span></strong></p>
 <p>卧槽，这下我就懵逼了，看样子是把整个<code>rowHeight</code>给Hook坏了，那这是为什么呢？</p>
@@ -334,7 +337,7 @@
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2017/08/06/UITableViewController/" data-id="cj60u3jiy000wdii183hk5pfu" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2017/08/06/UITableViewController/" data-id="cj60u8kjg000wgqi1arx9qsml" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2017/08/06/UITableViewController/#disqus_thread" class="article-comment-link">Comments</a>
       

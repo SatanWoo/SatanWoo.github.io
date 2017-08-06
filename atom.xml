@@ -4,7 +4,7 @@
   
   <link href="/atom.xml" rel="self"/>
   <link href="http://satanwoo.github.io/"/>
-  <updated>2017-08-06T14:39:16.000Z</updated>
+  <updated>2017-08-06T14:43:12.000Z</updated>
   <id>http://satanwoo.github.io/</id>
   
   <author>
@@ -19,8 +19,8 @@
     <link href="http://satanwoo.github.io/2017/08/06/UITableViewController/"/>
     <id>http://satanwoo.github.io/2017/08/06/UITableViewController/</id>
     <published>2017-08-06T14:28:23.000Z</published>
-    <updated>2017-08-06T14:39:16.000Z</updated>
-    <content type="html"><![CDATA[<h2 id="UIKit解剖（-）逆向UITableViewController分析Bug">UIKit解剖（-）逆向UITableViewController分析Bug</h2><p>之前在做XXXSDK的时候，我hook的<code>UITableView</code>的<code>setDelegate:</code>方法。整个SDK在接入手淘、天猫以及闲鱼等其他App的时候都没啥问题。</p>
+    <updated>2017-08-06T14:43:12.000Z</updated>
+    <content type="html"><![CDATA[<p>之前在做XXXSDK的时候，我hook的<code>UITableView</code>的<code>setDelegate:</code>方法。整个SDK在接入手淘、天猫以及闲鱼等其他App的时候都没啥问题。</p>
 <p>上周，UC的同学突然找到说，给我说了如下图所示的问题：</p>
 <p><strong><span style="color:red">商业保密，不显示了</span></strong></p>
 <p>卧槽，这下我就懵逼了，看样子是把整个<code>rowHeight</code>给Hook坏了，那这是为什么呢？</p>
@@ -258,7 +258,8 @@
 </code></pre><h3 id="结论">结论</h3><p>通过上面对汇编和伪代码的理解，我们可以很轻易的得出结论：当我们处于第一种情形的实现，我们将<code>tableview.delegate</code>设置成了我们的stub。因为不为空，所以<code>UITableViewController</code>默认不会对其进行处理，而由于我们当时没有提供stub对于<code>heightForRowAtIndexPath</code>的实现，导致出现了UC的bug。</p>
 ]]></content>
     <summary type="html">
-    <![CDATA[<h2 id="UIKit解剖（-）逆向UITableViewController分析Bug">UIKit解剖（-）逆向UITableViewController分析Bug</h2><p>之前在做XXXSDK的时候，我hook的<code>UITableView</code>的<]]>
+    <![CDATA[<p>之前在做XXXSDK的时候，我hook的<code>UITableView</code>的<code>setDelegate:</code>方法。整个SDK在接入手淘、天猫以及闲鱼等其他App的时候都没啥问题。</p>
+<p>上周，UC的同学突然找到说，给我说了如下图所示的]]>
     </summary>
     
       <category term="Reverse Engineering" scheme="http://satanwoo.github.io/tags/Reverse-Engineering/"/>
