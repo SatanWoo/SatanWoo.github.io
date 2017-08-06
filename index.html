@@ -62,6 +62,302 @@
       <div class="outer">
         <section id="main">
   
+    <article id="post-UITableViewController" class="article article-type-post" itemscope itemprop="blogPost">
+  <div class="article-meta">
+    <a href="/2017/08/06/UITableViewController/" class="article-date">
+  <time datetime="2017-08-06T14:28:23.000Z" itemprop="datePublished">2017-08-06</time>
+</a>
+    
+  </div>
+  <div class="article-inner">
+    
+    
+      <header class="article-header">
+        
+  
+    <h1 itemprop="name">
+      <a class="article-title" href="/2017/08/06/UITableViewController/">UIKit解剖（-）逆向UITableViewController分析Bug</a>
+    </h1>
+  
+
+      </header>
+    
+    <div class="article-entry" itemprop="articleBody">
+      
+        <h2 id="UIKit解剖（-）逆向UITableViewController分析Bug">UIKit解剖（-）逆向UITableViewController分析Bug</h2><p>之前在做XXXSDK的时候，我hook的<code>UITableView</code>的<code>setDelegate:</code>方法。整个SDK在接入手淘、天猫以及闲鱼等其他App的时候都没啥问题。</p>
+<p>上周，UC的同学突然找到说，给我说了如下图所示的问题：</p>
+<p><strong><span style="color:red">商业保密，不显示了</span></strong></p>
+<p>卧槽，这下我就懵逼了，看样子是把整个<code>rowHeight</code>给Hook坏了，那这是为什么呢？</p>
+<p>从开发<code>UITableView</code>的正向角度来说：我们一般都需要给其提供一个必选的<code>UITableViewDataSource</code>和一个可选的<code>UITableViewDelegate</code>，其中，涉及到高度的是如下这个API：</p>
+<pre><code><span class="tag">-</span> (<span class="tag">CGFloat</span>)<span class="rule"><span class="attribute">tableView</span>:<span class="value">(UITableView *)tableView heightForRowAtIndexPath:(NSIndexPath *)indexPath</span></span>;
+</code></pre><blockquote>
+<p>有人说可以直接通过tableview.rowHeight设置高度，但是对于不同cell不同高度的动态需求，但是这里我们暂不提这种分支情况。</p>
+</blockquote>
+<p>通过UC同学的协助，我们发现了如下输出：</p>
+<p><img src="https://raw.githubusercontent.com/SatanWoo/BeeHive/master/delegate.png?raw=true" alt=""></p>
+<p>通过输出不难发现，是最后的<code>delegate</code>被从对应的<code>UIViewController</code>改成了一个乱七八糟没实现对应<code>heightForRowAtIndexPath</code>方法的对象。</p>
+<p>为什么会这样呢？</p>
+<p>通过如下图所示的调用栈，</p>
+<p><img src="https://raw.githubusercontent.com/SatanWoo/BeeHive/master/stack.png?raw=true" alt=""></p>
+<p>调用栈最下层是UC同学的代码；</p>
+<p><code>self.tableview = [[xxxTableView alloc] init]</code></p>
+<p>调用栈最上层是我们的一层防护性hook，其代码如下：</p>
+<pre><code>+ (<span class="keyword">void</span>)load {
+    <span class="keyword">static</span> <span class="built_in">dispatch_once_t</span> onceToken;
+    <span class="built_in">dispatch_once</span>(&amp;onceToken, ^{
+        Swizzle([<span class="built_in">UIScrollView</span> class], <span class="keyword">@selector</span>(init), <span class="keyword">@selector</span>(swizzled_init));
+    });
+}
+
+- (instancetype)swizzled_init
+{
+    <span class="keyword">id</span> obj = [<span class="keyword">self</span> swizzled_init];
+    <span class="built_in">UIScrollView</span> *scrollView = (<span class="built_in">UIScrollView</span> *)obj;
+    <span class="keyword">if</span> (!scrollView<span class="variable">.delegate</span>) {
+        <span class="comment">//scrollView.delegate = [UIScrollViewDelegateDummyStub sharedStub];</span>
+    }
+    <span class="keyword">return</span> obj;
+}
+</code></pre><p>这段代码是什么作用呢？</p>
+<p><span style="color:red"><strong>我们之前提了<code>UITableViewDelegate</code>不是必需，因此，为了能够抓去所有UITableView的代码，我们会提供一个内置的默认delegate(当时的实现存在bug，没有实现heightForRowAtIndexPath方法)</strong></span>。</p>
+<p>而且，为了防止我们的delegate覆盖了有delegate的情况，我们还特地做了<code>!scroll.delegate</code>的判断。</p>
+<p>按照我们的预期设想，存在两种时间顺序情况：</p>
+<ol>
+<li>我们的init先执行，此时肯定会进入我们设置默认的逻辑；然后当外部代码调用<code>tableview.delegate = xxx</code>的时候，会把我们这个替换掉，不会影响正常的逻辑。</li>
+<li>我们的init后执行（比如某些子类覆盖的情况），那这样的话，当子类已经设置好<code>delegate</code>后，压根不会进入我们的设置逻辑。</li>
+</ol>
+<p><strong>然而，就是这一小段看起来无错的代码导致了UC的App出现了文章开头的Bug。</strong></p>
+<h3 id="逆向分析UITableViewController">逆向分析UITableViewController</h3><p>基于<strong>10.2</strong>的UIKit，我们通过汇编来分析<code>-[UITableViewController setTableView:]</code>的流程：</p>
+<pre><code>     <span class="comment">// 保存寄存器</span>
+-&gt;  <span class="number">0x18c84c640</span> &lt;+<span class="number">0</span>&gt;:   stp    x26, x25, [sp, <span class="preprocessor">#-<span class="number">0x50</span>]!</span>
+    <span class="number">0x18c84c644</span> &lt;+<span class="number">4</span>&gt;:   stp    x24, x23, [sp, <span class="preprocessor">#<span class="number">0x10</span>]</span>
+    <span class="number">0x18c84c648</span> &lt;+<span class="number">8</span>&gt;:   stp    x22, x21, [sp, <span class="preprocessor">#<span class="number">0x20</span>]</span>
+    <span class="number">0x18c84c64c</span> &lt;+<span class="number">12</span>&gt;:  stp    x20, x19, [sp, <span class="preprocessor">#<span class="number">0x30</span>]</span>
+    <span class="number">0x18c84c650</span> &lt;+<span class="number">16</span>&gt;:  stp    x29, x30, [sp, <span class="preprocessor">#<span class="number">0x40</span>]</span>
+
+    <span class="comment">// 获取原先UITableViewController的旧tableView</span>
+    <span class="number">0x18c84c654</span> &lt;+<span class="number">20</span>&gt;:  add    x29, sp, <span class="preprocessor">#<span class="number">0x40</span>            ; =<span class="number">0x40</span> </span>
+    <span class="number">0x18c84c658</span> &lt;+<span class="number">24</span>&gt;:  mov    x20, x0
+    <span class="number">0x18c84c65c</span> &lt;+<span class="number">28</span>&gt;:  mov    x0, x2
+    <span class="number">0x18c84c660</span> &lt;+<span class="number">32</span>&gt;:  bl     <span class="number">0x1851c8090</span>               ; objc_retain
+    <span class="number">0x18c84c664</span> &lt;+<span class="number">36</span>&gt;:  mov    x19, x0
+    <span class="number">0x18c84c668</span> &lt;+<span class="number">40</span>&gt;:  adrp   x8, <span class="number">124100</span>
+    <span class="number">0x18c84c66c</span> &lt;+<span class="number">44</span>&gt;:  ldr    x1, [x8, <span class="preprocessor">#<span class="number">0xd78</span>]</span>
+    <span class="number">0x18c84c670</span> &lt;+<span class="number">48</span>&gt;:  mov    x0, x20
+    <span class="number">0x18c84c674</span> &lt;+<span class="number">52</span>&gt;:  bl     <span class="number">0x1851c2f60</span>               ; objc_msgSend
+    <span class="number">0x18c84c678</span> &lt;+<span class="number">56</span>&gt;:  mov    x29, x29
+    <span class="number">0x18c84c67c</span> &lt;+<span class="number">60</span>&gt;:  bl     <span class="number">0x1851ca48c</span>               ; objc_retainAutoreleasedReturnValue
+
+    <span class="comment">// 比较旧的tableview和新的tableview</span>
+    <span class="number">0x18c84c680</span> &lt;+<span class="number">64</span>&gt;:  mov    x21, x0
+    <span class="number">0x18c84c684</span> &lt;+<span class="number">68</span>&gt;:  cmp    x21, x19
+
+    <span class="comment">// 如果两个tableView一致，直接返回</span>
+    <span class="number">0x18c84c688</span> &lt;+<span class="number">72</span>&gt;:  b.eq   <span class="number">0x18c84c7d4</span>               ; &lt;+<span class="number">404</span>&gt;
+
+    <span class="comment">// 获取旧的tableView的datasource</span>
+    <span class="number">0x18c84c68c</span> &lt;+<span class="number">76</span>&gt;:  adrp   x8, <span class="number">124074</span>
+    <span class="number">0x18c84c690</span> &lt;+<span class="number">80</span>&gt;:  ldr    x23, [x8, <span class="preprocessor">#<span class="number">0x2e0</span>]</span>
+    <span class="number">0x18c84c694</span> &lt;+<span class="number">84</span>&gt;:  mov    x0, x21
+    <span class="number">0x18c84c698</span> &lt;+<span class="number">88</span>&gt;:  mov    x1, x23
+    <span class="number">0x18c84c69c</span> &lt;+<span class="number">92</span>&gt;:  bl     <span class="number">0x1851c2f60</span>               ; objc_msgSend
+    <span class="number">0x18c84c6a0</span> &lt;+<span class="number">96</span>&gt;:  mov    x29, x29
+    <span class="number">0x18c84c6a4</span> &lt;+<span class="number">100</span>&gt;: bl     <span class="number">0x1851ca48c</span>               ; objc_retainAutoreleasedReturnValue
+
+
+    <span class="comment">// 从self的成员对象便宜792处取出UIFilteredDataSource</span>
+    <span class="number">0x18c84c6a8</span> &lt;+<span class="number">104</span>&gt;: mov    x22, x0
+    <span class="number">0x18c84c6ac</span> &lt;+<span class="number">108</span>&gt;: adrp   x8, <span class="number">124145</span>
+    <span class="number">0x18c84c6b0</span> &lt;+<span class="number">112</span>&gt;: ldrsw  x8, [x8, <span class="preprocessor">#<span class="number">0x7ac</span>]</span>
+    <span class="number">0x18c84c6b4</span> &lt;+<span class="number">116</span>&gt;: ldr    x8, [x20, x8]
+    <span class="number">0x18c84c6b8</span> &lt;+<span class="number">120</span>&gt;: cmp    x22, x20
+    <span class="number">0x18c84c6bc</span> &lt;+<span class="number">124</span>&gt;: ccmp   x22, x8, <span class="preprocessor">#<span class="number">0x4</span>, ne</span>
+
+    <span class="comment">// 如果不一致，把旧的tableview的datasource 置为nil</span>
+    <span class="number">0x18c84c6c0</span> &lt;+<span class="number">128</span>&gt;: b.ne   <span class="number">0x18c84c6d8</span>               ; &lt;+<span class="number">152</span>&gt;
+    <span class="number">0x18c84c6c4</span> &lt;+<span class="number">132</span>&gt;: adrp   x8, <span class="number">124073</span>
+    <span class="number">0x18c84c6c8</span> &lt;+<span class="number">136</span>&gt;: ldr    x1, [x8, <span class="preprocessor">#<span class="number">0x3c0</span>]</span>
+    <span class="number">0x18c84c6cc</span> &lt;+<span class="number">140</span>&gt;: mov    x2, <span class="preprocessor">#<span class="number">0x0</span></span>
+    <span class="number">0x18c84c6d0</span> &lt;+<span class="number">144</span>&gt;: mov    x0, x21
+    <span class="number">0x18c84c6d4</span> &lt;+<span class="number">148</span>&gt;: bl     <span class="number">0x1851c2f60</span>               ; objc_msgSend
+
+    <span class="comment">// 获取旧的tableview的delegate</span>
+    <span class="number">0x18c84c6d8</span> &lt;+<span class="number">152</span>&gt;: adrp   x8, <span class="number">124074</span>
+    <span class="number">0x18c84c6dc</span> &lt;+<span class="number">156</span>&gt;: ldr    x24, [x8, <span class="preprocessor">#<span class="number">0x7d8</span>]</span>
+    <span class="number">0x18c84c6e0</span> &lt;+<span class="number">160</span>&gt;: mov    x0, x21
+    <span class="number">0x18c84c6e4</span> &lt;+<span class="number">164</span>&gt;: mov    x1, x24
+    <span class="number">0x18c84c6e8</span> &lt;+<span class="number">168</span>&gt;: bl     <span class="number">0x1851c2f60</span>               ; objc_msgSend
+    <span class="number">0x18c84c6ec</span> &lt;+<span class="number">172</span>&gt;: mov    x29, x29
+    <span class="number">0x18c84c6f0</span> &lt;+<span class="number">176</span>&gt;: bl     <span class="number">0x1851ca48c</span>               ; objc_retainAutoreleasedReturnValue
+        <span class="number">0x18c84c6f4</span> &lt;+<span class="number">180</span>&gt;: mov    x25, x0
+    <span class="number">0x18c84c6f8</span> &lt;+<span class="number">184</span>&gt;: bl     <span class="number">0x1851c8150</span>               ; objc_release
+
+    <span class="comment">// 判断旧的delegate是不是当前的UITableViewController</span>
+    <span class="number">0x18c84c6fc</span> &lt;+<span class="number">188</span>&gt;: cmp    x25, x20
+    <span class="number">0x18c84c700</span> &lt;+<span class="number">192</span>&gt;: b.ne   <span class="number">0x18c84c718</span>               ; &lt;+<span class="number">216</span>&gt;
+    <span class="number">0x18c84c704</span> &lt;+<span class="number">196</span>&gt;: adrp   x8, <span class="number">124073</span>
+    <span class="number">0x18c84c708</span> &lt;+<span class="number">200</span>&gt;: ldr    x1, [x8, <span class="preprocessor">#<span class="number">0x3c8</span>]</span>
+
+    <span class="comment">// 如果不是，就把旧的tableview的delegate置为nil</span>
+    <span class="number">0x18c84c70c</span> &lt;+<span class="number">204</span>&gt;: mov    x2, <span class="preprocessor">#<span class="number">0x0</span></span>
+    <span class="number">0x18c84c710</span> &lt;+<span class="number">208</span>&gt;: mov    x0, x21
+    <span class="number">0x18c84c714</span> &lt;+<span class="number">212</span>&gt;: bl     <span class="number">0x1851c2f60</span>               ; objc_msgSend
+    <span class="number">0x18c84c718</span> &lt;+<span class="number">216</span>&gt;: adrp   x8, <span class="number">124080</span>
+    <span class="number">0x18c84c71c</span> &lt;+<span class="number">220</span>&gt;: ldr    x1, [x8, <span class="preprocessor">#<span class="number">0xe80</span>]</span>
+    <span class="number">0x18c84c720</span> &lt;+<span class="number">224</span>&gt;: mov    x0, x21
+    <span class="number">0x18c84c724</span> &lt;+<span class="number">228</span>&gt;: bl     <span class="number">0x1851c2f60</span>               ; objc_msgSend
+    <span class="number">0x18c84c728</span> &lt;+<span class="number">232</span>&gt;: mov    x29, x29
+    <span class="number">0x18c84c72c</span> &lt;+<span class="number">236</span>&gt;: bl     <span class="number">0x1851ca48c</span>               ; objc_retainAutoreleasedReturnValue
+    <span class="number">0x18c84c730</span> &lt;+<span class="number">240</span>&gt;: mov    x25, x0
+
+    <span class="comment">// 将uitableviewcontroller的tableview通过setView:置为新的</span>
+    <span class="number">0x18c84c734</span> &lt;+<span class="number">244</span>&gt;: adrp   x8, <span class="number">124076</span>
+    <span class="number">0x18c84c738</span> &lt;+<span class="number">248</span>&gt;: ldr    x1, [x8, <span class="preprocessor">#<span class="number">0x4b0</span>]</span>
+    <span class="number">0x18c84c73c</span> &lt;+<span class="number">252</span>&gt;: mov    x0, x20
+    <span class="number">0x18c84c740</span> &lt;+<span class="number">256</span>&gt;: mov    x2, x19
+    <span class="number">0x18c84c744</span> &lt;+<span class="number">260</span>&gt;: bl     <span class="number">0x1851c2f60</span>               ; objc_msgSend
+
+    <span class="comment">// 新的tableview的datasource判断是不是为空，为空通过_applyDefaultDataSourceToTable将其UIFilteredDataSource</span>
+    <span class="number">0x18c84c748</span> &lt;+<span class="number">264</span>&gt;: adrp   x8, <span class="number">124080</span>
+    <span class="number">0x18c84c74c</span> &lt;+<span class="number">268</span>&gt;: ldr    x1, [x8, <span class="preprocessor">#<span class="number">0x810</span>]</span>
+    <span class="number">0x18c84c750</span> &lt;+<span class="number">272</span>&gt;: mov    x0, x19
+    <span class="number">0x18c84c754</span> &lt;+<span class="number">276</span>&gt;: mov    x2, x25
+    <span class="number">0x18c84c758</span> &lt;+<span class="number">280</span>&gt;: bl     <span class="number">0x1851c2f60</span>               ; objc_msgSend
+    <span class="number">0x18c84c75c</span> &lt;+<span class="number">284</span>&gt;: mov    x0, x19
+    <span class="number">0x18c84c760</span> &lt;+<span class="number">288</span>&gt;: mov    x1, x23
+    <span class="number">0x18c84c764</span> &lt;+<span class="number">292</span>&gt;: bl     <span class="number">0x1851c2f60</span>               ; objc_msgSend
+    <span class="number">0x18c84c768</span> &lt;+<span class="number">296</span>&gt;: mov    x29, x29
+    <span class="number">0x18c84c76c</span> &lt;+<span class="number">300</span>&gt;: bl     <span class="number">0x1851ca48c</span>               ; objc_retainAutoreleasedReturnValue
+    <span class="number">0x18c84c770</span> &lt;+<span class="number">304</span>&gt;: mov    x23, x0
+    <span class="number">0x18c84c774</span> &lt;+<span class="number">308</span>&gt;: bl     <span class="number">0x1851c8150</span>               ; objc_release
+    <span class="number">0x18c84c778</span> &lt;+<span class="number">312</span>&gt;: cbnz   x23, <span class="number">0x18c84c790</span>          ; &lt;+<span class="number">336</span>&gt;
+    <span class="number">0x18c84c77c</span> &lt;+<span class="number">316</span>&gt;: adrp   x8, <span class="number">124100</span>
+    <span class="number">0x18c84c780</span> &lt;+<span class="number">320</span>&gt;: ldr    x1, [x8, <span class="preprocessor">#<span class="number">0xd80</span>]</span>
+    <span class="number">0x18c84c784</span> &lt;+<span class="number">324</span>&gt;: mov    x0, x20
+    <span class="number">0x18c84c788</span> &lt;+<span class="number">328</span>&gt;: mov    x2, x19
+    <span class="number">0x18c84c78c</span> &lt;+<span class="number">332</span>&gt;: bl     <span class="number">0x1851c2f60</span>               ; objc_msgSend
+
+    <span class="comment">// 新的tableview的delegaate判断是不是为空，为空通过将delegate置为self（即当前的UITableViewController）</span>
+    <span class="number">0x18c84c790</span> &lt;+<span class="number">336</span>&gt;: mov    x0, x19
+    <span class="number">0x18c84c794</span> &lt;+<span class="number">340</span>&gt;: mov    x1, x24
+    <span class="number">0x18c84c798</span> &lt;+<span class="number">344</span>&gt;: bl     <span class="number">0x1851c2f60</span>               ; objc_msgSend
+    <span class="number">0x18c84c79c</span> &lt;+<span class="number">348</span>&gt;: mov    x29, x29
+    <span class="number">0x18c84c7a0</span> &lt;+<span class="number">352</span>&gt;: bl     <span class="number">0x1851ca48c</span>               ; objc_retainAutoreleasedReturnValue
+    <span class="number">0x18c84c7a4</span> &lt;+<span class="number">356</span>&gt;: mov    x23, x0
+    <span class="number">0x18c84c7a8</span> &lt;+<span class="number">360</span>&gt;: bl     <span class="number">0x1851c8150</span>               ; objc_release
+
+
+    <span class="number">0x18c84c7ac</span> &lt;+<span class="number">364</span>&gt;: cbnz   x23, <span class="number">0x18c84c7c4</span>          ; &lt;+<span class="number">388</span>&gt;
+    <span class="number">0x18c84c7b0</span> &lt;+<span class="number">368</span>&gt;: adrp   x8, <span class="number">124073</span>
+    <span class="number">0x18c84c7b4</span> &lt;+<span class="number">372</span>&gt;: ldr    x1, [x8, <span class="preprocessor">#<span class="number">0x3c8</span>]</span>
+    <span class="number">0x18c84c7b8</span> &lt;+<span class="number">376</span>&gt;: mov    x0, x19
+    <span class="number">0x18c84c7bc</span> &lt;+<span class="number">380</span>&gt;: mov    x2, x20
+    <span class="number">0x18c84c7c0</span> &lt;+<span class="number">384</span>&gt;: bl     <span class="number">0x1851c2f60</span>               ; objc_msgSend
+    <span class="number">0x18c84c7c4</span> &lt;+<span class="number">388</span>&gt;: mov    x0, x25
+    <span class="number">0x18c84c7c8</span> &lt;+<span class="number">392</span>&gt;: bl     <span class="number">0x1851c8150</span>               ; objc_release
+    <span class="number">0x18c84c7cc</span> &lt;+<span class="number">396</span>&gt;: mov    x0, x22
+    <span class="number">0x18c84c7d0</span> &lt;+<span class="number">400</span>&gt;: bl     <span class="number">0x1851c8150</span>               ; objc_release
+    <span class="number">0x18c84c7d4</span> &lt;+<span class="number">404</span>&gt;: mov    x0, x21
+    <span class="number">0x18c84c7d8</span> &lt;+<span class="number">408</span>&gt;: bl     <span class="number">0x1851c8150</span>               ; objc_release
+
+    <span class="comment">// 恢复寄存器</span>
+
+    <span class="number">0x18c84c7dc</span> &lt;+<span class="number">412</span>&gt;: mov    x0, x19
+    <span class="number">0x18c84c7e0</span> &lt;+<span class="number">416</span>&gt;: ldp    x29, x30, [sp, <span class="preprocessor">#<span class="number">0x40</span>]</span>
+    <span class="number">0x18c84c7e4</span> &lt;+<span class="number">420</span>&gt;: ldp    x20, x19, [sp, <span class="preprocessor">#<span class="number">0x30</span>]</span>
+    <span class="number">0x18c84c7e8</span> &lt;+<span class="number">424</span>&gt;: ldp    x22, x21, [sp, <span class="preprocessor">#<span class="number">0x20</span>]</span>
+    <span class="number">0x18c84c7ec</span> &lt;+<span class="number">428</span>&gt;: ldp    x24, x23, [sp, <span class="preprocessor">#<span class="number">0x10</span>]</span>
+    <span class="number">0x18c84c7f0</span> &lt;+<span class="number">432</span>&gt;: ldp    x26, x25, [sp], <span class="preprocessor">#<span class="number">0x50</span></span>
+    <span class="number">0x18c84c7f4</span> &lt;+<span class="number">436</span>&gt;: b      <span class="number">0x1851c8150</span>               ; objc_release
+</code></pre><ul>
+<li>一看到adrp, ldr的搭配，基本可以确定是取某个方法进行调用。</li>
+<li>看到一大堆的<code>bl objc_retain</code>，<code>bl objc_release</code>，不用管，反正都是ARC帮我们自动插入的。</li>
+<li>可以看出，当传入给UITableViewController的tableView含有<code>dataSource</code>和<code>delegate</code>，UITableViewController都不会对其进行处理；否则会进行一个默认的设置。</li>
+</ul>
+<p>我自己理解后转写的伪代码如下：</p>
+<pre><code><span class="built_in">UITableView</span> *oldTableView = [<span class="keyword">self</span> __existingTableView]; 
+
+<span class="keyword">if</span> (oldTableView == xxxtableView) {
+    <span class="keyword">return</span> 
+} <span class="keyword">else</span> {
+    <span class="keyword">id</span> oldDataSource = [oldTableView dataSource];
+    <span class="comment">// x21 被赋值成了oldTableView, x22 oldDataSource</span>
+
+    <span class="comment">// 取UITableViewController 792偏移的成员变量 filteredDataSource</span>
+    <span class="keyword">id</span> filteredDataSource = [<span class="keyword">self</span> _filteredDataSource];
+
+    <span class="keyword">if</span> (oldDataSource != filteredDataSource) 
+    {
+
+    } <span class="keyword">else</span> {
+        [oldTableView setDataSource:<span class="literal">nil</span>];
+    }
+
+    <span class="keyword">id</span> oldDelegate = [oldTableView delegate];
+    <span class="comment">// x25 被赋值了oldDelegate</span>
+
+    <span class="keyword">if</span> (oldeDelegate != <span class="keyword">self</span>)
+    {
+        <span class="keyword">goto</span> <span class="comment">//</span>
+    } <span class="keyword">else</span> {
+        [oldTableView setDelegate:<span class="literal">nil</span>];
+    }
+
+    <span class="keyword">id</span> oldRefreshControl = [oldTableView _refreshControl];
+    <span class="comment">// x25 被赋值了oldRefreshControl</span>
+
+    [<span class="keyword">self</span> setView:xxtableView];
+    [xxxtableView _setRefreshControl:oldRefreshControl];
+
+    <span class="keyword">id</span> newDataSource = [xxxtableview dataSource];
+    <span class="keyword">if</span> (!newDataSource) {
+        [<span class="keyword">self</span> _applyDefaultDataSourceToTable:xxxTableView];
+    }
+
+    <span class="keyword">id</span> newDelegate = [xxxtableview delegate];
+    <span class="keyword">if</span> (!newDelegate) {
+        [xxxTableView setDelegate:<span class="keyword">self</span>];
+    }
+}
+</code></pre><h3 id="结论">结论</h3><p>通过上面对汇编和伪代码的理解，我们可以很轻易的得出结论：当我们处于第一种情形的实现，我们将<code>tableview.delegate</code>设置成了我们的stub。因为不为空，所以<code>UITableViewController</code>默认不会对其进行处理，而由于我们当时没有提供stub对于<code>heightForRowAtIndexPath</code>的实现，导致出现了UC的bug。</p>
+
+      
+    </div>
+    <footer class="article-footer">
+      <a data-url="http://satanwoo.github.io/2017/08/06/UITableViewController/" data-id="cj60u3jiy000wdii183hk5pfu" class="article-share-link">Share</a>
+      
+        <a href="http://satanwoo.github.io/2017/08/06/UITableViewController/#disqus_thread" class="article-comment-link">Comments</a>
+      
+      
+  <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Reverse-Engineering/">Reverse Engineering</a></li><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
+
+    </footer>
+  </div>
+  
+</article>
+
+<div id="disqus_thread"></div>
+<script>
+
+/**
+*  RECOMMENDED CONFIGURATION VARIABLES: EDIT AND UNCOMMENT THE SECTION BELOW TO INSERT DYNAMIC VALUES FROM YOUR PLATFORM OR CMS.
+*  LEARN WHY DEFINING THESE VARIABLES IS IMPORTANT: https://disqus.com/admin/universalcode/#configuration-variables*/
+/*
+var disqus_config = function () {
+this.page.url = PAGE_URL;  // Replace PAGE_URL with your page's canonical URL variable
+this.page.identifier = PAGE_IDENTIFIER; // Replace PAGE_IDENTIFIER with your page's unique identifier variable
+};
+*/
+(function() { // DON'T EDIT BELOW THIS LINE
+var d = document, s = d.createElement('script');
+s.src = 'https://satanwoo-2.disqus.com/embed.js';
+s.setAttribute('data-timestamp', +new Date());
+(d.head || d.body).appendChild(s);
+})();
+</script>
+<noscript>Please enable JavaScript to view the <a href="https://disqus.com/?ref_noscript">comments powered by Disqus.</a></noscript>
+                                
+  
     <article id="post-xlog" class="article article-type-post" itemscope itemprop="blogPost">
   <div class="article-meta">
     <a href="/2017/07/30/xlog/" class="article-date">
@@ -319,7 +615,7 @@ BOOT_RUN_EXIT(appender_close);
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2017/07/30/xlog/" data-id="cj5q37evc0003asi1l2mx1v9h" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2017/07/30/xlog/" data-id="cj60u3jhs0003dii151pv5zjo" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2017/07/30/xlog/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -622,7 +918,7 @@ ldp    x9, x17, [x12]        <span class="comment">// {x9, x17} = *bucket</span>
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2017/06/29/Macho-2/" data-id="cj5q37exc001lasi129kant9h" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2017/06/29/Macho-2/" data-id="cj60u3jjx001odii1ymhduujr" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2017/06/29/Macho-2/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -911,7 +1207,7 @@ _magic = [cursor readBigInt32];
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2017/06/13/Macho-1/" data-id="cj5q37exe001nasi1fx77c64l" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2017/06/13/Macho-1/" data-id="cj60u3jk0001qdii1x2igiqy2" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2017/06/13/Macho-1/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -1173,7 +1469,7 @@ _attribute__((section (<span class="string">"__DATA, MinyiSpecific"</span>))) <s
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2017/06/01/FBTweak/" data-id="cj5q37eyf0027asi15tgduvyp" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2017/06/01/FBTweak/" data-id="cj60u3jks002adii194a850ku" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2017/06/01/FBTweak/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -1313,7 +1609,7 @@ foo(&amp;s, <span class="number">1</span>, <span class="number">2</span>);
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2017/04/23/ARM64IndirectReturn/" data-id="cj5q37eyr002oasi1t3yveakx" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2017/04/23/ARM64IndirectReturn/" data-id="cj60u3jl7002rdii16etia4hs" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2017/04/23/ARM64IndirectReturn/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -1484,7 +1780,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2017/04/18/CalculateTwoArrayDiff/" data-id="cj5q37eyp002kasi1ltdqg936" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2017/04/18/CalculateTwoArrayDiff/" data-id="cj60u3jl4002ndii1f6la0kh7" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2017/04/18/CalculateTwoArrayDiff/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -1674,7 +1970,7 @@ dispatch_group_create(<span class="keyword">void</span>)
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2017/01/07/DispatchGroupCrash/" data-id="cj5q37eyi002basi1zzpu1gu6" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2017/01/07/DispatchGroupCrash/" data-id="cj60u3jkw002edii1dzm897ai" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2017/01/07/DispatchGroupCrash/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -1922,7 +2218,7 @@ func <span class="function"><span class="title">resultFromBatchObjects</span><sp
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2017/01/07/JSONRPCKit/" data-id="cj5q37exv001zasi1193agq8p" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2017/01/07/JSONRPCKit/" data-id="cj60u3jkh0022dii189nz7aj9" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2017/01/07/JSONRPCKit/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -2206,7 +2502,7 @@ dispatch_sync(dq, ^{
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/10/23/multithread-dangling-pointer/" data-id="cj5q37evu000basi1wn2jfaz3" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/10/23/multithread-dangling-pointer/" data-id="cj60u3jia000bdii1ze1cf7s7" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/10/23/multithread-dangling-pointer/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -2362,7 +2658,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/09/17/uiwindow-iOS/" data-id="cj5q37evo0007asi1dx43lmvk" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/09/17/uiwindow-iOS/" data-id="cj60u3ji50007dii1cw1wz330" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/09/17/uiwindow-iOS/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -2522,7 +2818,7 @@ OSSpinUnlock(&amp;_lock)<span class="comment">;</span>
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/07/10/immutable-thread/" data-id="cj5q37evw000dasi15y6jph04" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/07/10/immutable-thread/" data-id="cj60u3jic000ddii1ry5cje18" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/07/10/immutable-thread/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -2646,7 +2942,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/05/02/Spotify/" data-id="cj5q37ews0014asi1v6ide5g9" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/05/02/Spotify/" data-id="cj60u3jjc0018dii1xywl4qid" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/05/02/Spotify/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -2774,7 +3070,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/04/26/blank-space-in-html/" data-id="cj5q37ewg000sasi1en7kkw9x" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/04/26/blank-space-in-html/" data-id="cj60u3jiu000sdii15t75dwfx" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/04/26/blank-space-in-html/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -3032,7 +3328,7 @@ Elapsed application CPU <span class="keyword">time</span> (seconds): <span class
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/04/11/dispatch-once/" data-id="cj5q37ew2000iasi1ckxg3yy7" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/04/11/dispatch-once/" data-id="cj60u3jih000idii1kxvt24pt" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/04/11/dispatch-once/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -3249,7 +3545,7 @@ a4.<span class="function"><span class="title">staticInfo</span><span class="para
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/03/22/dispatch-in-swift/" data-id="cj5q37ew4000kasi1kcnxvzuq" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/03/22/dispatch-in-swift/" data-id="cj60u3jij000kdii1mfaw967s" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/03/22/dispatch-in-swift/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -3363,7 +3659,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/03/14/RxSwift/" data-id="cj5q37ewy001aasi1ai9ln3te" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/03/14/RxSwift/" data-id="cj60u3jjg001ddii1isj6w2v6" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/03/14/RxSwift/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -3473,7 +3769,7 @@ val = edx(<span class="literal">true</span>)
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/03/14/SizeUp/" data-id="cj5q37ewv0017asi1cklorl1m" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/03/14/SizeUp/" data-id="cj60u3jje001bdii1nc8mf8i6" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/03/14/SizeUp/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -3635,7 +3931,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/03/14/DXXcodeConsoleUnicodePlugin/" data-id="cj5q37eym002gasi1yayyxz8z" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/03/14/DXXcodeConsoleUnicodePlugin/" data-id="cj60u3jl0002jdii184a984e3" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/03/14/DXXcodeConsoleUnicodePlugin/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -3734,7 +4030,7 @@ fi
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/02/27/check-manifest/" data-id="cj5q37ewd000pasi1ljdx34at" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/02/27/check-manifest/" data-id="cj60u3jir000pdii1xw32xjl4" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/02/27/check-manifest/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -3866,7 +4162,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/02/27/pod-install-plugin/" data-id="cj5q37evr0009asi1msccwb26" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/02/27/pod-install-plugin/" data-id="cj60u3ji80009dii1q0kknemg" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/02/27/pod-install-plugin/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -4144,7 +4440,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/02/27/FBKVOController/" data-id="cj5q37eyh0029asi1ry443cuh" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/02/27/FBKVOController/" data-id="cj60u3jku002cdii13r7hzn2j" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/02/27/FBKVOController/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -4280,7 +4576,7 @@ selectedTitleLabelsContentView<span class="class">.layer</span><span class="clas
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/02/05/DGRunKeeperSwitch/" data-id="cj5q37eyo002iasi1m75y5y0t" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/02/05/DGRunKeeperSwitch/" data-id="cj60u3jl3002ldii12mkjrujf" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/02/05/DGRunKeeperSwitch/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -4558,7 +4854,7 @@ NSLayoutConstraint *constraint = [NSLayoutConstraint <span class="string">constr
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/02/05/PureLayout/" data-id="cj5q37ex5001hasi1f266kw63" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/02/05/PureLayout/" data-id="cj60u3jjo001kdii185k518q5" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/02/05/PureLayout/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -4906,7 +5202,7 @@ extension Task {
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/12/30/Refactor-Mega-ViewController/" data-id="cj5q37ex3001fasi1h223vm2s" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/12/30/Refactor-Mega-ViewController/" data-id="cj60u3jjk001idii13tovdvxz" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2015/12/30/Refactor-Mega-ViewController/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -5079,7 +5375,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/12/20/Learn-R-2/" data-id="cj5q37exj001pasi1ixwdkopk" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/12/20/Learn-R-2/" data-id="cj60u3jk4001sdii1jan7ywgq" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2015/12/20/Learn-R-2/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -5155,7 +5451,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/12/15/Regression-Model-1/" data-id="cj5q37ex0001casi1h73hvcr9" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/12/15/Regression-Model-1/" data-id="cj60u3jji001fdii1wrylr62j" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2015/12/15/Regression-Model-1/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -5320,7 +5616,7 @@ $foo
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/12/13/Learn-R-1/" data-id="cj5q37exn001sasi182218xkk" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/12/13/Learn-R-1/" data-id="cj60u3jk7001vdii1f616c2qo" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2015/12/13/Learn-R-1/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -5448,7 +5744,7 @@ frame <span class="preprocessor">#<span class="number">20</span>: libdyld.dylib`
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/12/11/LLDB-1/" data-id="cj5q37exs001xasi1ml30ify6" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/12/11/LLDB-1/" data-id="cj60u3jkc0020dii1bitlvgh1" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2015/12/11/LLDB-1/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -5769,256 +6065,9 @@ TBBoundingBox TBBoundingBoxMake(<span class="built_in">double</span> x0, <span c
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/12/11/TBAnnotationClustering/" data-id="cj5q37ewl000wasi1ahl5zmq7" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/12/11/TBAnnotationClustering/" data-id="cj60u3jj20010dii1yc8tswvt" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2015/12/11/TBAnnotationClustering/#disqus_thread" class="article-comment-link">Comments</a>
-      
-      
-  <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
-
-    </footer>
-  </div>
-  
-</article>
-
-<div id="disqus_thread"></div>
-<script>
-
-/**
-*  RECOMMENDED CONFIGURATION VARIABLES: EDIT AND UNCOMMENT THE SECTION BELOW TO INSERT DYNAMIC VALUES FROM YOUR PLATFORM OR CMS.
-*  LEARN WHY DEFINING THESE VARIABLES IS IMPORTANT: https://disqus.com/admin/universalcode/#configuration-variables*/
-/*
-var disqus_config = function () {
-this.page.url = PAGE_URL;  // Replace PAGE_URL with your page's canonical URL variable
-this.page.identifier = PAGE_IDENTIFIER; // Replace PAGE_IDENTIFIER with your page's unique identifier variable
-};
-*/
-(function() { // DON'T EDIT BELOW THIS LINE
-var d = document, s = d.createElement('script');
-s.src = 'https://satanwoo-2.disqus.com/embed.js';
-s.setAttribute('data-timestamp', +new Date());
-(d.head || d.body).appendChild(s);
-})();
-</script>
-<noscript>Please enable JavaScript to view the <a href="https://disqus.com/?ref_noscript">comments powered by Disqus.</a></noscript>
-                                
-  
-    <article id="post-FDFullScreenPopGesture-Source-Code" class="article article-type-post" itemscope itemprop="blogPost">
-  <div class="article-meta">
-    <a href="/2015/11/26/FDFullScreenPopGesture-Source-Code/" class="article-date">
-  <time datetime="2015-11-26T03:38:42.000Z" itemprop="datePublished">2015-11-26</time>
-</a>
-    
-  </div>
-  <div class="article-inner">
-    
-    
-      <header class="article-header">
-        
-  
-    <h1 itemprop="name">
-      <a class="article-title" href="/2015/11/26/FDFullScreenPopGesture-Source-Code/">FDFullScreenPopGesture源码解析</a>
-    </h1>
-  
-
-      </header>
-    
-    <div class="article-entry" itemprop="articleBody">
-      
-        <p><em>嘿嘿，花了三天时间把自己的代码从700行缩减成了200行，终于有时间可以拜读新源码了，好开心。</em></p>
-<p>好了，废话不多话，今天我们要读了百度出品的一个开源项目FDFullScreenPopGesture。</p>
-<h2 id="项目介绍">项目介绍</h2><p><a href="https://github.com/forkingdog/FDFullscreenPopGesture" target="_blank" rel="external">FDFullScreenPopGesture</a>是一款无需改动即可整合进入现有项目的全局手势操作，使用这个即可以在左侧边缘拖拽的时候返回上一级的效果。</p>
-<p>看到这，有人会问，我们这个直接用UIPanGestureRecognizer不也能达到吗？<br>没错，仅仅是返回上一级这个需求确实很简单。但是iOS7上返回上一级时候，UINavigationBar的切换效果你能实现吗？</p>
-<p>而且，我要说的重点是<strong>FDFullscreenPopGesture</strong>实现思路很赞！！！</p>
-<h2 id="源码分析">源码分析</h2><h3 id="结构分析">结构分析</h3><p>整个FDFullscreenPopGesture其实可以主要拆分成三块：</p>
-<pre><code>-<span class="ruby">- _FDFullscreenPopGestureRecognizerDelegate
-</span>-<span class="ruby">- <span class="constant">UIViewController</span> (<span class="constant">FDFullscreenPopGesturePrivate</span>)
-</span>-<span class="ruby">- <span class="constant">UINavigationController</span> (<span class="constant">FDFullscreenPopGesture</span>)</span>
-</code></pre><ul>
-<li><p>_FDFullscreenPopGestureRecognizerDelegate虽然名字看起来像一个Protocol，但是它实质上是一个<strong>NSObject</strong>子类，同时实现了<strong>UIGestureRecognizerDelegate</strong>。这么做的好处是什么呢？不知道大家有没有经历过ViewController重构，以前很多时候，比如我们写UIScrollView，UITableView，他们的Delegate，DataSource都耦合进了ViewController，常常导致MassViewController灾难的发生。<strong>单独构建一个专门负责的Delgeate“处理器”是非常有效的手段</strong></p>
-</li>
-<li><p>UIViewController (FDFullscreenPopGesturePrivate)是一个Category，我们在这个分类里面主要进行<strong>viewWillAppear</strong>的Hook，具体做什么，后面章节我们细细道来。</p>
-</li>
-<li><p>UINavigationController (FDFullscreenPopGesture)也是一个分类，是进行<strong>pushViewController:animated:</strong>方法的hook，实现部分我们后续再看。</p>
-</li>
-</ul>
-<h3 id="源码分析-1">源码分析</h3><h4 id="_FDFullscreenPopGestureRecognizerDelegate">_FDFullscreenPopGestureRecognizerDelegate</h4><pre><code>- (<span class="built_in">BOOL</span>)gestureRecognizerShouldBegin:(<span class="built_in">UIPanGestureRecognizer</span> *)gestureRecognizer
-{
-    <span class="comment">// 1.</span>
-    <span class="keyword">if</span> (<span class="keyword">self</span><span class="variable">.navigationController</span><span class="variable">.viewControllers</span><span class="variable">.count</span> &lt;= <span class="number">1</span>) {
-        <span class="keyword">return</span> <span class="literal">NO</span>;
-    }
-
-    <span class="comment">// 2.</span>
-    <span class="built_in">UIViewController</span> *topViewController = <span class="keyword">self</span><span class="variable">.navigationController</span><span class="variable">.viewControllers</span><span class="variable">.lastObject</span>;
-    <span class="keyword">if</span> (topViewController<span class="variable">.fd_interactivePopDisabled</span>) {
-        <span class="keyword">return</span> <span class="literal">NO</span>;
-    }
-
-    <span class="comment">// 3. </span>
-    <span class="built_in">CGPoint</span> beginningLocation = [gestureRecognizer locationInView:gestureRecognizer<span class="variable">.view</span>];
-    <span class="built_in">CGFloat</span> maxAllowedInitialDistance = topViewController<span class="variable">.fd_interactivePopMaxAllowedInitialDistanceToLeftEdge</span>;
-    <span class="keyword">if</span> (maxAllowedInitialDistance &gt; <span class="number">0</span> &amp;&amp; beginningLocation<span class="variable">.x</span> &gt; maxAllowedInitialDistance) {
-        <span class="keyword">return</span> <span class="literal">NO</span>;
-    }
-
-    <span class="comment">// 4.</span>
-    <span class="keyword">if</span> ([[<span class="keyword">self</span><span class="variable">.navigationController</span> valueForKey:<span class="string">@"_isTransitioning"</span>] boolValue]) {
-        <span class="keyword">return</span> <span class="literal">NO</span>;
-    }
-
-    <span class="comment">// 5.</span>
-    <span class="built_in">CGPoint</span> translation = [gestureRecognizer translationInView:gestureRecognizer<span class="variable">.view</span>];
-    <span class="keyword">if</span> (translation<span class="variable">.x</span> &lt;= <span class="number">0</span>) {
-        <span class="keyword">return</span> <span class="literal">NO</span>;
-    }
-
-    <span class="keyword">return</span> <span class="literal">YES</span>;
-}
-</code></pre><p>整个类特别精简，它的职责就是维护一个UINavigationController然后根据一系列的状态判断该手势是否生效。这些状态包括</p>
-<ol>
-<li>当前UINavigationController的栈是否只剩最后一个ViewController了</li>
-<li>当前即将出栈的topViewController是否禁用了<strong>fd_interactivePopDisabled</strong>，该变量我们稍后会说</li>
-<li>当前手势的启动点是不是离左侧边缘太远了，毕竟我们是要模拟iOS原生的手势操作，原生的不支持全屏，我们为啥要支持！</li>
-<li>当前是否已经处在转场过程中。在这里，可以看到它使用了valueForKey这一<strong>Key-Value-Coding</strong>技术，它可以访问私有变量<strong>_isTransitioning</strong>哦！</li>
-<li>方向相反的滑动滚粗。</li>
-</ol>
-<h4 id="UIViewController_(FDFullscreenPopGesturePrivate)">UIViewController (FDFullscreenPopGesturePrivate)</h4><p>整个这个类也非常简单，就是通过 <strong>fd_viewWillAppear</strong> hook了 <strong>viewWillAppear</strong> 这个方法，然后插入了自己一段回调的block。</p>
-<pre><code>- (<span class="keyword">void</span>)fd_viewWillAppear:(<span class="built_in">BOOL</span>)animated
-{
-    <span class="comment">// Forward to primary implementation.</span>
-    [<span class="keyword">self</span> fd_viewWillAppear:animated];
-
-    <span class="keyword">if</span> (<span class="keyword">self</span><span class="variable">.fd_willAppearInjectBlock</span>) {
-        <span class="keyword">self</span><span class="variable">.fd_willAppearInjectBlock</span>(<span class="keyword">self</span>, animated);
-    }
-}
-</code></pre><h4 id="UINavigationController_(FDFullscreenPopGesture)">UINavigationController (FDFullscreenPopGesture)</h4><p>这个分类是整个项目的逻辑控制核心。它干了这么几件事：</p>
-<ul>
-<li>用 <strong>fd_pushViewController:animated:</strong> hook <strong>pushViewController:animated:</strong></li>
-<li><strong>禁用</strong>UINavgationController的<strong>interactivePopGestureRecognizer</strong></li>
-<li>构建了属于自己UIPanGestureRecognizer替换interactivePopGestureRecognizer，同时把手势的delegate赋值给了_FDFullscreenPopGestureRecognizerDelegate</li>
-</ul>
-<p>它的主要核心代码如下：</p>
-<pre><code>- (<span class="keyword">void</span>)fd_pushViewController:(<span class="built_in">UIViewController</span> *)viewController animated:(<span class="built_in">BOOL</span>)animated
-{
-    <span class="keyword">if</span> (![<span class="keyword">self</span><span class="variable">.interactivePopGestureRecognizer</span><span class="variable">.view</span><span class="variable">.gestureRecognizers</span> containsObject:<span class="keyword">self</span><span class="variable">.fd_fullscreenPopGestureRecognizer</span>]) {
-
-        <span class="comment">// 1.</span>
-        [<span class="keyword">self</span><span class="variable">.interactivePopGestureRecognizer</span><span class="variable">.view</span> addGestureRecognizer:<span class="keyword">self</span><span class="variable">.fd_fullscreenPopGestureRecognizer</span>];
-
-        <span class="comment">// 2.</span>
-        <span class="built_in">NSArray</span> *internalTargets = [<span class="keyword">self</span><span class="variable">.interactivePopGestureRecognizer</span> valueForKey:<span class="string">@"targets"</span>];
-        <span class="keyword">id</span> internalTarget = [internalTargets<span class="variable">.firstObject</span> valueForKey:<span class="string">@"target"</span>];
-        SEL internalAction = <span class="built_in">NSSelectorFromString</span>(<span class="string">@"handleNavigationTransition:"</span>);
-        <span class="keyword">self</span><span class="variable">.fd_fullscreenPopGestureRecognizer</span><span class="variable">.delegate</span> = <span class="keyword">self</span><span class="variable">.fd_popGestureRecognizerDelegate</span>;
-        [<span class="keyword">self</span><span class="variable">.fd_fullscreenPopGestureRecognizer</span> addTarget:internalTarget action:internalAction];
-
-        <span class="comment">// 3.</span>
-        <span class="keyword">self</span><span class="variable">.interactivePopGestureRecognizer</span><span class="variable">.enabled</span> = <span class="literal">NO</span>;
-    }
-
-    <span class="comment">// 4.</span>
-    [<span class="keyword">self</span> fd_setupViewControllerBasedNavigationBarAppearanceIfNeeded:viewController];
-
-    <span class="comment">// Forward to primary implementation.</span>
-    <span class="keyword">if</span> (![<span class="keyword">self</span><span class="variable">.viewControllers</span> containsObject:viewController]) {
-        [<span class="keyword">self</span> fd_pushViewController:viewController animated:animated];
-    }
-}
-</code></pre><p>整体来看这段源码，无非做了如下这些事：</p>
-<ol>
-<li>将UIPanGestureRecognizer添加到本来interactivePopGestureRecognizer所在的view上</li>
-<li><div style="color:red"><strong>这段是重点的重点</strong>，一定要往下看！！！</div><br>将PanGesture的target设置为<strong>internalTarget</strong>，action设置为<br><strong>handleNavigationTransition</strong>.</li>
-<li>禁用interactivePopGestureRecognizer</li>
-<li><p>根据是否需要隐藏UINavigationBar来调用fd_setupViewControllerBasedNavigationBarAppearanceIfNeeded:viewController进行之前提到过的<strong>fdwillAppearInjectBlock</strong>设置，代码如下：</p>
-<pre><code>- (void)fd_setupViewControllerBasedNavigationBarAppearanceIfNeeded:(UIViewController *)appearingViewController
-{
-    <span class="preprocessor">if</span> (!<span class="keyword">self.fd_viewControllerBasedNavigationBarAppearanceEnabled) </span>{
-        return<span class="comment">;</span>
-    }
-
-    __weak typeof(<span class="keyword">self) </span>weakSelf = <span class="keyword">self;
-</span>    _FDViewControllerWillAppearInjectBlock <span class="keyword">block </span>= ^(UIViewController *viewController, <span class="keyword">BOOL </span>animated) {
-        __strong typeof(weakSelf) <span class="keyword">strongSelf </span>= weakSelf<span class="comment">;</span>
-        <span class="preprocessor">if</span> (<span class="keyword">strongSelf) </span>{
-            [<span class="keyword">strongSelf </span>setNavigationBarHidden:viewController.fd_prefersNavigationBarHidden animated:animated]<span class="comment">;</span>
-        }
-    }<span class="comment">;</span>
-
-    // Setup will appear inject <span class="keyword">block </span>to appearing view controller.
-    // Setup disappearing view controller as well, <span class="keyword">because </span>not every view controller is <span class="keyword">added </span>into
-    // stack <span class="keyword">by </span><span class="keyword">pushing, </span>maybe <span class="keyword">by </span><span class="string">"-setViewControllers:"</span>.
-    appearingViewController.fd_willAppearInjectBlock = <span class="keyword">block;
-</span>    UIViewController *disappearingViewController = <span class="keyword">self.viewControllers.lastObject;
-</span>    <span class="preprocessor">if</span> (disappearingViewController &amp;&amp; !disappearingViewController.fd_willAppearInjectBlock) {
-        disappearingViewController.fd_willAppearInjectBlock = <span class="keyword">block;
-</span>    }
-}
-</code></pre></li>
-</ol>
-<p>这段代码就是将即将消失和展现的ViewController在viewWillAppear设置了一个自定义UINavigationBar的回调，用以根据进入的方式来展现NaviagtionBar，而不会出现突兀的“镂空”。</p>
-<p>到这，源码就结束了，可以回家收衣服喽！</p>
-<h3 id="重点">重点</h3><p>源码是不是很简单？有什么好分析的呢？<br>如果你读到这，哈哈，恭喜啦，重点分析来啦。</p>
-<p>首先感谢@J_雨的天才思路，大家可以阅读<a href="http://www.jianshu.com/p/d39f7d22db6c" target="_blank" rel="external">轻松学习之二——iOS利用Runtime自定义控制器POP手势动画</a>这篇文章，真的很赞</p>
-<p>之前我们在上文用红色标注了一段内容：</p>
-<div style="color:red"><br>将PanGesture的target设置为<strong>internalTarget</strong>，action设置为<br><strong>handleNavigationTransition</strong>。</div>
-
-<p>看起来很容易理解，可是大家有没有想过为什么action的名称是handleNavigationTransition呢？</p>
-<p>首先我们先打印看看NavigationController的interactivePopGestureRecognizer究竟是个什么玩意？</p>
-<pre><code>&lt;<span class="built_in">UIScreenEdgePanGestureRecognizer</span>: <span class="number">0x7fea78ec5950</span>; state = Possible; delaysTouchesBegan = <span class="literal">YES</span>; view = &lt;<span class="built_in">UILayoutContainerView</span> <span class="number">0x7fea78f77960</span>&gt;; target= &lt;(action=handleNavigationTransition:, target=&lt;_<span class="built_in">UINavigationInteractiveTransition</span> <span class="number">0x7fea78c1c640</span>&gt;)&gt;
-</code></pre><p>这是什么玩意？让我们分别来看看它答应出来的这些属性。</p>
-<ol>
-<li>state = Possible，很简单，就是一个UIGestureRecognizerState = UIGestureRecognizerStatePossible。</li>
-<li>view = UILayoutContainerView，不太懂，暂时也没觉得有需要，不管他。</li>
-<li>target =&lt;(action=handleNavigationTransition:, target=<_uinavigationinteractivetransition 0x7fea78c1c640="">)，这个看起来很有用，因为我们都知道，Gesture就是通过<strong>Target-Action</strong>的方式进行动作触发的。</_uinavigationinteractivetransition></li>
-</ol>
-<p>所以我们赶紧看看这个<strong>target</strong>是个啥玩意，使用如下命令：</p>
-<pre><code><span class="collection">[self.navigationController.interactivePopGestureRecognizer valueForKey:@<span class="string">"target"</span>]</span><span class="comment">;</span>
-</code></pre><p>卧槽，一运行，Crash了，报找不到这个Key。咋回事，难道我记错了KVC的用户，赶紧换成valueForKey:@”View”试试。</p>
-<p>哎！没错啊！成功得到了如下输出：</p>
-<pre><code>-<span class="string">[UILayoutContainerView objectAtIndexedSubscript:]</span>
-</code></pre><p>那咋回事，看来必须祭出屠龙刀Runtime了，嘿嘿，Objective-C面前，一切私有变量都是纸老虎。</p>
-<pre><code><span class="keyword">unsigned</span> <span class="keyword">int</span> count = <span class="number">0</span>;
-Ivar *var = class_copyIvarList([UIGestureRecognizer <span class="keyword">class</span>], &amp;count);
-<span class="keyword">for</span> (<span class="keyword">unsigned</span> <span class="keyword">int</span> i = <span class="number">0</span>; i &lt; count; i++) {
-     Ivar _var = *(var + i);
-     NSLog(@<span class="string">"%s"</span>, ivar_getTypeEncoding(_var));
-     NSLog(@<span class="string">"%s"</span>, ivar_getName(_var));
-}
-</code></pre><p>输出太长了，我们找我们想看的，</p>
-<pre><code><span class="number">2015</span>-<span class="number">11</span>-<span class="number">27</span> <span class="number">02</span>:<span class="number">10</span>:<span class="number">03.873</span> SamplePhotosApp[<span class="number">85305</span>:<span class="number">2664323</span>] _targets
-<span class="number">2015</span>-<span class="number">11</span>-<span class="number">27</span> <span class="number">02</span>:<span class="number">10</span>:<span class="number">03.873</span> SamplePhotosApp[<span class="number">85305</span>:<span class="number">2664323</span>] @<span class="string">"NSMutableArray"</span>
-</code></pre><p>卧槽，这丫叫_targets，好吧，赶紧改成valueForKey:@”targets”再试试。<br>哎，等等，不是_targets吗，怎么能用targets呢？</p>
-<p><strong>咳咳，吴老师又要来讲课了！对于KVC来说，它的查找顺序是key -&gt; property -&gt; ivar，也就是说，它会先按照是否有targets这个名称的key，然后targets这个property，最后再找_targets这个ivar。</strong></p>
-<p>通过输出log，我们可以发现_targets是个数组，维护了一个个自定义结构维护的target-action配对。</p>
-<p>因此，我们现在只要找到这个自定义结构是啥，里面包含了啥就可以了是吧。</p>
-<p><strong>当头一棒</strong>，很遗憾，苹果太阴了，直接重载了这个自定义结构的debugDescription，特喵的什么都看不到。</p>
-<p>事情到了这咋办呢？其实我也没想到，还好上述的参考文章告诉了我们可以依靠断点，通过断点，我们发发现了该自定义结构叫<strong>UIGestureRecognizerTarget</strong>，我们通过KVC获取其target和action即可。</p>
-<h3 id="补充：关于Method_Swizzling">补充：关于Method Swizzling</h3><pre><code><span class="keyword">Class</span> <span class="keyword">class</span> = [<span class="keyword">self</span> <span class="keyword">class</span>];
-
-SEL originalSelector = @<span class="keyword">selector</span>(pushViewController:animated:);
-SEL swizzledSelector = @<span class="keyword">selector</span>(fd_pushViewController:animated:);
-
-<span class="function"><span class="keyword">Method</span> <span class="title">originalMethod</span> = <span class="title">class_getInstanceMethod</span><span class="params">(<span class="keyword">class</span>, originalSelector)</span>;</span>
-<span class="function"><span class="keyword">Method</span> <span class="title">swizzledMethod</span> = <span class="title">class_getInstanceMethod</span><span class="params">(<span class="keyword">class</span>, swizzledSelector)</span>;</span>
-
-BOOL success = class_addMethod(<span class="keyword">class</span>, originalSelector, method_getImplementation(swizzledMethod), method_getTypeEncoding(swizzledMethod));
-<span class="keyword">if</span> (success) <span class="comment">{
-    class_replaceMethod(class, swizzledSelector, method_getImplementation(originalMethod), method_getTypeEncoding(originalMethod));
-}</span> <span class="keyword">else</span> <span class="comment">{
-    method_exchangeImplementations(originalMethod, swizzledMethod);
-}</span>
-</code></pre><p>有很多人都了解Method Swizzling，但是不知道为什么这里需要进行<strong>BOOL success = class_addMethod</strong>判断。</p>
-<p>其主要原因就是如果直接通过method_exchangeImplementations来进行的话，可能子类里并没有originalSelector所代表的方法，你直接和父类进行了交换，这是我们不希望看到的。</p>
-<p>因此通过addMethod来判断，如果加成功了，说明原先这个函数在子类中并不存在，我们现在添加了，只要再把swizzleSelector指向旧函数即可；而如果没成功，说明这个函数在子类中存在了，我们直接替换也不会影响父类。</p>
-
-      
-    </div>
-    <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/11/26/FDFullScreenPopGesture-Source-Code/" data-id="cj5q37eyd0025asi1mqptttte" class="article-share-link">Share</a>
-      
-        <a href="http://satanwoo.github.io/2015/11/26/FDFullScreenPopGesture-Source-Code/#disqus_thread" class="article-comment-link">Comments</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
@@ -6065,7 +6114,7 @@ s.setAttribute('data-timestamp', +new Date());
   <div class="widget-wrap">
     <h3 class="widget-title">Tags</h3>
     <div class="widget">
-      <ul class="tag-list"><li class="tag-list-item"><a class="tag-list-link" href="/tags/Android/">Android</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/C/">C</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Growth/">Growth</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/JavaScript/">JavaScript</a><span class="tag-list-count">3</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Math/">Math</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Performance/">Performance</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/R/">R</a><span class="tag-list-count">2</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Reverse-Engineering/">Reverse Engineering</a><span class="tag-list-count">3</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Swift/">Swift</a><span class="tag-list-count">6</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/iOS/">iOS</a><span class="tag-list-count">26</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/shell/">shell</a><span class="tag-list-count">1</span></li></ul>
+      <ul class="tag-list"><li class="tag-list-item"><a class="tag-list-link" href="/tags/Android/">Android</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/C/">C</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Growth/">Growth</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/JavaScript/">JavaScript</a><span class="tag-list-count">3</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Math/">Math</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Performance/">Performance</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/R/">R</a><span class="tag-list-count">2</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Reverse-Engineering/">Reverse Engineering</a><span class="tag-list-count">4</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Swift/">Swift</a><span class="tag-list-count">6</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/iOS/">iOS</a><span class="tag-list-count">27</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/shell/">shell</a><span class="tag-list-count">1</span></li></ul>
     </div>
   </div>
 
@@ -6074,7 +6123,7 @@ s.setAttribute('data-timestamp', +new Date());
   <div class="widget-wrap">
     <h3 class="widget-title">Tag Cloud</h3>
     <div class="widget tagcloud">
-      <a href="/tags/Android/" style="font-size: 10px;">Android</a> <a href="/tags/C/" style="font-size: 10px;">C</a> <a href="/tags/Growth/" style="font-size: 10px;">Growth</a> <a href="/tags/JavaScript/" style="font-size: 15px;">JavaScript</a> <a href="/tags/Math/" style="font-size: 10px;">Math</a> <a href="/tags/Performance/" style="font-size: 10px;">Performance</a> <a href="/tags/R/" style="font-size: 12.5px;">R</a> <a href="/tags/Reverse-Engineering/" style="font-size: 15px;">Reverse Engineering</a> <a href="/tags/Swift/" style="font-size: 17.5px;">Swift</a> <a href="/tags/iOS/" style="font-size: 20px;">iOS</a> <a href="/tags/shell/" style="font-size: 10px;">shell</a>
+      <a href="/tags/Android/" style="font-size: 10px;">Android</a> <a href="/tags/C/" style="font-size: 10px;">C</a> <a href="/tags/Growth/" style="font-size: 10px;">Growth</a> <a href="/tags/JavaScript/" style="font-size: 14px;">JavaScript</a> <a href="/tags/Math/" style="font-size: 10px;">Math</a> <a href="/tags/Performance/" style="font-size: 10px;">Performance</a> <a href="/tags/R/" style="font-size: 12px;">R</a> <a href="/tags/Reverse-Engineering/" style="font-size: 16px;">Reverse Engineering</a> <a href="/tags/Swift/" style="font-size: 18px;">Swift</a> <a href="/tags/iOS/" style="font-size: 20px;">iOS</a> <a href="/tags/shell/" style="font-size: 10px;">shell</a>
     </div>
   </div>
 
@@ -6083,7 +6132,7 @@ s.setAttribute('data-timestamp', +new Date());
   <div class="widget-wrap">
     <h3 class="widget-title">Archives</h3>
     <div class="widget">
-      <ul class="archive-list"><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/07/">July 2017</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/06/">June 2017</a><span class="archive-list-count">3</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/04/">April 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/01/">January 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/10/">October 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/09/">September 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/07/">July 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/05/">May 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/04/">April 2016</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/03/">March 2016</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/02/">February 2016</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/12/">December 2015</a><span class="archive-list-count">6</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/11/">November 2015</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/10/">October 2015</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/09/">September 2015</a><span class="archive-list-count">4</span></li></ul>
+      <ul class="archive-list"><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/08/">August 2017</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/07/">July 2017</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/06/">June 2017</a><span class="archive-list-count">3</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/04/">April 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/01/">January 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/10/">October 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/09/">September 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/07/">July 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/05/">May 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/04/">April 2016</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/03/">March 2016</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/02/">February 2016</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/12/">December 2015</a><span class="archive-list-count">6</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/11/">November 2015</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/10/">October 2015</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/09/">September 2015</a><span class="archive-list-count">4</span></li></ul>
     </div>
   </div>
 
@@ -6093,6 +6142,10 @@ s.setAttribute('data-timestamp', +new Date());
     <h3 class="widget-title">Recents</h3>
     <div class="widget">
       <ul>
+        
+          <li>
+            <a href="/2017/08/06/UITableViewController/">UIKit解剖（-）逆向UITableViewController分析Bug</a>
+          </li>
         
           <li>
             <a href="/2017/07/30/xlog/">微信高性能线上日志系统xlog剖析</a>
@@ -6108,10 +6161,6 @@ s.setAttribute('data-timestamp', +new Date());
         
           <li>
             <a href="/2017/06/01/FBTweak/">从FBTweak 源码剖析一些中阶知识</a>
-          </li>
-        
-          <li>
-            <a href="/2017/04/23/ARM64IndirectReturn/">ARM64下Indirect Result Location摸索</a>
           </li>
         
       </ul>

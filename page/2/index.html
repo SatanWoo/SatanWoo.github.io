@@ -62,6 +62,253 @@
       <div class="outer">
         <section id="main">
   
+    <article id="post-FDFullScreenPopGesture-Source-Code" class="article article-type-post" itemscope itemprop="blogPost">
+  <div class="article-meta">
+    <a href="/2015/11/26/FDFullScreenPopGesture-Source-Code/" class="article-date">
+  <time datetime="2015-11-26T03:38:42.000Z" itemprop="datePublished">2015-11-26</time>
+</a>
+    
+  </div>
+  <div class="article-inner">
+    
+    
+      <header class="article-header">
+        
+  
+    <h1 itemprop="name">
+      <a class="article-title" href="/2015/11/26/FDFullScreenPopGesture-Source-Code/">FDFullScreenPopGesture源码解析</a>
+    </h1>
+  
+
+      </header>
+    
+    <div class="article-entry" itemprop="articleBody">
+      
+        <p><em>嘿嘿，花了三天时间把自己的代码从700行缩减成了200行，终于有时间可以拜读新源码了，好开心。</em></p>
+<p>好了，废话不多话，今天我们要读了百度出品的一个开源项目FDFullScreenPopGesture。</p>
+<h2 id="项目介绍">项目介绍</h2><p><a href="https://github.com/forkingdog/FDFullscreenPopGesture" target="_blank" rel="external">FDFullScreenPopGesture</a>是一款无需改动即可整合进入现有项目的全局手势操作，使用这个即可以在左侧边缘拖拽的时候返回上一级的效果。</p>
+<p>看到这，有人会问，我们这个直接用UIPanGestureRecognizer不也能达到吗？<br>没错，仅仅是返回上一级这个需求确实很简单。但是iOS7上返回上一级时候，UINavigationBar的切换效果你能实现吗？</p>
+<p>而且，我要说的重点是<strong>FDFullscreenPopGesture</strong>实现思路很赞！！！</p>
+<h2 id="源码分析">源码分析</h2><h3 id="结构分析">结构分析</h3><p>整个FDFullscreenPopGesture其实可以主要拆分成三块：</p>
+<pre><code>-<span class="ruby">- _FDFullscreenPopGestureRecognizerDelegate
+</span>-<span class="ruby">- <span class="constant">UIViewController</span> (<span class="constant">FDFullscreenPopGesturePrivate</span>)
+</span>-<span class="ruby">- <span class="constant">UINavigationController</span> (<span class="constant">FDFullscreenPopGesture</span>)</span>
+</code></pre><ul>
+<li><p>_FDFullscreenPopGestureRecognizerDelegate虽然名字看起来像一个Protocol，但是它实质上是一个<strong>NSObject</strong>子类，同时实现了<strong>UIGestureRecognizerDelegate</strong>。这么做的好处是什么呢？不知道大家有没有经历过ViewController重构，以前很多时候，比如我们写UIScrollView，UITableView，他们的Delegate，DataSource都耦合进了ViewController，常常导致MassViewController灾难的发生。<strong>单独构建一个专门负责的Delgeate“处理器”是非常有效的手段</strong></p>
+</li>
+<li><p>UIViewController (FDFullscreenPopGesturePrivate)是一个Category，我们在这个分类里面主要进行<strong>viewWillAppear</strong>的Hook，具体做什么，后面章节我们细细道来。</p>
+</li>
+<li><p>UINavigationController (FDFullscreenPopGesture)也是一个分类，是进行<strong>pushViewController:animated:</strong>方法的hook，实现部分我们后续再看。</p>
+</li>
+</ul>
+<h3 id="源码分析-1">源码分析</h3><h4 id="_FDFullscreenPopGestureRecognizerDelegate">_FDFullscreenPopGestureRecognizerDelegate</h4><pre><code>- (<span class="built_in">BOOL</span>)gestureRecognizerShouldBegin:(<span class="built_in">UIPanGestureRecognizer</span> *)gestureRecognizer
+{
+    <span class="comment">// 1.</span>
+    <span class="keyword">if</span> (<span class="keyword">self</span><span class="variable">.navigationController</span><span class="variable">.viewControllers</span><span class="variable">.count</span> &lt;= <span class="number">1</span>) {
+        <span class="keyword">return</span> <span class="literal">NO</span>;
+    }
+
+    <span class="comment">// 2.</span>
+    <span class="built_in">UIViewController</span> *topViewController = <span class="keyword">self</span><span class="variable">.navigationController</span><span class="variable">.viewControllers</span><span class="variable">.lastObject</span>;
+    <span class="keyword">if</span> (topViewController<span class="variable">.fd_interactivePopDisabled</span>) {
+        <span class="keyword">return</span> <span class="literal">NO</span>;
+    }
+
+    <span class="comment">// 3. </span>
+    <span class="built_in">CGPoint</span> beginningLocation = [gestureRecognizer locationInView:gestureRecognizer<span class="variable">.view</span>];
+    <span class="built_in">CGFloat</span> maxAllowedInitialDistance = topViewController<span class="variable">.fd_interactivePopMaxAllowedInitialDistanceToLeftEdge</span>;
+    <span class="keyword">if</span> (maxAllowedInitialDistance &gt; <span class="number">0</span> &amp;&amp; beginningLocation<span class="variable">.x</span> &gt; maxAllowedInitialDistance) {
+        <span class="keyword">return</span> <span class="literal">NO</span>;
+    }
+
+    <span class="comment">// 4.</span>
+    <span class="keyword">if</span> ([[<span class="keyword">self</span><span class="variable">.navigationController</span> valueForKey:<span class="string">@"_isTransitioning"</span>] boolValue]) {
+        <span class="keyword">return</span> <span class="literal">NO</span>;
+    }
+
+    <span class="comment">// 5.</span>
+    <span class="built_in">CGPoint</span> translation = [gestureRecognizer translationInView:gestureRecognizer<span class="variable">.view</span>];
+    <span class="keyword">if</span> (translation<span class="variable">.x</span> &lt;= <span class="number">0</span>) {
+        <span class="keyword">return</span> <span class="literal">NO</span>;
+    }
+
+    <span class="keyword">return</span> <span class="literal">YES</span>;
+}
+</code></pre><p>整个类特别精简，它的职责就是维护一个UINavigationController然后根据一系列的状态判断该手势是否生效。这些状态包括</p>
+<ol>
+<li>当前UINavigationController的栈是否只剩最后一个ViewController了</li>
+<li>当前即将出栈的topViewController是否禁用了<strong>fd_interactivePopDisabled</strong>，该变量我们稍后会说</li>
+<li>当前手势的启动点是不是离左侧边缘太远了，毕竟我们是要模拟iOS原生的手势操作，原生的不支持全屏，我们为啥要支持！</li>
+<li>当前是否已经处在转场过程中。在这里，可以看到它使用了valueForKey这一<strong>Key-Value-Coding</strong>技术，它可以访问私有变量<strong>_isTransitioning</strong>哦！</li>
+<li>方向相反的滑动滚粗。</li>
+</ol>
+<h4 id="UIViewController_(FDFullscreenPopGesturePrivate)">UIViewController (FDFullscreenPopGesturePrivate)</h4><p>整个这个类也非常简单，就是通过 <strong>fd_viewWillAppear</strong> hook了 <strong>viewWillAppear</strong> 这个方法，然后插入了自己一段回调的block。</p>
+<pre><code>- (<span class="keyword">void</span>)fd_viewWillAppear:(<span class="built_in">BOOL</span>)animated
+{
+    <span class="comment">// Forward to primary implementation.</span>
+    [<span class="keyword">self</span> fd_viewWillAppear:animated];
+
+    <span class="keyword">if</span> (<span class="keyword">self</span><span class="variable">.fd_willAppearInjectBlock</span>) {
+        <span class="keyword">self</span><span class="variable">.fd_willAppearInjectBlock</span>(<span class="keyword">self</span>, animated);
+    }
+}
+</code></pre><h4 id="UINavigationController_(FDFullscreenPopGesture)">UINavigationController (FDFullscreenPopGesture)</h4><p>这个分类是整个项目的逻辑控制核心。它干了这么几件事：</p>
+<ul>
+<li>用 <strong>fd_pushViewController:animated:</strong> hook <strong>pushViewController:animated:</strong></li>
+<li><strong>禁用</strong>UINavgationController的<strong>interactivePopGestureRecognizer</strong></li>
+<li>构建了属于自己UIPanGestureRecognizer替换interactivePopGestureRecognizer，同时把手势的delegate赋值给了_FDFullscreenPopGestureRecognizerDelegate</li>
+</ul>
+<p>它的主要核心代码如下：</p>
+<pre><code>- (<span class="keyword">void</span>)fd_pushViewController:(<span class="built_in">UIViewController</span> *)viewController animated:(<span class="built_in">BOOL</span>)animated
+{
+    <span class="keyword">if</span> (![<span class="keyword">self</span><span class="variable">.interactivePopGestureRecognizer</span><span class="variable">.view</span><span class="variable">.gestureRecognizers</span> containsObject:<span class="keyword">self</span><span class="variable">.fd_fullscreenPopGestureRecognizer</span>]) {
+
+        <span class="comment">// 1.</span>
+        [<span class="keyword">self</span><span class="variable">.interactivePopGestureRecognizer</span><span class="variable">.view</span> addGestureRecognizer:<span class="keyword">self</span><span class="variable">.fd_fullscreenPopGestureRecognizer</span>];
+
+        <span class="comment">// 2.</span>
+        <span class="built_in">NSArray</span> *internalTargets = [<span class="keyword">self</span><span class="variable">.interactivePopGestureRecognizer</span> valueForKey:<span class="string">@"targets"</span>];
+        <span class="keyword">id</span> internalTarget = [internalTargets<span class="variable">.firstObject</span> valueForKey:<span class="string">@"target"</span>];
+        SEL internalAction = <span class="built_in">NSSelectorFromString</span>(<span class="string">@"handleNavigationTransition:"</span>);
+        <span class="keyword">self</span><span class="variable">.fd_fullscreenPopGestureRecognizer</span><span class="variable">.delegate</span> = <span class="keyword">self</span><span class="variable">.fd_popGestureRecognizerDelegate</span>;
+        [<span class="keyword">self</span><span class="variable">.fd_fullscreenPopGestureRecognizer</span> addTarget:internalTarget action:internalAction];
+
+        <span class="comment">// 3.</span>
+        <span class="keyword">self</span><span class="variable">.interactivePopGestureRecognizer</span><span class="variable">.enabled</span> = <span class="literal">NO</span>;
+    }
+
+    <span class="comment">// 4.</span>
+    [<span class="keyword">self</span> fd_setupViewControllerBasedNavigationBarAppearanceIfNeeded:viewController];
+
+    <span class="comment">// Forward to primary implementation.</span>
+    <span class="keyword">if</span> (![<span class="keyword">self</span><span class="variable">.viewControllers</span> containsObject:viewController]) {
+        [<span class="keyword">self</span> fd_pushViewController:viewController animated:animated];
+    }
+}
+</code></pre><p>整体来看这段源码，无非做了如下这些事：</p>
+<ol>
+<li>将UIPanGestureRecognizer添加到本来interactivePopGestureRecognizer所在的view上</li>
+<li><div style="color:red"><strong>这段是重点的重点</strong>，一定要往下看！！！</div><br>将PanGesture的target设置为<strong>internalTarget</strong>，action设置为<br><strong>handleNavigationTransition</strong>.</li>
+<li>禁用interactivePopGestureRecognizer</li>
+<li><p>根据是否需要隐藏UINavigationBar来调用fd_setupViewControllerBasedNavigationBarAppearanceIfNeeded:viewController进行之前提到过的<strong>fdwillAppearInjectBlock</strong>设置，代码如下：</p>
+<pre><code>- (void)fd_setupViewControllerBasedNavigationBarAppearanceIfNeeded:(UIViewController *)appearingViewController
+{
+    <span class="preprocessor">if</span> (!<span class="keyword">self.fd_viewControllerBasedNavigationBarAppearanceEnabled) </span>{
+        return<span class="comment">;</span>
+    }
+
+    __weak typeof(<span class="keyword">self) </span>weakSelf = <span class="keyword">self;
+</span>    _FDViewControllerWillAppearInjectBlock <span class="keyword">block </span>= ^(UIViewController *viewController, <span class="keyword">BOOL </span>animated) {
+        __strong typeof(weakSelf) <span class="keyword">strongSelf </span>= weakSelf<span class="comment">;</span>
+        <span class="preprocessor">if</span> (<span class="keyword">strongSelf) </span>{
+            [<span class="keyword">strongSelf </span>setNavigationBarHidden:viewController.fd_prefersNavigationBarHidden animated:animated]<span class="comment">;</span>
+        }
+    }<span class="comment">;</span>
+
+    // Setup will appear inject <span class="keyword">block </span>to appearing view controller.
+    // Setup disappearing view controller as well, <span class="keyword">because </span>not every view controller is <span class="keyword">added </span>into
+    // stack <span class="keyword">by </span><span class="keyword">pushing, </span>maybe <span class="keyword">by </span><span class="string">"-setViewControllers:"</span>.
+    appearingViewController.fd_willAppearInjectBlock = <span class="keyword">block;
+</span>    UIViewController *disappearingViewController = <span class="keyword">self.viewControllers.lastObject;
+</span>    <span class="preprocessor">if</span> (disappearingViewController &amp;&amp; !disappearingViewController.fd_willAppearInjectBlock) {
+        disappearingViewController.fd_willAppearInjectBlock = <span class="keyword">block;
+</span>    }
+}
+</code></pre></li>
+</ol>
+<p>这段代码就是将即将消失和展现的ViewController在viewWillAppear设置了一个自定义UINavigationBar的回调，用以根据进入的方式来展现NaviagtionBar，而不会出现突兀的“镂空”。</p>
+<p>到这，源码就结束了，可以回家收衣服喽！</p>
+<h3 id="重点">重点</h3><p>源码是不是很简单？有什么好分析的呢？<br>如果你读到这，哈哈，恭喜啦，重点分析来啦。</p>
+<p>首先感谢@J_雨的天才思路，大家可以阅读<a href="http://www.jianshu.com/p/d39f7d22db6c" target="_blank" rel="external">轻松学习之二——iOS利用Runtime自定义控制器POP手势动画</a>这篇文章，真的很赞</p>
+<p>之前我们在上文用红色标注了一段内容：</p>
+<div style="color:red"><br>将PanGesture的target设置为<strong>internalTarget</strong>，action设置为<br><strong>handleNavigationTransition</strong>。</div>
+
+<p>看起来很容易理解，可是大家有没有想过为什么action的名称是handleNavigationTransition呢？</p>
+<p>首先我们先打印看看NavigationController的interactivePopGestureRecognizer究竟是个什么玩意？</p>
+<pre><code>&lt;<span class="built_in">UIScreenEdgePanGestureRecognizer</span>: <span class="number">0x7fea78ec5950</span>; state = Possible; delaysTouchesBegan = <span class="literal">YES</span>; view = &lt;<span class="built_in">UILayoutContainerView</span> <span class="number">0x7fea78f77960</span>&gt;; target= &lt;(action=handleNavigationTransition:, target=&lt;_<span class="built_in">UINavigationInteractiveTransition</span> <span class="number">0x7fea78c1c640</span>&gt;)&gt;
+</code></pre><p>这是什么玩意？让我们分别来看看它答应出来的这些属性。</p>
+<ol>
+<li>state = Possible，很简单，就是一个UIGestureRecognizerState = UIGestureRecognizerStatePossible。</li>
+<li>view = UILayoutContainerView，不太懂，暂时也没觉得有需要，不管他。</li>
+<li>target =&lt;(action=handleNavigationTransition:, target=<_uinavigationinteractivetransition 0x7fea78c1c640="">)，这个看起来很有用，因为我们都知道，Gesture就是通过<strong>Target-Action</strong>的方式进行动作触发的。</_uinavigationinteractivetransition></li>
+</ol>
+<p>所以我们赶紧看看这个<strong>target</strong>是个啥玩意，使用如下命令：</p>
+<pre><code><span class="collection">[self.navigationController.interactivePopGestureRecognizer valueForKey:@<span class="string">"target"</span>]</span><span class="comment">;</span>
+</code></pre><p>卧槽，一运行，Crash了，报找不到这个Key。咋回事，难道我记错了KVC的用户，赶紧换成valueForKey:@”View”试试。</p>
+<p>哎！没错啊！成功得到了如下输出：</p>
+<pre><code>-<span class="string">[UILayoutContainerView objectAtIndexedSubscript:]</span>
+</code></pre><p>那咋回事，看来必须祭出屠龙刀Runtime了，嘿嘿，Objective-C面前，一切私有变量都是纸老虎。</p>
+<pre><code><span class="keyword">unsigned</span> <span class="keyword">int</span> count = <span class="number">0</span>;
+Ivar *var = class_copyIvarList([UIGestureRecognizer <span class="keyword">class</span>], &amp;count);
+<span class="keyword">for</span> (<span class="keyword">unsigned</span> <span class="keyword">int</span> i = <span class="number">0</span>; i &lt; count; i++) {
+     Ivar _var = *(var + i);
+     NSLog(@<span class="string">"%s"</span>, ivar_getTypeEncoding(_var));
+     NSLog(@<span class="string">"%s"</span>, ivar_getName(_var));
+}
+</code></pre><p>输出太长了，我们找我们想看的，</p>
+<pre><code><span class="number">2015</span>-<span class="number">11</span>-<span class="number">27</span> <span class="number">02</span>:<span class="number">10</span>:<span class="number">03.873</span> SamplePhotosApp[<span class="number">85305</span>:<span class="number">2664323</span>] _targets
+<span class="number">2015</span>-<span class="number">11</span>-<span class="number">27</span> <span class="number">02</span>:<span class="number">10</span>:<span class="number">03.873</span> SamplePhotosApp[<span class="number">85305</span>:<span class="number">2664323</span>] @<span class="string">"NSMutableArray"</span>
+</code></pre><p>卧槽，这丫叫_targets，好吧，赶紧改成valueForKey:@”targets”再试试。<br>哎，等等，不是_targets吗，怎么能用targets呢？</p>
+<p><strong>咳咳，吴老师又要来讲课了！对于KVC来说，它的查找顺序是key -&gt; property -&gt; ivar，也就是说，它会先按照是否有targets这个名称的key，然后targets这个property，最后再找_targets这个ivar。</strong></p>
+<p>通过输出log，我们可以发现_targets是个数组，维护了一个个自定义结构维护的target-action配对。</p>
+<p>因此，我们现在只要找到这个自定义结构是啥，里面包含了啥就可以了是吧。</p>
+<p><strong>当头一棒</strong>，很遗憾，苹果太阴了，直接重载了这个自定义结构的debugDescription，特喵的什么都看不到。</p>
+<p>事情到了这咋办呢？其实我也没想到，还好上述的参考文章告诉了我们可以依靠断点，通过断点，我们发发现了该自定义结构叫<strong>UIGestureRecognizerTarget</strong>，我们通过KVC获取其target和action即可。</p>
+<h3 id="补充：关于Method_Swizzling">补充：关于Method Swizzling</h3><pre><code><span class="keyword">Class</span> <span class="keyword">class</span> = [<span class="keyword">self</span> <span class="keyword">class</span>];
+
+SEL originalSelector = @<span class="keyword">selector</span>(pushViewController:animated:);
+SEL swizzledSelector = @<span class="keyword">selector</span>(fd_pushViewController:animated:);
+
+<span class="function"><span class="keyword">Method</span> <span class="title">originalMethod</span> = <span class="title">class_getInstanceMethod</span><span class="params">(<span class="keyword">class</span>, originalSelector)</span>;</span>
+<span class="function"><span class="keyword">Method</span> <span class="title">swizzledMethod</span> = <span class="title">class_getInstanceMethod</span><span class="params">(<span class="keyword">class</span>, swizzledSelector)</span>;</span>
+
+BOOL success = class_addMethod(<span class="keyword">class</span>, originalSelector, method_getImplementation(swizzledMethod), method_getTypeEncoding(swizzledMethod));
+<span class="keyword">if</span> (success) <span class="comment">{
+    class_replaceMethod(class, swizzledSelector, method_getImplementation(originalMethod), method_getTypeEncoding(originalMethod));
+}</span> <span class="keyword">else</span> <span class="comment">{
+    method_exchangeImplementations(originalMethod, swizzledMethod);
+}</span>
+</code></pre><p>有很多人都了解Method Swizzling，但是不知道为什么这里需要进行<strong>BOOL success = class_addMethod</strong>判断。</p>
+<p>其主要原因就是如果直接通过method_exchangeImplementations来进行的话，可能子类里并没有originalSelector所代表的方法，你直接和父类进行了交换，这是我们不希望看到的。</p>
+<p>因此通过addMethod来判断，如果加成功了，说明原先这个函数在子类中并不存在，我们现在添加了，只要再把swizzleSelector指向旧函数即可；而如果没成功，说明这个函数在子类中存在了，我们直接替换也不会影响父类。</p>
+
+      
+    </div>
+    <footer class="article-footer">
+      <a data-url="http://satanwoo.github.io/2015/11/26/FDFullScreenPopGesture-Source-Code/" data-id="cj60u3jkq0028dii1oh7zinke" class="article-share-link">Share</a>
+      
+        <a href="http://satanwoo.github.io/2015/11/26/FDFullScreenPopGesture-Source-Code/#disqus_thread" class="article-comment-link">Comments</a>
+      
+      
+  <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
+
+    </footer>
+  </div>
+  
+</article>
+
+<div id="disqus_thread"></div>
+<script>
+
+/**
+*  RECOMMENDED CONFIGURATION VARIABLES: EDIT AND UNCOMMENT THE SECTION BELOW TO INSERT DYNAMIC VALUES FROM YOUR PLATFORM OR CMS.
+*  LEARN WHY DEFINING THESE VARIABLES IS IMPORTANT: https://disqus.com/admin/universalcode/#configuration-variables*/
+/*
+var disqus_config = function () {
+this.page.url = PAGE_URL;  // Replace PAGE_URL with your page's canonical URL variable
+this.page.identifier = PAGE_IDENTIFIER; // Replace PAGE_IDENTIFIER with your page's unique identifier variable
+};
+*/
+(function() { // DON'T EDIT BELOW THIS LINE
+var d = document, s = d.createElement('script');
+s.src = 'https://satanwoo-2.disqus.com/embed.js';
+s.setAttribute('data-timestamp', +new Date());
+(d.head || d.body).appendChild(s);
+})();
+</script>
+<noscript>Please enable JavaScript to view the <a href="https://disqus.com/?ref_noscript">comments powered by Disqus.</a></noscript>
+                                
+  
     <article id="post-Fun-of-CAReplicationLayer" class="article article-type-post" itemscope itemprop="blogPost">
   <div class="article-meta">
     <a href="/2015/11/17/Fun-of-CAReplicationLayer/" class="article-date">
@@ -160,7 +407,7 @@ replicationLayer.instanceDelay = <span class="number">0.3</span>
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/11/17/Fun-of-CAReplicationLayer/" data-id="cj5q37eyb0023asi1tjpd8fkp" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/11/17/Fun-of-CAReplicationLayer/" data-id="cj60u3jko0026dii1o98znp6x" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2015/11/17/Fun-of-CAReplicationLayer/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -388,7 +635,7 @@ modalVC<span class="class">.modalPresentationStyle</span> = <span class="class">
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/11/12/Swift-UITransition-iOS8/" data-id="cj5q37ewn000yasi1uy5k2ae3" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/11/12/Swift-UITransition-iOS8/" data-id="cj60u3jj50012dii1bxe2ut1n" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2015/11/12/Swift-UITransition-iOS8/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -570,7 +817,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/11/05/Understand-Viper/" data-id="cj5q37ewi000uasi1l0pvehqo" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/11/05/Understand-Viper/" data-id="cj60u3jiw000udii1kf8kjok6" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2015/11/05/Understand-Viper/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -821,7 +1068,7 @@ objectPath.<span class="keyword">get</span>(obj, <span class="string">'a.\u1200'
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/11/05/Object-Path-Source-Code/" data-id="cj5q37ex8001jasi1hmq79er2" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/11/05/Object-Path-Source-Code/" data-id="cj60u3jjt001mdii1dlgb7gdb" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2015/11/05/Object-Path-Source-Code/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -906,7 +1153,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/10/29/Learn-Android-Day-by-Day/" data-id="cj5q37exp001uasi13c9f1lbu" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/10/29/Learn-Android-Day-by-Day/" data-id="cj60u3jk9001xdii11whwushj" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2015/10/29/Learn-Android-Day-by-Day/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -1140,7 +1387,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/10/29/Swift-Count-Down-Label/" data-id="cj5q37ewp0010asi1w73c7pw9" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/10/29/Swift-Count-Down-Label/" data-id="cj60u3jj80014dii1fdmtdb43" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2015/10/29/Swift-Count-Down-Label/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -1293,7 +1540,7 @@ func computeAngle(p1:<span class="type">CGPoint</span> , p2:<span class="type">C
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/10/27/Swift-Circle-Slider/" data-id="cj5q37ewr0012asi1uloyt89n" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/10/27/Swift-Circle-Slider/" data-id="cj60u3jja0016dii1k4rivtiq" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2015/10/27/Swift-Circle-Slider/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -1537,7 +1784,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/10/14/GLCalendarView/" data-id="cj5q37exy0021asi1vwc8xpig" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/10/14/GLCalendarView/" data-id="cj60u3jkm0024dii1e7vl8px2" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2015/10/14/GLCalendarView/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -1780,7 +2027,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/09/30/Debounce-and-Throttle-in-iOS/" data-id="cj5q37eyk002easi142y9mk5l" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/09/30/Debounce-and-Throttle-in-iOS/" data-id="cj60u3jky002hdii13r2zaeq2" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2015/09/30/Debounce-and-Throttle-in-iOS/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -2103,7 +2350,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/09/23/flux-js-part-one/" data-id="cj5q37evz000fasi1v4zqccde" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/09/23/flux-js-part-one/" data-id="cj60u3jif000fdii1i5zwgovc" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2015/09/23/flux-js-part-one/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -2797,7 +3044,7 @@ CountryModel<span class="keyword">*</span> country = [[CountryModel alloc] initW
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/09/17/code-of-JSONModel/" data-id="cj5q37ew8000nasi1wtzapdfv" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/09/17/code-of-JSONModel/" data-id="cj60u3jim000ndii1enzc306c" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2015/09/17/code-of-JSONModel/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -2867,7 +3114,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/09/11/A-New-Start/" data-id="cj5q37euh0000asi1ddagpb1g" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/09/11/A-New-Start/" data-id="cj60u3jh60000dii16dte5yih" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2015/09/11/A-New-Start/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -2916,7 +3163,7 @@ s.setAttribute('data-timestamp', +new Date());
   <div class="widget-wrap">
     <h3 class="widget-title">Tags</h3>
     <div class="widget">
-      <ul class="tag-list"><li class="tag-list-item"><a class="tag-list-link" href="/tags/Android/">Android</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/C/">C</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Growth/">Growth</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/JavaScript/">JavaScript</a><span class="tag-list-count">3</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Math/">Math</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Performance/">Performance</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/R/">R</a><span class="tag-list-count">2</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Reverse-Engineering/">Reverse Engineering</a><span class="tag-list-count">3</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Swift/">Swift</a><span class="tag-list-count">6</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/iOS/">iOS</a><span class="tag-list-count">26</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/shell/">shell</a><span class="tag-list-count">1</span></li></ul>
+      <ul class="tag-list"><li class="tag-list-item"><a class="tag-list-link" href="/tags/Android/">Android</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/C/">C</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Growth/">Growth</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/JavaScript/">JavaScript</a><span class="tag-list-count">3</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Math/">Math</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Performance/">Performance</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/R/">R</a><span class="tag-list-count">2</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Reverse-Engineering/">Reverse Engineering</a><span class="tag-list-count">4</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Swift/">Swift</a><span class="tag-list-count">6</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/iOS/">iOS</a><span class="tag-list-count">27</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/shell/">shell</a><span class="tag-list-count">1</span></li></ul>
     </div>
   </div>
 
@@ -2925,7 +3172,7 @@ s.setAttribute('data-timestamp', +new Date());
   <div class="widget-wrap">
     <h3 class="widget-title">Tag Cloud</h3>
     <div class="widget tagcloud">
-      <a href="/tags/Android/" style="font-size: 10px;">Android</a> <a href="/tags/C/" style="font-size: 10px;">C</a> <a href="/tags/Growth/" style="font-size: 10px;">Growth</a> <a href="/tags/JavaScript/" style="font-size: 15px;">JavaScript</a> <a href="/tags/Math/" style="font-size: 10px;">Math</a> <a href="/tags/Performance/" style="font-size: 10px;">Performance</a> <a href="/tags/R/" style="font-size: 12.5px;">R</a> <a href="/tags/Reverse-Engineering/" style="font-size: 15px;">Reverse Engineering</a> <a href="/tags/Swift/" style="font-size: 17.5px;">Swift</a> <a href="/tags/iOS/" style="font-size: 20px;">iOS</a> <a href="/tags/shell/" style="font-size: 10px;">shell</a>
+      <a href="/tags/Android/" style="font-size: 10px;">Android</a> <a href="/tags/C/" style="font-size: 10px;">C</a> <a href="/tags/Growth/" style="font-size: 10px;">Growth</a> <a href="/tags/JavaScript/" style="font-size: 14px;">JavaScript</a> <a href="/tags/Math/" style="font-size: 10px;">Math</a> <a href="/tags/Performance/" style="font-size: 10px;">Performance</a> <a href="/tags/R/" style="font-size: 12px;">R</a> <a href="/tags/Reverse-Engineering/" style="font-size: 16px;">Reverse Engineering</a> <a href="/tags/Swift/" style="font-size: 18px;">Swift</a> <a href="/tags/iOS/" style="font-size: 20px;">iOS</a> <a href="/tags/shell/" style="font-size: 10px;">shell</a>
     </div>
   </div>
 
@@ -2934,7 +3181,7 @@ s.setAttribute('data-timestamp', +new Date());
   <div class="widget-wrap">
     <h3 class="widget-title">Archives</h3>
     <div class="widget">
-      <ul class="archive-list"><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/07/">July 2017</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/06/">June 2017</a><span class="archive-list-count">3</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/04/">April 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/01/">January 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/10/">October 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/09/">September 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/07/">July 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/05/">May 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/04/">April 2016</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/03/">March 2016</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/02/">February 2016</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/12/">December 2015</a><span class="archive-list-count">6</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/11/">November 2015</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/10/">October 2015</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/09/">September 2015</a><span class="archive-list-count">4</span></li></ul>
+      <ul class="archive-list"><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/08/">August 2017</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/07/">July 2017</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/06/">June 2017</a><span class="archive-list-count">3</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/04/">April 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/01/">January 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/10/">October 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/09/">September 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/07/">July 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/05/">May 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/04/">April 2016</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/03/">March 2016</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/02/">February 2016</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/12/">December 2015</a><span class="archive-list-count">6</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/11/">November 2015</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/10/">October 2015</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/09/">September 2015</a><span class="archive-list-count">4</span></li></ul>
     </div>
   </div>
 
@@ -2944,6 +3191,10 @@ s.setAttribute('data-timestamp', +new Date());
     <h3 class="widget-title">Recents</h3>
     <div class="widget">
       <ul>
+        
+          <li>
+            <a href="/2017/08/06/UITableViewController/">UIKit解剖（-）逆向UITableViewController分析Bug</a>
+          </li>
         
           <li>
             <a href="/2017/07/30/xlog/">微信高性能线上日志系统xlog剖析</a>
@@ -2959,10 +3210,6 @@ s.setAttribute('data-timestamp', +new Date());
         
           <li>
             <a href="/2017/06/01/FBTweak/">从FBTweak 源码剖析一些中阶知识</a>
-          </li>
-        
-          <li>
-            <a href="/2017/04/23/ARM64IndirectReturn/">ARM64下Indirect Result Location摸索</a>
           </li>
         
       </ul>

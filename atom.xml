@@ -4,7 +4,7 @@
   
   <link href="/atom.xml" rel="self"/>
   <link href="http://satanwoo.github.io/"/>
-  <updated>2017-07-30T02:08:48.000Z</updated>
+  <updated>2017-08-06T14:39:16.000Z</updated>
   <id>http://satanwoo.github.io/</id>
   
   <author>
@@ -13,6 +13,259 @@
   </author>
   
   <generator uri="http://hexo.io/">Hexo</generator>
+  
+  <entry>
+    <title><![CDATA[UIKit解剖（-）逆向UITableViewController分析Bug]]></title>
+    <link href="http://satanwoo.github.io/2017/08/06/UITableViewController/"/>
+    <id>http://satanwoo.github.io/2017/08/06/UITableViewController/</id>
+    <published>2017-08-06T14:28:23.000Z</published>
+    <updated>2017-08-06T14:39:16.000Z</updated>
+    <content type="html"><![CDATA[<h2 id="UIKit解剖（-）逆向UITableViewController分析Bug">UIKit解剖（-）逆向UITableViewController分析Bug</h2><p>之前在做XXXSDK的时候，我hook的<code>UITableView</code>的<code>setDelegate:</code>方法。整个SDK在接入手淘、天猫以及闲鱼等其他App的时候都没啥问题。</p>
+<p>上周，UC的同学突然找到说，给我说了如下图所示的问题：</p>
+<p><strong><span style="color:red">商业保密，不显示了</span></strong></p>
+<p>卧槽，这下我就懵逼了，看样子是把整个<code>rowHeight</code>给Hook坏了，那这是为什么呢？</p>
+<p>从开发<code>UITableView</code>的正向角度来说：我们一般都需要给其提供一个必选的<code>UITableViewDataSource</code>和一个可选的<code>UITableViewDelegate</code>，其中，涉及到高度的是如下这个API：</p>
+<pre><code><span class="tag">-</span> (<span class="tag">CGFloat</span>)<span class="rule"><span class="attribute">tableView</span>:<span class="value">(UITableView *)tableView heightForRowAtIndexPath:(NSIndexPath *)indexPath</span></span>;
+</code></pre><blockquote>
+<p>有人说可以直接通过tableview.rowHeight设置高度，但是对于不同cell不同高度的动态需求，但是这里我们暂不提这种分支情况。</p>
+</blockquote>
+<p>通过UC同学的协助，我们发现了如下输出：</p>
+<p><img src="https://raw.githubusercontent.com/SatanWoo/BeeHive/master/delegate.png?raw=true" alt=""></p>
+<p>通过输出不难发现，是最后的<code>delegate</code>被从对应的<code>UIViewController</code>改成了一个乱七八糟没实现对应<code>heightForRowAtIndexPath</code>方法的对象。</p>
+<p>为什么会这样呢？</p>
+<p>通过如下图所示的调用栈，</p>
+<p><img src="https://raw.githubusercontent.com/SatanWoo/BeeHive/master/stack.png?raw=true" alt=""></p>
+<p>调用栈最下层是UC同学的代码；</p>
+<p><code>self.tableview = [[xxxTableView alloc] init]</code></p>
+<p>调用栈最上层是我们的一层防护性hook，其代码如下：</p>
+<pre><code>+ (<span class="keyword">void</span>)load {
+    <span class="keyword">static</span> <span class="built_in">dispatch_once_t</span> onceToken;
+    <span class="built_in">dispatch_once</span>(&amp;onceToken, ^{
+        Swizzle([<span class="built_in">UIScrollView</span> class], <span class="keyword">@selector</span>(init), <span class="keyword">@selector</span>(swizzled_init));
+    });
+}
+
+- (instancetype)swizzled_init
+{
+    <span class="keyword">id</span> obj = [<span class="keyword">self</span> swizzled_init];
+    <span class="built_in">UIScrollView</span> *scrollView = (<span class="built_in">UIScrollView</span> *)obj;
+    <span class="keyword">if</span> (!scrollView<span class="variable">.delegate</span>) {
+        <span class="comment">//scrollView.delegate = [UIScrollViewDelegateDummyStub sharedStub];</span>
+    }
+    <span class="keyword">return</span> obj;
+}
+</code></pre><p>这段代码是什么作用呢？</p>
+<p><span style="color:red"><strong>我们之前提了<code>UITableViewDelegate</code>不是必需，因此，为了能够抓去所有UITableView的代码，我们会提供一个内置的默认delegate(当时的实现存在bug，没有实现heightForRowAtIndexPath方法)</strong></span>。</p>
+<p>而且，为了防止我们的delegate覆盖了有delegate的情况，我们还特地做了<code>!scroll.delegate</code>的判断。</p>
+<p>按照我们的预期设想，存在两种时间顺序情况：</p>
+<ol>
+<li>我们的init先执行，此时肯定会进入我们设置默认的逻辑；然后当外部代码调用<code>tableview.delegate = xxx</code>的时候，会把我们这个替换掉，不会影响正常的逻辑。</li>
+<li>我们的init后执行（比如某些子类覆盖的情况），那这样的话，当子类已经设置好<code>delegate</code>后，压根不会进入我们的设置逻辑。</li>
+</ol>
+<p><strong>然而，就是这一小段看起来无错的代码导致了UC的App出现了文章开头的Bug。</strong></p>
+<h3 id="逆向分析UITableViewController">逆向分析UITableViewController</h3><p>基于<strong>10.2</strong>的UIKit，我们通过汇编来分析<code>-[UITableViewController setTableView:]</code>的流程：</p>
+<pre><code>     <span class="comment">// 保存寄存器</span>
+-&gt;  <span class="number">0x18c84c640</span> &lt;+<span class="number">0</span>&gt;:   stp    x26, x25, [sp, <span class="preprocessor">#-<span class="number">0x50</span>]!</span>
+    <span class="number">0x18c84c644</span> &lt;+<span class="number">4</span>&gt;:   stp    x24, x23, [sp, <span class="preprocessor">#<span class="number">0x10</span>]</span>
+    <span class="number">0x18c84c648</span> &lt;+<span class="number">8</span>&gt;:   stp    x22, x21, [sp, <span class="preprocessor">#<span class="number">0x20</span>]</span>
+    <span class="number">0x18c84c64c</span> &lt;+<span class="number">12</span>&gt;:  stp    x20, x19, [sp, <span class="preprocessor">#<span class="number">0x30</span>]</span>
+    <span class="number">0x18c84c650</span> &lt;+<span class="number">16</span>&gt;:  stp    x29, x30, [sp, <span class="preprocessor">#<span class="number">0x40</span>]</span>
+
+    <span class="comment">// 获取原先UITableViewController的旧tableView</span>
+    <span class="number">0x18c84c654</span> &lt;+<span class="number">20</span>&gt;:  add    x29, sp, <span class="preprocessor">#<span class="number">0x40</span>            ; =<span class="number">0x40</span> </span>
+    <span class="number">0x18c84c658</span> &lt;+<span class="number">24</span>&gt;:  mov    x20, x0
+    <span class="number">0x18c84c65c</span> &lt;+<span class="number">28</span>&gt;:  mov    x0, x2
+    <span class="number">0x18c84c660</span> &lt;+<span class="number">32</span>&gt;:  bl     <span class="number">0x1851c8090</span>               ; objc_retain
+    <span class="number">0x18c84c664</span> &lt;+<span class="number">36</span>&gt;:  mov    x19, x0
+    <span class="number">0x18c84c668</span> &lt;+<span class="number">40</span>&gt;:  adrp   x8, <span class="number">124100</span>
+    <span class="number">0x18c84c66c</span> &lt;+<span class="number">44</span>&gt;:  ldr    x1, [x8, <span class="preprocessor">#<span class="number">0xd78</span>]</span>
+    <span class="number">0x18c84c670</span> &lt;+<span class="number">48</span>&gt;:  mov    x0, x20
+    <span class="number">0x18c84c674</span> &lt;+<span class="number">52</span>&gt;:  bl     <span class="number">0x1851c2f60</span>               ; objc_msgSend
+    <span class="number">0x18c84c678</span> &lt;+<span class="number">56</span>&gt;:  mov    x29, x29
+    <span class="number">0x18c84c67c</span> &lt;+<span class="number">60</span>&gt;:  bl     <span class="number">0x1851ca48c</span>               ; objc_retainAutoreleasedReturnValue
+
+    <span class="comment">// 比较旧的tableview和新的tableview</span>
+    <span class="number">0x18c84c680</span> &lt;+<span class="number">64</span>&gt;:  mov    x21, x0
+    <span class="number">0x18c84c684</span> &lt;+<span class="number">68</span>&gt;:  cmp    x21, x19
+
+    <span class="comment">// 如果两个tableView一致，直接返回</span>
+    <span class="number">0x18c84c688</span> &lt;+<span class="number">72</span>&gt;:  b.eq   <span class="number">0x18c84c7d4</span>               ; &lt;+<span class="number">404</span>&gt;
+
+    <span class="comment">// 获取旧的tableView的datasource</span>
+    <span class="number">0x18c84c68c</span> &lt;+<span class="number">76</span>&gt;:  adrp   x8, <span class="number">124074</span>
+    <span class="number">0x18c84c690</span> &lt;+<span class="number">80</span>&gt;:  ldr    x23, [x8, <span class="preprocessor">#<span class="number">0x2e0</span>]</span>
+    <span class="number">0x18c84c694</span> &lt;+<span class="number">84</span>&gt;:  mov    x0, x21
+    <span class="number">0x18c84c698</span> &lt;+<span class="number">88</span>&gt;:  mov    x1, x23
+    <span class="number">0x18c84c69c</span> &lt;+<span class="number">92</span>&gt;:  bl     <span class="number">0x1851c2f60</span>               ; objc_msgSend
+    <span class="number">0x18c84c6a0</span> &lt;+<span class="number">96</span>&gt;:  mov    x29, x29
+    <span class="number">0x18c84c6a4</span> &lt;+<span class="number">100</span>&gt;: bl     <span class="number">0x1851ca48c</span>               ; objc_retainAutoreleasedReturnValue
+
+
+    <span class="comment">// 从self的成员对象便宜792处取出UIFilteredDataSource</span>
+    <span class="number">0x18c84c6a8</span> &lt;+<span class="number">104</span>&gt;: mov    x22, x0
+    <span class="number">0x18c84c6ac</span> &lt;+<span class="number">108</span>&gt;: adrp   x8, <span class="number">124145</span>
+    <span class="number">0x18c84c6b0</span> &lt;+<span class="number">112</span>&gt;: ldrsw  x8, [x8, <span class="preprocessor">#<span class="number">0x7ac</span>]</span>
+    <span class="number">0x18c84c6b4</span> &lt;+<span class="number">116</span>&gt;: ldr    x8, [x20, x8]
+    <span class="number">0x18c84c6b8</span> &lt;+<span class="number">120</span>&gt;: cmp    x22, x20
+    <span class="number">0x18c84c6bc</span> &lt;+<span class="number">124</span>&gt;: ccmp   x22, x8, <span class="preprocessor">#<span class="number">0x4</span>, ne</span>
+
+    <span class="comment">// 如果不一致，把旧的tableview的datasource 置为nil</span>
+    <span class="number">0x18c84c6c0</span> &lt;+<span class="number">128</span>&gt;: b.ne   <span class="number">0x18c84c6d8</span>               ; &lt;+<span class="number">152</span>&gt;
+    <span class="number">0x18c84c6c4</span> &lt;+<span class="number">132</span>&gt;: adrp   x8, <span class="number">124073</span>
+    <span class="number">0x18c84c6c8</span> &lt;+<span class="number">136</span>&gt;: ldr    x1, [x8, <span class="preprocessor">#<span class="number">0x3c0</span>]</span>
+    <span class="number">0x18c84c6cc</span> &lt;+<span class="number">140</span>&gt;: mov    x2, <span class="preprocessor">#<span class="number">0x0</span></span>
+    <span class="number">0x18c84c6d0</span> &lt;+<span class="number">144</span>&gt;: mov    x0, x21
+    <span class="number">0x18c84c6d4</span> &lt;+<span class="number">148</span>&gt;: bl     <span class="number">0x1851c2f60</span>               ; objc_msgSend
+
+    <span class="comment">// 获取旧的tableview的delegate</span>
+    <span class="number">0x18c84c6d8</span> &lt;+<span class="number">152</span>&gt;: adrp   x8, <span class="number">124074</span>
+    <span class="number">0x18c84c6dc</span> &lt;+<span class="number">156</span>&gt;: ldr    x24, [x8, <span class="preprocessor">#<span class="number">0x7d8</span>]</span>
+    <span class="number">0x18c84c6e0</span> &lt;+<span class="number">160</span>&gt;: mov    x0, x21
+    <span class="number">0x18c84c6e4</span> &lt;+<span class="number">164</span>&gt;: mov    x1, x24
+    <span class="number">0x18c84c6e8</span> &lt;+<span class="number">168</span>&gt;: bl     <span class="number">0x1851c2f60</span>               ; objc_msgSend
+    <span class="number">0x18c84c6ec</span> &lt;+<span class="number">172</span>&gt;: mov    x29, x29
+    <span class="number">0x18c84c6f0</span> &lt;+<span class="number">176</span>&gt;: bl     <span class="number">0x1851ca48c</span>               ; objc_retainAutoreleasedReturnValue
+        <span class="number">0x18c84c6f4</span> &lt;+<span class="number">180</span>&gt;: mov    x25, x0
+    <span class="number">0x18c84c6f8</span> &lt;+<span class="number">184</span>&gt;: bl     <span class="number">0x1851c8150</span>               ; objc_release
+
+    <span class="comment">// 判断旧的delegate是不是当前的UITableViewController</span>
+    <span class="number">0x18c84c6fc</span> &lt;+<span class="number">188</span>&gt;: cmp    x25, x20
+    <span class="number">0x18c84c700</span> &lt;+<span class="number">192</span>&gt;: b.ne   <span class="number">0x18c84c718</span>               ; &lt;+<span class="number">216</span>&gt;
+    <span class="number">0x18c84c704</span> &lt;+<span class="number">196</span>&gt;: adrp   x8, <span class="number">124073</span>
+    <span class="number">0x18c84c708</span> &lt;+<span class="number">200</span>&gt;: ldr    x1, [x8, <span class="preprocessor">#<span class="number">0x3c8</span>]</span>
+
+    <span class="comment">// 如果不是，就把旧的tableview的delegate置为nil</span>
+    <span class="number">0x18c84c70c</span> &lt;+<span class="number">204</span>&gt;: mov    x2, <span class="preprocessor">#<span class="number">0x0</span></span>
+    <span class="number">0x18c84c710</span> &lt;+<span class="number">208</span>&gt;: mov    x0, x21
+    <span class="number">0x18c84c714</span> &lt;+<span class="number">212</span>&gt;: bl     <span class="number">0x1851c2f60</span>               ; objc_msgSend
+    <span class="number">0x18c84c718</span> &lt;+<span class="number">216</span>&gt;: adrp   x8, <span class="number">124080</span>
+    <span class="number">0x18c84c71c</span> &lt;+<span class="number">220</span>&gt;: ldr    x1, [x8, <span class="preprocessor">#<span class="number">0xe80</span>]</span>
+    <span class="number">0x18c84c720</span> &lt;+<span class="number">224</span>&gt;: mov    x0, x21
+    <span class="number">0x18c84c724</span> &lt;+<span class="number">228</span>&gt;: bl     <span class="number">0x1851c2f60</span>               ; objc_msgSend
+    <span class="number">0x18c84c728</span> &lt;+<span class="number">232</span>&gt;: mov    x29, x29
+    <span class="number">0x18c84c72c</span> &lt;+<span class="number">236</span>&gt;: bl     <span class="number">0x1851ca48c</span>               ; objc_retainAutoreleasedReturnValue
+    <span class="number">0x18c84c730</span> &lt;+<span class="number">240</span>&gt;: mov    x25, x0
+
+    <span class="comment">// 将uitableviewcontroller的tableview通过setView:置为新的</span>
+    <span class="number">0x18c84c734</span> &lt;+<span class="number">244</span>&gt;: adrp   x8, <span class="number">124076</span>
+    <span class="number">0x18c84c738</span> &lt;+<span class="number">248</span>&gt;: ldr    x1, [x8, <span class="preprocessor">#<span class="number">0x4b0</span>]</span>
+    <span class="number">0x18c84c73c</span> &lt;+<span class="number">252</span>&gt;: mov    x0, x20
+    <span class="number">0x18c84c740</span> &lt;+<span class="number">256</span>&gt;: mov    x2, x19
+    <span class="number">0x18c84c744</span> &lt;+<span class="number">260</span>&gt;: bl     <span class="number">0x1851c2f60</span>               ; objc_msgSend
+
+    <span class="comment">// 新的tableview的datasource判断是不是为空，为空通过_applyDefaultDataSourceToTable将其UIFilteredDataSource</span>
+    <span class="number">0x18c84c748</span> &lt;+<span class="number">264</span>&gt;: adrp   x8, <span class="number">124080</span>
+    <span class="number">0x18c84c74c</span> &lt;+<span class="number">268</span>&gt;: ldr    x1, [x8, <span class="preprocessor">#<span class="number">0x810</span>]</span>
+    <span class="number">0x18c84c750</span> &lt;+<span class="number">272</span>&gt;: mov    x0, x19
+    <span class="number">0x18c84c754</span> &lt;+<span class="number">276</span>&gt;: mov    x2, x25
+    <span class="number">0x18c84c758</span> &lt;+<span class="number">280</span>&gt;: bl     <span class="number">0x1851c2f60</span>               ; objc_msgSend
+    <span class="number">0x18c84c75c</span> &lt;+<span class="number">284</span>&gt;: mov    x0, x19
+    <span class="number">0x18c84c760</span> &lt;+<span class="number">288</span>&gt;: mov    x1, x23
+    <span class="number">0x18c84c764</span> &lt;+<span class="number">292</span>&gt;: bl     <span class="number">0x1851c2f60</span>               ; objc_msgSend
+    <span class="number">0x18c84c768</span> &lt;+<span class="number">296</span>&gt;: mov    x29, x29
+    <span class="number">0x18c84c76c</span> &lt;+<span class="number">300</span>&gt;: bl     <span class="number">0x1851ca48c</span>               ; objc_retainAutoreleasedReturnValue
+    <span class="number">0x18c84c770</span> &lt;+<span class="number">304</span>&gt;: mov    x23, x0
+    <span class="number">0x18c84c774</span> &lt;+<span class="number">308</span>&gt;: bl     <span class="number">0x1851c8150</span>               ; objc_release
+    <span class="number">0x18c84c778</span> &lt;+<span class="number">312</span>&gt;: cbnz   x23, <span class="number">0x18c84c790</span>          ; &lt;+<span class="number">336</span>&gt;
+    <span class="number">0x18c84c77c</span> &lt;+<span class="number">316</span>&gt;: adrp   x8, <span class="number">124100</span>
+    <span class="number">0x18c84c780</span> &lt;+<span class="number">320</span>&gt;: ldr    x1, [x8, <span class="preprocessor">#<span class="number">0xd80</span>]</span>
+    <span class="number">0x18c84c784</span> &lt;+<span class="number">324</span>&gt;: mov    x0, x20
+    <span class="number">0x18c84c788</span> &lt;+<span class="number">328</span>&gt;: mov    x2, x19
+    <span class="number">0x18c84c78c</span> &lt;+<span class="number">332</span>&gt;: bl     <span class="number">0x1851c2f60</span>               ; objc_msgSend
+
+    <span class="comment">// 新的tableview的delegaate判断是不是为空，为空通过将delegate置为self（即当前的UITableViewController）</span>
+    <span class="number">0x18c84c790</span> &lt;+<span class="number">336</span>&gt;: mov    x0, x19
+    <span class="number">0x18c84c794</span> &lt;+<span class="number">340</span>&gt;: mov    x1, x24
+    <span class="number">0x18c84c798</span> &lt;+<span class="number">344</span>&gt;: bl     <span class="number">0x1851c2f60</span>               ; objc_msgSend
+    <span class="number">0x18c84c79c</span> &lt;+<span class="number">348</span>&gt;: mov    x29, x29
+    <span class="number">0x18c84c7a0</span> &lt;+<span class="number">352</span>&gt;: bl     <span class="number">0x1851ca48c</span>               ; objc_retainAutoreleasedReturnValue
+    <span class="number">0x18c84c7a4</span> &lt;+<span class="number">356</span>&gt;: mov    x23, x0
+    <span class="number">0x18c84c7a8</span> &lt;+<span class="number">360</span>&gt;: bl     <span class="number">0x1851c8150</span>               ; objc_release
+
+
+    <span class="number">0x18c84c7ac</span> &lt;+<span class="number">364</span>&gt;: cbnz   x23, <span class="number">0x18c84c7c4</span>          ; &lt;+<span class="number">388</span>&gt;
+    <span class="number">0x18c84c7b0</span> &lt;+<span class="number">368</span>&gt;: adrp   x8, <span class="number">124073</span>
+    <span class="number">0x18c84c7b4</span> &lt;+<span class="number">372</span>&gt;: ldr    x1, [x8, <span class="preprocessor">#<span class="number">0x3c8</span>]</span>
+    <span class="number">0x18c84c7b8</span> &lt;+<span class="number">376</span>&gt;: mov    x0, x19
+    <span class="number">0x18c84c7bc</span> &lt;+<span class="number">380</span>&gt;: mov    x2, x20
+    <span class="number">0x18c84c7c0</span> &lt;+<span class="number">384</span>&gt;: bl     <span class="number">0x1851c2f60</span>               ; objc_msgSend
+    <span class="number">0x18c84c7c4</span> &lt;+<span class="number">388</span>&gt;: mov    x0, x25
+    <span class="number">0x18c84c7c8</span> &lt;+<span class="number">392</span>&gt;: bl     <span class="number">0x1851c8150</span>               ; objc_release
+    <span class="number">0x18c84c7cc</span> &lt;+<span class="number">396</span>&gt;: mov    x0, x22
+    <span class="number">0x18c84c7d0</span> &lt;+<span class="number">400</span>&gt;: bl     <span class="number">0x1851c8150</span>               ; objc_release
+    <span class="number">0x18c84c7d4</span> &lt;+<span class="number">404</span>&gt;: mov    x0, x21
+    <span class="number">0x18c84c7d8</span> &lt;+<span class="number">408</span>&gt;: bl     <span class="number">0x1851c8150</span>               ; objc_release
+
+    <span class="comment">// 恢复寄存器</span>
+
+    <span class="number">0x18c84c7dc</span> &lt;+<span class="number">412</span>&gt;: mov    x0, x19
+    <span class="number">0x18c84c7e0</span> &lt;+<span class="number">416</span>&gt;: ldp    x29, x30, [sp, <span class="preprocessor">#<span class="number">0x40</span>]</span>
+    <span class="number">0x18c84c7e4</span> &lt;+<span class="number">420</span>&gt;: ldp    x20, x19, [sp, <span class="preprocessor">#<span class="number">0x30</span>]</span>
+    <span class="number">0x18c84c7e8</span> &lt;+<span class="number">424</span>&gt;: ldp    x22, x21, [sp, <span class="preprocessor">#<span class="number">0x20</span>]</span>
+    <span class="number">0x18c84c7ec</span> &lt;+<span class="number">428</span>&gt;: ldp    x24, x23, [sp, <span class="preprocessor">#<span class="number">0x10</span>]</span>
+    <span class="number">0x18c84c7f0</span> &lt;+<span class="number">432</span>&gt;: ldp    x26, x25, [sp], <span class="preprocessor">#<span class="number">0x50</span></span>
+    <span class="number">0x18c84c7f4</span> &lt;+<span class="number">436</span>&gt;: b      <span class="number">0x1851c8150</span>               ; objc_release
+</code></pre><ul>
+<li>一看到adrp, ldr的搭配，基本可以确定是取某个方法进行调用。</li>
+<li>看到一大堆的<code>bl objc_retain</code>，<code>bl objc_release</code>，不用管，反正都是ARC帮我们自动插入的。</li>
+<li>可以看出，当传入给UITableViewController的tableView含有<code>dataSource</code>和<code>delegate</code>，UITableViewController都不会对其进行处理；否则会进行一个默认的设置。</li>
+</ul>
+<p>我自己理解后转写的伪代码如下：</p>
+<pre><code><span class="built_in">UITableView</span> *oldTableView = [<span class="keyword">self</span> __existingTableView]; 
+
+<span class="keyword">if</span> (oldTableView == xxxtableView) {
+    <span class="keyword">return</span> 
+} <span class="keyword">else</span> {
+    <span class="keyword">id</span> oldDataSource = [oldTableView dataSource];
+    <span class="comment">// x21 被赋值成了oldTableView, x22 oldDataSource</span>
+
+    <span class="comment">// 取UITableViewController 792偏移的成员变量 filteredDataSource</span>
+    <span class="keyword">id</span> filteredDataSource = [<span class="keyword">self</span> _filteredDataSource];
+
+    <span class="keyword">if</span> (oldDataSource != filteredDataSource) 
+    {
+
+    } <span class="keyword">else</span> {
+        [oldTableView setDataSource:<span class="literal">nil</span>];
+    }
+
+    <span class="keyword">id</span> oldDelegate = [oldTableView delegate];
+    <span class="comment">// x25 被赋值了oldDelegate</span>
+
+    <span class="keyword">if</span> (oldeDelegate != <span class="keyword">self</span>)
+    {
+        <span class="keyword">goto</span> <span class="comment">//</span>
+    } <span class="keyword">else</span> {
+        [oldTableView setDelegate:<span class="literal">nil</span>];
+    }
+
+    <span class="keyword">id</span> oldRefreshControl = [oldTableView _refreshControl];
+    <span class="comment">// x25 被赋值了oldRefreshControl</span>
+
+    [<span class="keyword">self</span> setView:xxtableView];
+    [xxxtableView _setRefreshControl:oldRefreshControl];
+
+    <span class="keyword">id</span> newDataSource = [xxxtableview dataSource];
+    <span class="keyword">if</span> (!newDataSource) {
+        [<span class="keyword">self</span> _applyDefaultDataSourceToTable:xxxTableView];
+    }
+
+    <span class="keyword">id</span> newDelegate = [xxxtableview delegate];
+    <span class="keyword">if</span> (!newDelegate) {
+        [xxxTableView setDelegate:<span class="keyword">self</span>];
+    }
+}
+</code></pre><h3 id="结论">结论</h3><p>通过上面对汇编和伪代码的理解，我们可以很轻易的得出结论：当我们处于第一种情形的实现，我们将<code>tableview.delegate</code>设置成了我们的stub。因为不为空，所以<code>UITableViewController</code>默认不会对其进行处理，而由于我们当时没有提供stub对于<code>heightForRowAtIndexPath</code>的实现，导致出现了UC的bug。</p>
+]]></content>
+    <summary type="html">
+    <![CDATA[<h2 id="UIKit解剖（-）逆向UITableViewController分析Bug">UIKit解剖（-）逆向UITableViewController分析Bug</h2><p>之前在做XXXSDK的时候，我hook的<code>UITableView</code>的<]]>
+    </summary>
+    
+      <category term="Reverse Engineering" scheme="http://satanwoo.github.io/tags/Reverse-Engineering/"/>
+    
+      <category term="iOS" scheme="http://satanwoo.github.io/tags/iOS/"/>
+    
+  </entry>
   
   <entry>
     <title><![CDATA[微信高性能线上日志系统xlog剖析]]></title>
@@ -2879,95 +3132,6 @@ fi
     </summary>
     
       <category term="shell" scheme="http://satanwoo.github.io/tags/shell/"/>
-    
-  </entry>
-  
-  <entry>
-    <title><![CDATA[开发一个简单的Pod Install 插件]]></title>
-    <link href="http://satanwoo.github.io/2016/02/27/pod-install-plugin/"/>
-    <id>http://satanwoo.github.io/2016/02/27/pod-install-plugin/</id>
-    <published>2016-02-27T10:23:09.000Z</published>
-    <updated>2016-02-27T10:25:35.000Z</updated>
-    <content type="html"><![CDATA[<p>前几天刚刚粗略了学习了一下Xcode的插件开发，一时心痒，就准备做个简单的插件练练手。</p>
-<p>哎哟我擦，正当我准备大展身手的时候，我突然想到我该做个啥呢?  我这真是有了程序员，只差一个好Idea了。</p>
-<p>好吧，正巧这个时候，我发现我和朋友协作的一个iOS项目在两个分支上同步开发，每次要合并后拉下分支，都发现Pod.lock文件都产生了变化，无法编译成功。每当这个时候，我都要进入<code>terminal</code>输入一大堆的<code>cd ..</code>进入对应的文件目录执行<code>pod install</code>命令，甚是繁琐。</p>
-<p>当然啦，你可以通过<code>alias</code> 配置快速的执行命令，但是，你仍然得切换出Xcode的窗口，对于我们这种效率控来说不能接受。</p>
-<p>所以，我就想到了，在Xcode中利用插件集成一下关于pod的一些功能，同时绑定快捷键提高操作效率。</p>
-<p>说干就干。</p>
-<p>首先我们利用Xcode的plugin template生成项目的一些基本流程结构。关于插件的具体思路可以参考我之前的一篇文章《DXXcodeConsoleUnicodePlugin源码解析》</p>
-<p>在这里，我们着重介绍一下利用 <code>NSTask</code> 去执行诸如<code>pod install</code>这样的命令。</p>
-<h4 id="实现思路">实现思路</h4><p>在实现真正的<code>Objective-C</code>代码之前，我们首先现在<code>terminal</code>中随便找个安全的目录敲入<code>pod install</code>来试试看结果，如下所说：</p>
-<pre><code>pod install
-[!] <span class="keyword">No</span> <span class="label">`Podfile'</span> found <span class="keyword">in</span> the project directory.
-</code></pre><p>从这个错误提示中我们可以大致了解，<code>pod install</code>的命令依赖于所谓的<code>Podfile</code>。于是，我们输入<code>pod install --help</code>查看其对应的帮助手册：</p>
-<pre><code>-<span class="ruby">-project-directory=<span class="regexp">/project/dir</span><span class="regexp">/   The path to the root of the project
-</span></span>                                       directory
--<span class="ruby"><span class="regexp">-no-clean                          Leave SCM dirs like `.git` and `.svn`
-</span></span>                                       intact after downloading
--<span class="ruby"><span class="regexp">-no-integrate                      Skip integration of the Pods libraries
-</span></span>                                       in the Xcode project(s)
--<span class="ruby"><span class="regexp">-no-repo-update                    Skip running `pod repo update` before
-</span></span>                                       install
--<span class="ruby"><span class="regexp">-silent                            Show nothing
-</span></span>-<span class="ruby"><span class="regexp">-verbose                           Show more debugging information
-</span></span>-<span class="ruby"><span class="regexp">-no-ansi                           Show output without ANSI codes
-</span></span>-<span class="ruby"><span class="regexp">-help                              Show help banner of specified command</span></span>
-</code></pre><p>从第一条帮助命令张，我们可以看到，我们需要通过<strong>–project-directory=</strong>来设置<code>pod install</code>的根目录，也即<code>Podfile</code>的所在。</p>
-<p>好，事情到这里，我们在编写插件前需要的准备工作就基本完成了，我们现在只需利用<code>NSTask</code>将我们在命令行中输入的命令执行即可。</p>
-<p>让我们来看看实现的代码：</p>
-<pre><code> <span class="comment">// 1.</span>
- [<span class="keyword">self</span> searchMainProjectPath];
-
- <span class="comment">// 2.</span>
- <span class="built_in">NSTask</span> *podInstallAction = [[<span class="built_in">NSTask</span> alloc] init];
- podInstallAction<span class="variable">.currentDirectoryPath</span> = <span class="keyword">self</span><span class="variable">.mainProjectPath</span>;
- podInstallAction<span class="variable">.arguments</span> = @[<span class="string">@"install"</span>];
- podInstallAction<span class="variable">.launchPath</span> = <span class="string">@"/usr/bin/pod"</span>;
-
- <span class="comment">// 3.</span>
- <span class="built_in">NSPipe</span> *pipeOut = [<span class="built_in">NSPipe</span> pipe];
- [podInstallAction setStandardOutput:pipeOut];
- <span class="built_in">NSFileHandle</span> *output = [pipeOut fileHandleForReading];
-
- [output setReadabilityHandler:^(<span class="built_in">NSFileHandle</span> * _Nonnull fileHandler) {
-   <span class="built_in">NSData</span> *data = [fileHandler availableData];
-   <span class="built_in">NSString</span> *text = [[<span class="built_in">NSString</span> alloc] initWithData:data encoding:<span class="built_in">NSASCIIStringEncoding</span>];
-
-   <span class="built_in">NSLog</span>(<span class="string">@"text is %@"</span>, text);
- }];
-
-[podInstallAction launch];
-[podInstallAction waitUntilExit];
-</code></pre><ol>
-<li>我们首先要寻找到当前项目的主目录，也就是<code>Podfile</code>的路径</li>
-<li>然后我们构建NSTask，将其的执行目录设置成我们的主目录，然后<code>/usr/bin</code>中调出<code>pod</code>的可执行文件，执行<code>pod install</code>。</li>
-<li>我们利用NSPipe将默认的NSTask的输出(stdout)重定向到我们的指定的地方，这样有助于我们查看log或者进行流程工程。</li>
-</ol>
-<p>到这里，基本上一个简单的小插件就完成了，但是我在这里想要强调一点关于主工程路径搜索的一些问题，我们首先来看代码：</p>
-<pre><code><span class="built_in">NSArray</span> *workspaceWindowControllers = [<span class="built_in">NSClassFromString</span>(<span class="string">@"IDEWorkspaceWindowController"</span>) workspaceWindowControllers];
-[workspaceWindowControllers enumerateObjectsUsingBlock:^(<span class="keyword">id</span> controller, <span class="built_in">NSUInteger</span> idx, <span class="built_in">BOOL</span> *stop) {
-  <span class="keyword">if</span> ([[controller valueForKey:<span class="string">@"window"</span>] isMainWindow]) {
-    <span class="keyword">id</span> workspace = [controller valueForKey:<span class="string">@"_workspace"</span>];
-    <span class="built_in">NSString</span> *filePath = [[workspace valueForKey:<span class="string">@"representingFilePath"</span>] valueForKey:<span class="string">@"pathString"</span>];
-    <span class="built_in">NSString</span> *projectName = [[filePath lastPathComponent] stringByDeletingPathExtension];
-    <span class="built_in">NSLog</span>(<span class="string">@"CocoaPodUI::ProjectName::%@"</span>, projectName);
-
-    <span class="built_in">NSString</span> *text = [[filePath stringByDeletingLastPathComponent] stringByAppendingPathComponent:<span class="string">@"Podfile"</span>];
-
-    <span class="keyword">self</span><span class="variable">.mainProjectPath</span> = [filePath stringByDeletingLastPathComponent];
-
-    <span class="built_in">NSLog</span>(<span class="string">@"pod ifle is %@"</span>, text);
-  }
-}];
-</code></pre><p><strong>基于Xcode的插件开发实际上利用了大量的私有头文件。由于Objective-C著名的runtime特性，因此，很多时候，我们可以利用key-value-coding的方式获取我们普通途径下无法得到的结果。<br>同时，当有一个类的方法是私有方法的时候，你可以利用一个<code>category</code>声明同样的函数签名，不需要实现，<code>Objective-C</code>的runtime会自动帮你转发对应的<code>message passing</code>。</strong>。</p>
-]]></content>
-    <summary type="html">
-    <![CDATA[<p>前几天刚刚粗略了学习了一下Xcode的插件开发，一时心痒，就准备做个简单的插件练练手。</p>
-<p>哎哟我擦，正当我准备大展身手的时候，我突然想到我该做个啥呢?  我这真是有了程序员，只差一个好Idea了。</p>
-<p>好吧，正巧这个时候，我发现我和朋友协作的一个iOS]]>
-    </summary>
-    
-      <category term="iOS" scheme="http://satanwoo.github.io/tags/iOS/"/>
     
   </entry>
   

@@ -1,0 +1,498 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  
+  <title>UIKit解剖（-）逆向UITableViewController分析Bug | Hexo</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+  <meta name="description" content="UIKit解剖（-）逆向UITableViewController分析Bug之前在做XXXSDK的时候，我hook的UITableView的setDelegate:方法。整个SDK在接入手淘、天猫以及闲鱼等其他App的时候都没啥问题。
+上周，UC的同学突然找到说，给我说了如下图所示的问题：
+商业保密，不显示了
+卧槽，这下我就懵逼了，看样子是把整个rowHeight给Hook坏了，那这是为什么呢？">
+<meta property="og:type" content="article">
+<meta property="og:title" content="UIKit解剖（-）逆向UITableViewController分析Bug">
+<meta property="og:url" content="http://satanwoo.github.io/2017/08/06/UITableViewController/index.html">
+<meta property="og:site_name" content="Hexo">
+<meta property="og:description" content="UIKit解剖（-）逆向UITableViewController分析Bug之前在做XXXSDK的时候，我hook的UITableView的setDelegate:方法。整个SDK在接入手淘、天猫以及闲鱼等其他App的时候都没啥问题。
+上周，UC的同学突然找到说，给我说了如下图所示的问题：
+商业保密，不显示了
+卧槽，这下我就懵逼了，看样子是把整个rowHeight给Hook坏了，那这是为什么呢？">
+<meta property="og:image" content="https://raw.githubusercontent.com/SatanWoo/BeeHive/master/delegate.png?raw=true">
+<meta property="og:image" content="https://raw.githubusercontent.com/SatanWoo/BeeHive/master/stack.png?raw=true">
+<meta property="og:updated_time" content="2017-08-06T14:39:16.000Z">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="UIKit解剖（-）逆向UITableViewController分析Bug">
+<meta name="twitter:description" content="UIKit解剖（-）逆向UITableViewController分析Bug之前在做XXXSDK的时候，我hook的UITableView的setDelegate:方法。整个SDK在接入手淘、天猫以及闲鱼等其他App的时候都没啥问题。
+上周，UC的同学突然找到说，给我说了如下图所示的问题：
+商业保密，不显示了
+卧槽，这下我就懵逼了，看样子是把整个rowHeight给Hook坏了，那这是为什么呢？">
+  
+    <link rel="alternative" href="/atom.xml" title="Hexo" type="application/atom+xml">
+  
+  
+    <link rel="icon" href="/favicon.png">
+  
+  <link rel="stylesheet" href="/css/style.css" type="text/css">
+  
+
+</head>
+<body>
+  <div id="container">
+    <div id="wrap">
+      <header id="header">
+  <div id="banner"></div>
+  <div id="header-outer" class="outer">
+    <div id="header-title" class="inner">
+      <h1 id="logo-wrap">
+        <a href="/" id="logo">Hexo</a>
+      </h1>
+      
+    </div>
+    <div id="header-inner" class="inner">
+      <nav id="main-nav">
+        <a id="main-nav-toggle" class="nav-icon"></a>
+        
+          <a class="main-nav-link" href="/">Home</a>
+        
+          <a class="main-nav-link" href="/archives">Archives</a>
+        
+          <a class="main-nav-link" href="/sitemap.xml">map</a>
+        
+      </nav>
+      <nav id="sub-nav">
+        
+          <a id="nav-rss-link" class="nav-icon" href="/atom.xml" title="RSS Feed"></a>
+        
+        <a id="nav-search-btn" class="nav-icon" title="Search"></a>
+      </nav>
+      <div id="search-form-wrap">
+        <form action="//google.com/search" method="get" accept-charset="UTF-8" class="search-form"><input type="search" name="q" results="0" class="search-form-input" placeholder="Search"><button type="submit" class="search-form-submit">&#xF002;</button><input type="hidden" name="sitesearch" value="http://satanwoo.github.io"></form>
+      </div>
+    </div>
+  </div>
+</header>
+      <div class="outer">
+        <section id="main"><article id="post-UITableViewController" class="article article-type-post" itemscope itemprop="blogPost">
+  <div class="article-meta">
+    <a href="/2017/08/06/UITableViewController/" class="article-date">
+  <time datetime="2017-08-06T14:28:23.000Z" itemprop="datePublished">2017-08-06</time>
+</a>
+    
+  </div>
+  <div class="article-inner">
+    
+    
+      <header class="article-header">
+        
+  
+    <h1 class="article-title" itemprop="name">
+      UIKit解剖（-）逆向UITableViewController分析Bug
+    </h1>
+  
+
+      </header>
+    
+    <div class="article-entry" itemprop="articleBody">
+      
+        <h2 id="UIKit解剖（-）逆向UITableViewController分析Bug">UIKit解剖（-）逆向UITableViewController分析Bug</h2><p>之前在做XXXSDK的时候，我hook的<code>UITableView</code>的<code>setDelegate:</code>方法。整个SDK在接入手淘、天猫以及闲鱼等其他App的时候都没啥问题。</p>
+<p>上周，UC的同学突然找到说，给我说了如下图所示的问题：</p>
+<p><strong><span style="color:red">商业保密，不显示了</span></strong></p>
+<p>卧槽，这下我就懵逼了，看样子是把整个<code>rowHeight</code>给Hook坏了，那这是为什么呢？</p>
+<p>从开发<code>UITableView</code>的正向角度来说：我们一般都需要给其提供一个必选的<code>UITableViewDataSource</code>和一个可选的<code>UITableViewDelegate</code>，其中，涉及到高度的是如下这个API：</p>
+<pre><code><span class="tag">-</span> (<span class="tag">CGFloat</span>)<span class="rule"><span class="attribute">tableView</span>:<span class="value">(UITableView *)tableView heightForRowAtIndexPath:(NSIndexPath *)indexPath</span></span>;
+</code></pre><blockquote>
+<p>有人说可以直接通过tableview.rowHeight设置高度，但是对于不同cell不同高度的动态需求，但是这里我们暂不提这种分支情况。</p>
+</blockquote>
+<p>通过UC同学的协助，我们发现了如下输出：</p>
+<p><img src="https://raw.githubusercontent.com/SatanWoo/BeeHive/master/delegate.png?raw=true" alt=""></p>
+<p>通过输出不难发现，是最后的<code>delegate</code>被从对应的<code>UIViewController</code>改成了一个乱七八糟没实现对应<code>heightForRowAtIndexPath</code>方法的对象。</p>
+<p>为什么会这样呢？</p>
+<p>通过如下图所示的调用栈，</p>
+<p><img src="https://raw.githubusercontent.com/SatanWoo/BeeHive/master/stack.png?raw=true" alt=""></p>
+<p>调用栈最下层是UC同学的代码；</p>
+<p><code>self.tableview = [[xxxTableView alloc] init]</code></p>
+<p>调用栈最上层是我们的一层防护性hook，其代码如下：</p>
+<pre><code>+ (<span class="keyword">void</span>)load {
+    <span class="keyword">static</span> <span class="built_in">dispatch_once_t</span> onceToken;
+    <span class="built_in">dispatch_once</span>(&amp;onceToken, ^{
+        Swizzle([<span class="built_in">UIScrollView</span> class], <span class="keyword">@selector</span>(init), <span class="keyword">@selector</span>(swizzled_init));
+    });
+}
+
+- (instancetype)swizzled_init
+{
+    <span class="keyword">id</span> obj = [<span class="keyword">self</span> swizzled_init];
+    <span class="built_in">UIScrollView</span> *scrollView = (<span class="built_in">UIScrollView</span> *)obj;
+    <span class="keyword">if</span> (!scrollView<span class="variable">.delegate</span>) {
+        <span class="comment">//scrollView.delegate = [UIScrollViewDelegateDummyStub sharedStub];</span>
+    }
+    <span class="keyword">return</span> obj;
+}
+</code></pre><p>这段代码是什么作用呢？</p>
+<p><span style="color:red"><strong>我们之前提了<code>UITableViewDelegate</code>不是必需，因此，为了能够抓去所有UITableView的代码，我们会提供一个内置的默认delegate(当时的实现存在bug，没有实现heightForRowAtIndexPath方法)</strong></span>。</p>
+<p>而且，为了防止我们的delegate覆盖了有delegate的情况，我们还特地做了<code>!scroll.delegate</code>的判断。</p>
+<p>按照我们的预期设想，存在两种时间顺序情况：</p>
+<ol>
+<li>我们的init先执行，此时肯定会进入我们设置默认的逻辑；然后当外部代码调用<code>tableview.delegate = xxx</code>的时候，会把我们这个替换掉，不会影响正常的逻辑。</li>
+<li>我们的init后执行（比如某些子类覆盖的情况），那这样的话，当子类已经设置好<code>delegate</code>后，压根不会进入我们的设置逻辑。</li>
+</ol>
+<p><strong>然而，就是这一小段看起来无错的代码导致了UC的App出现了文章开头的Bug。</strong></p>
+<h3 id="逆向分析UITableViewController">逆向分析UITableViewController</h3><p>基于<strong>10.2</strong>的UIKit，我们通过汇编来分析<code>-[UITableViewController setTableView:]</code>的流程：</p>
+<pre><code>     <span class="comment">// 保存寄存器</span>
+-&gt;  <span class="number">0x18c84c640</span> &lt;+<span class="number">0</span>&gt;:   stp    x26, x25, [sp, <span class="preprocessor">#-<span class="number">0x50</span>]!</span>
+    <span class="number">0x18c84c644</span> &lt;+<span class="number">4</span>&gt;:   stp    x24, x23, [sp, <span class="preprocessor">#<span class="number">0x10</span>]</span>
+    <span class="number">0x18c84c648</span> &lt;+<span class="number">8</span>&gt;:   stp    x22, x21, [sp, <span class="preprocessor">#<span class="number">0x20</span>]</span>
+    <span class="number">0x18c84c64c</span> &lt;+<span class="number">12</span>&gt;:  stp    x20, x19, [sp, <span class="preprocessor">#<span class="number">0x30</span>]</span>
+    <span class="number">0x18c84c650</span> &lt;+<span class="number">16</span>&gt;:  stp    x29, x30, [sp, <span class="preprocessor">#<span class="number">0x40</span>]</span>
+
+    <span class="comment">// 获取原先UITableViewController的旧tableView</span>
+    <span class="number">0x18c84c654</span> &lt;+<span class="number">20</span>&gt;:  add    x29, sp, <span class="preprocessor">#<span class="number">0x40</span>            ; =<span class="number">0x40</span> </span>
+    <span class="number">0x18c84c658</span> &lt;+<span class="number">24</span>&gt;:  mov    x20, x0
+    <span class="number">0x18c84c65c</span> &lt;+<span class="number">28</span>&gt;:  mov    x0, x2
+    <span class="number">0x18c84c660</span> &lt;+<span class="number">32</span>&gt;:  bl     <span class="number">0x1851c8090</span>               ; objc_retain
+    <span class="number">0x18c84c664</span> &lt;+<span class="number">36</span>&gt;:  mov    x19, x0
+    <span class="number">0x18c84c668</span> &lt;+<span class="number">40</span>&gt;:  adrp   x8, <span class="number">124100</span>
+    <span class="number">0x18c84c66c</span> &lt;+<span class="number">44</span>&gt;:  ldr    x1, [x8, <span class="preprocessor">#<span class="number">0xd78</span>]</span>
+    <span class="number">0x18c84c670</span> &lt;+<span class="number">48</span>&gt;:  mov    x0, x20
+    <span class="number">0x18c84c674</span> &lt;+<span class="number">52</span>&gt;:  bl     <span class="number">0x1851c2f60</span>               ; objc_msgSend
+    <span class="number">0x18c84c678</span> &lt;+<span class="number">56</span>&gt;:  mov    x29, x29
+    <span class="number">0x18c84c67c</span> &lt;+<span class="number">60</span>&gt;:  bl     <span class="number">0x1851ca48c</span>               ; objc_retainAutoreleasedReturnValue
+
+    <span class="comment">// 比较旧的tableview和新的tableview</span>
+    <span class="number">0x18c84c680</span> &lt;+<span class="number">64</span>&gt;:  mov    x21, x0
+    <span class="number">0x18c84c684</span> &lt;+<span class="number">68</span>&gt;:  cmp    x21, x19
+
+    <span class="comment">// 如果两个tableView一致，直接返回</span>
+    <span class="number">0x18c84c688</span> &lt;+<span class="number">72</span>&gt;:  b.eq   <span class="number">0x18c84c7d4</span>               ; &lt;+<span class="number">404</span>&gt;
+
+    <span class="comment">// 获取旧的tableView的datasource</span>
+    <span class="number">0x18c84c68c</span> &lt;+<span class="number">76</span>&gt;:  adrp   x8, <span class="number">124074</span>
+    <span class="number">0x18c84c690</span> &lt;+<span class="number">80</span>&gt;:  ldr    x23, [x8, <span class="preprocessor">#<span class="number">0x2e0</span>]</span>
+    <span class="number">0x18c84c694</span> &lt;+<span class="number">84</span>&gt;:  mov    x0, x21
+    <span class="number">0x18c84c698</span> &lt;+<span class="number">88</span>&gt;:  mov    x1, x23
+    <span class="number">0x18c84c69c</span> &lt;+<span class="number">92</span>&gt;:  bl     <span class="number">0x1851c2f60</span>               ; objc_msgSend
+    <span class="number">0x18c84c6a0</span> &lt;+<span class="number">96</span>&gt;:  mov    x29, x29
+    <span class="number">0x18c84c6a4</span> &lt;+<span class="number">100</span>&gt;: bl     <span class="number">0x1851ca48c</span>               ; objc_retainAutoreleasedReturnValue
+
+
+    <span class="comment">// 从self的成员对象便宜792处取出UIFilteredDataSource</span>
+    <span class="number">0x18c84c6a8</span> &lt;+<span class="number">104</span>&gt;: mov    x22, x0
+    <span class="number">0x18c84c6ac</span> &lt;+<span class="number">108</span>&gt;: adrp   x8, <span class="number">124145</span>
+    <span class="number">0x18c84c6b0</span> &lt;+<span class="number">112</span>&gt;: ldrsw  x8, [x8, <span class="preprocessor">#<span class="number">0x7ac</span>]</span>
+    <span class="number">0x18c84c6b4</span> &lt;+<span class="number">116</span>&gt;: ldr    x8, [x20, x8]
+    <span class="number">0x18c84c6b8</span> &lt;+<span class="number">120</span>&gt;: cmp    x22, x20
+    <span class="number">0x18c84c6bc</span> &lt;+<span class="number">124</span>&gt;: ccmp   x22, x8, <span class="preprocessor">#<span class="number">0x4</span>, ne</span>
+
+    <span class="comment">// 如果不一致，把旧的tableview的datasource 置为nil</span>
+    <span class="number">0x18c84c6c0</span> &lt;+<span class="number">128</span>&gt;: b.ne   <span class="number">0x18c84c6d8</span>               ; &lt;+<span class="number">152</span>&gt;
+    <span class="number">0x18c84c6c4</span> &lt;+<span class="number">132</span>&gt;: adrp   x8, <span class="number">124073</span>
+    <span class="number">0x18c84c6c8</span> &lt;+<span class="number">136</span>&gt;: ldr    x1, [x8, <span class="preprocessor">#<span class="number">0x3c0</span>]</span>
+    <span class="number">0x18c84c6cc</span> &lt;+<span class="number">140</span>&gt;: mov    x2, <span class="preprocessor">#<span class="number">0x0</span></span>
+    <span class="number">0x18c84c6d0</span> &lt;+<span class="number">144</span>&gt;: mov    x0, x21
+    <span class="number">0x18c84c6d4</span> &lt;+<span class="number">148</span>&gt;: bl     <span class="number">0x1851c2f60</span>               ; objc_msgSend
+
+    <span class="comment">// 获取旧的tableview的delegate</span>
+    <span class="number">0x18c84c6d8</span> &lt;+<span class="number">152</span>&gt;: adrp   x8, <span class="number">124074</span>
+    <span class="number">0x18c84c6dc</span> &lt;+<span class="number">156</span>&gt;: ldr    x24, [x8, <span class="preprocessor">#<span class="number">0x7d8</span>]</span>
+    <span class="number">0x18c84c6e0</span> &lt;+<span class="number">160</span>&gt;: mov    x0, x21
+    <span class="number">0x18c84c6e4</span> &lt;+<span class="number">164</span>&gt;: mov    x1, x24
+    <span class="number">0x18c84c6e8</span> &lt;+<span class="number">168</span>&gt;: bl     <span class="number">0x1851c2f60</span>               ; objc_msgSend
+    <span class="number">0x18c84c6ec</span> &lt;+<span class="number">172</span>&gt;: mov    x29, x29
+    <span class="number">0x18c84c6f0</span> &lt;+<span class="number">176</span>&gt;: bl     <span class="number">0x1851ca48c</span>               ; objc_retainAutoreleasedReturnValue
+        <span class="number">0x18c84c6f4</span> &lt;+<span class="number">180</span>&gt;: mov    x25, x0
+    <span class="number">0x18c84c6f8</span> &lt;+<span class="number">184</span>&gt;: bl     <span class="number">0x1851c8150</span>               ; objc_release
+
+    <span class="comment">// 判断旧的delegate是不是当前的UITableViewController</span>
+    <span class="number">0x18c84c6fc</span> &lt;+<span class="number">188</span>&gt;: cmp    x25, x20
+    <span class="number">0x18c84c700</span> &lt;+<span class="number">192</span>&gt;: b.ne   <span class="number">0x18c84c718</span>               ; &lt;+<span class="number">216</span>&gt;
+    <span class="number">0x18c84c704</span> &lt;+<span class="number">196</span>&gt;: adrp   x8, <span class="number">124073</span>
+    <span class="number">0x18c84c708</span> &lt;+<span class="number">200</span>&gt;: ldr    x1, [x8, <span class="preprocessor">#<span class="number">0x3c8</span>]</span>
+
+    <span class="comment">// 如果不是，就把旧的tableview的delegate置为nil</span>
+    <span class="number">0x18c84c70c</span> &lt;+<span class="number">204</span>&gt;: mov    x2, <span class="preprocessor">#<span class="number">0x0</span></span>
+    <span class="number">0x18c84c710</span> &lt;+<span class="number">208</span>&gt;: mov    x0, x21
+    <span class="number">0x18c84c714</span> &lt;+<span class="number">212</span>&gt;: bl     <span class="number">0x1851c2f60</span>               ; objc_msgSend
+    <span class="number">0x18c84c718</span> &lt;+<span class="number">216</span>&gt;: adrp   x8, <span class="number">124080</span>
+    <span class="number">0x18c84c71c</span> &lt;+<span class="number">220</span>&gt;: ldr    x1, [x8, <span class="preprocessor">#<span class="number">0xe80</span>]</span>
+    <span class="number">0x18c84c720</span> &lt;+<span class="number">224</span>&gt;: mov    x0, x21
+    <span class="number">0x18c84c724</span> &lt;+<span class="number">228</span>&gt;: bl     <span class="number">0x1851c2f60</span>               ; objc_msgSend
+    <span class="number">0x18c84c728</span> &lt;+<span class="number">232</span>&gt;: mov    x29, x29
+    <span class="number">0x18c84c72c</span> &lt;+<span class="number">236</span>&gt;: bl     <span class="number">0x1851ca48c</span>               ; objc_retainAutoreleasedReturnValue
+    <span class="number">0x18c84c730</span> &lt;+<span class="number">240</span>&gt;: mov    x25, x0
+
+    <span class="comment">// 将uitableviewcontroller的tableview通过setView:置为新的</span>
+    <span class="number">0x18c84c734</span> &lt;+<span class="number">244</span>&gt;: adrp   x8, <span class="number">124076</span>
+    <span class="number">0x18c84c738</span> &lt;+<span class="number">248</span>&gt;: ldr    x1, [x8, <span class="preprocessor">#<span class="number">0x4b0</span>]</span>
+    <span class="number">0x18c84c73c</span> &lt;+<span class="number">252</span>&gt;: mov    x0, x20
+    <span class="number">0x18c84c740</span> &lt;+<span class="number">256</span>&gt;: mov    x2, x19
+    <span class="number">0x18c84c744</span> &lt;+<span class="number">260</span>&gt;: bl     <span class="number">0x1851c2f60</span>               ; objc_msgSend
+
+    <span class="comment">// 新的tableview的datasource判断是不是为空，为空通过_applyDefaultDataSourceToTable将其UIFilteredDataSource</span>
+    <span class="number">0x18c84c748</span> &lt;+<span class="number">264</span>&gt;: adrp   x8, <span class="number">124080</span>
+    <span class="number">0x18c84c74c</span> &lt;+<span class="number">268</span>&gt;: ldr    x1, [x8, <span class="preprocessor">#<span class="number">0x810</span>]</span>
+    <span class="number">0x18c84c750</span> &lt;+<span class="number">272</span>&gt;: mov    x0, x19
+    <span class="number">0x18c84c754</span> &lt;+<span class="number">276</span>&gt;: mov    x2, x25
+    <span class="number">0x18c84c758</span> &lt;+<span class="number">280</span>&gt;: bl     <span class="number">0x1851c2f60</span>               ; objc_msgSend
+    <span class="number">0x18c84c75c</span> &lt;+<span class="number">284</span>&gt;: mov    x0, x19
+    <span class="number">0x18c84c760</span> &lt;+<span class="number">288</span>&gt;: mov    x1, x23
+    <span class="number">0x18c84c764</span> &lt;+<span class="number">292</span>&gt;: bl     <span class="number">0x1851c2f60</span>               ; objc_msgSend
+    <span class="number">0x18c84c768</span> &lt;+<span class="number">296</span>&gt;: mov    x29, x29
+    <span class="number">0x18c84c76c</span> &lt;+<span class="number">300</span>&gt;: bl     <span class="number">0x1851ca48c</span>               ; objc_retainAutoreleasedReturnValue
+    <span class="number">0x18c84c770</span> &lt;+<span class="number">304</span>&gt;: mov    x23, x0
+    <span class="number">0x18c84c774</span> &lt;+<span class="number">308</span>&gt;: bl     <span class="number">0x1851c8150</span>               ; objc_release
+    <span class="number">0x18c84c778</span> &lt;+<span class="number">312</span>&gt;: cbnz   x23, <span class="number">0x18c84c790</span>          ; &lt;+<span class="number">336</span>&gt;
+    <span class="number">0x18c84c77c</span> &lt;+<span class="number">316</span>&gt;: adrp   x8, <span class="number">124100</span>
+    <span class="number">0x18c84c780</span> &lt;+<span class="number">320</span>&gt;: ldr    x1, [x8, <span class="preprocessor">#<span class="number">0xd80</span>]</span>
+    <span class="number">0x18c84c784</span> &lt;+<span class="number">324</span>&gt;: mov    x0, x20
+    <span class="number">0x18c84c788</span> &lt;+<span class="number">328</span>&gt;: mov    x2, x19
+    <span class="number">0x18c84c78c</span> &lt;+<span class="number">332</span>&gt;: bl     <span class="number">0x1851c2f60</span>               ; objc_msgSend
+
+    <span class="comment">// 新的tableview的delegaate判断是不是为空，为空通过将delegate置为self（即当前的UITableViewController）</span>
+    <span class="number">0x18c84c790</span> &lt;+<span class="number">336</span>&gt;: mov    x0, x19
+    <span class="number">0x18c84c794</span> &lt;+<span class="number">340</span>&gt;: mov    x1, x24
+    <span class="number">0x18c84c798</span> &lt;+<span class="number">344</span>&gt;: bl     <span class="number">0x1851c2f60</span>               ; objc_msgSend
+    <span class="number">0x18c84c79c</span> &lt;+<span class="number">348</span>&gt;: mov    x29, x29
+    <span class="number">0x18c84c7a0</span> &lt;+<span class="number">352</span>&gt;: bl     <span class="number">0x1851ca48c</span>               ; objc_retainAutoreleasedReturnValue
+    <span class="number">0x18c84c7a4</span> &lt;+<span class="number">356</span>&gt;: mov    x23, x0
+    <span class="number">0x18c84c7a8</span> &lt;+<span class="number">360</span>&gt;: bl     <span class="number">0x1851c8150</span>               ; objc_release
+
+
+    <span class="number">0x18c84c7ac</span> &lt;+<span class="number">364</span>&gt;: cbnz   x23, <span class="number">0x18c84c7c4</span>          ; &lt;+<span class="number">388</span>&gt;
+    <span class="number">0x18c84c7b0</span> &lt;+<span class="number">368</span>&gt;: adrp   x8, <span class="number">124073</span>
+    <span class="number">0x18c84c7b4</span> &lt;+<span class="number">372</span>&gt;: ldr    x1, [x8, <span class="preprocessor">#<span class="number">0x3c8</span>]</span>
+    <span class="number">0x18c84c7b8</span> &lt;+<span class="number">376</span>&gt;: mov    x0, x19
+    <span class="number">0x18c84c7bc</span> &lt;+<span class="number">380</span>&gt;: mov    x2, x20
+    <span class="number">0x18c84c7c0</span> &lt;+<span class="number">384</span>&gt;: bl     <span class="number">0x1851c2f60</span>               ; objc_msgSend
+    <span class="number">0x18c84c7c4</span> &lt;+<span class="number">388</span>&gt;: mov    x0, x25
+    <span class="number">0x18c84c7c8</span> &lt;+<span class="number">392</span>&gt;: bl     <span class="number">0x1851c8150</span>               ; objc_release
+    <span class="number">0x18c84c7cc</span> &lt;+<span class="number">396</span>&gt;: mov    x0, x22
+    <span class="number">0x18c84c7d0</span> &lt;+<span class="number">400</span>&gt;: bl     <span class="number">0x1851c8150</span>               ; objc_release
+    <span class="number">0x18c84c7d4</span> &lt;+<span class="number">404</span>&gt;: mov    x0, x21
+    <span class="number">0x18c84c7d8</span> &lt;+<span class="number">408</span>&gt;: bl     <span class="number">0x1851c8150</span>               ; objc_release
+
+    <span class="comment">// 恢复寄存器</span>
+
+    <span class="number">0x18c84c7dc</span> &lt;+<span class="number">412</span>&gt;: mov    x0, x19
+    <span class="number">0x18c84c7e0</span> &lt;+<span class="number">416</span>&gt;: ldp    x29, x30, [sp, <span class="preprocessor">#<span class="number">0x40</span>]</span>
+    <span class="number">0x18c84c7e4</span> &lt;+<span class="number">420</span>&gt;: ldp    x20, x19, [sp, <span class="preprocessor">#<span class="number">0x30</span>]</span>
+    <span class="number">0x18c84c7e8</span> &lt;+<span class="number">424</span>&gt;: ldp    x22, x21, [sp, <span class="preprocessor">#<span class="number">0x20</span>]</span>
+    <span class="number">0x18c84c7ec</span> &lt;+<span class="number">428</span>&gt;: ldp    x24, x23, [sp, <span class="preprocessor">#<span class="number">0x10</span>]</span>
+    <span class="number">0x18c84c7f0</span> &lt;+<span class="number">432</span>&gt;: ldp    x26, x25, [sp], <span class="preprocessor">#<span class="number">0x50</span></span>
+    <span class="number">0x18c84c7f4</span> &lt;+<span class="number">436</span>&gt;: b      <span class="number">0x1851c8150</span>               ; objc_release
+</code></pre><ul>
+<li>一看到adrp, ldr的搭配，基本可以确定是取某个方法进行调用。</li>
+<li>看到一大堆的<code>bl objc_retain</code>，<code>bl objc_release</code>，不用管，反正都是ARC帮我们自动插入的。</li>
+<li>可以看出，当传入给UITableViewController的tableView含有<code>dataSource</code>和<code>delegate</code>，UITableViewController都不会对其进行处理；否则会进行一个默认的设置。</li>
+</ul>
+<p>我自己理解后转写的伪代码如下：</p>
+<pre><code><span class="built_in">UITableView</span> *oldTableView = [<span class="keyword">self</span> __existingTableView]; 
+
+<span class="keyword">if</span> (oldTableView == xxxtableView) {
+    <span class="keyword">return</span> 
+} <span class="keyword">else</span> {
+    <span class="keyword">id</span> oldDataSource = [oldTableView dataSource];
+    <span class="comment">// x21 被赋值成了oldTableView, x22 oldDataSource</span>
+
+    <span class="comment">// 取UITableViewController 792偏移的成员变量 filteredDataSource</span>
+    <span class="keyword">id</span> filteredDataSource = [<span class="keyword">self</span> _filteredDataSource];
+
+    <span class="keyword">if</span> (oldDataSource != filteredDataSource) 
+    {
+
+    } <span class="keyword">else</span> {
+        [oldTableView setDataSource:<span class="literal">nil</span>];
+    }
+
+    <span class="keyword">id</span> oldDelegate = [oldTableView delegate];
+    <span class="comment">// x25 被赋值了oldDelegate</span>
+
+    <span class="keyword">if</span> (oldeDelegate != <span class="keyword">self</span>)
+    {
+        <span class="keyword">goto</span> <span class="comment">//</span>
+    } <span class="keyword">else</span> {
+        [oldTableView setDelegate:<span class="literal">nil</span>];
+    }
+
+    <span class="keyword">id</span> oldRefreshControl = [oldTableView _refreshControl];
+    <span class="comment">// x25 被赋值了oldRefreshControl</span>
+
+    [<span class="keyword">self</span> setView:xxtableView];
+    [xxxtableView _setRefreshControl:oldRefreshControl];
+
+    <span class="keyword">id</span> newDataSource = [xxxtableview dataSource];
+    <span class="keyword">if</span> (!newDataSource) {
+        [<span class="keyword">self</span> _applyDefaultDataSourceToTable:xxxTableView];
+    }
+
+    <span class="keyword">id</span> newDelegate = [xxxtableview delegate];
+    <span class="keyword">if</span> (!newDelegate) {
+        [xxxTableView setDelegate:<span class="keyword">self</span>];
+    }
+}
+</code></pre><h3 id="结论">结论</h3><p>通过上面对汇编和伪代码的理解，我们可以很轻易的得出结论：当我们处于第一种情形的实现，我们将<code>tableview.delegate</code>设置成了我们的stub。因为不为空，所以<code>UITableViewController</code>默认不会对其进行处理，而由于我们当时没有提供stub对于<code>heightForRowAtIndexPath</code>的实现，导致出现了UC的bug。</p>
+
+      
+    </div>
+    <footer class="article-footer">
+      <a data-url="http://satanwoo.github.io/2017/08/06/UITableViewController/" data-id="cj60u3jiy000wdii183hk5pfu" class="article-share-link">Share</a>
+      
+        <a href="http://satanwoo.github.io/2017/08/06/UITableViewController/#disqus_thread" class="article-comment-link">Comments</a>
+      
+      
+  <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Reverse-Engineering/">Reverse Engineering</a></li><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
+
+    </footer>
+  </div>
+  
+    
+<nav id="article-nav">
+  
+  
+    <a href="/2017/07/30/xlog/" id="article-nav-older" class="article-nav-link-wrap">
+      <strong class="article-nav-caption">Older</strong>
+      <div class="article-nav-title">微信高性能线上日志系统xlog剖析</div>
+    </a>
+  
+</nav>
+
+  
+</article>
+
+<div id="disqus_thread"></div>
+<script>
+
+/**
+*  RECOMMENDED CONFIGURATION VARIABLES: EDIT AND UNCOMMENT THE SECTION BELOW TO INSERT DYNAMIC VALUES FROM YOUR PLATFORM OR CMS.
+*  LEARN WHY DEFINING THESE VARIABLES IS IMPORTANT: https://disqus.com/admin/universalcode/#configuration-variables*/
+/*
+var disqus_config = function () {
+this.page.url = PAGE_URL;  // Replace PAGE_URL with your page's canonical URL variable
+this.page.identifier = PAGE_IDENTIFIER; // Replace PAGE_IDENTIFIER with your page's unique identifier variable
+};
+*/
+(function() { // DON'T EDIT BELOW THIS LINE
+var d = document, s = d.createElement('script');
+s.src = 'https://satanwoo-2.disqus.com/embed.js';
+s.setAttribute('data-timestamp', +new Date());
+(d.head || d.body).appendChild(s);
+})();
+</script>
+<noscript>Please enable JavaScript to view the <a href="https://disqus.com/?ref_noscript">comments powered by Disqus.</a></noscript>
+                                
+  <section id="comments">
+    <div id="disqus_thread">
+      <noscript>Please enable JavaScript to view the <a href="//disqus.com/?ref_noscript">comments powered by Disqus.</a></noscript>
+    </div>
+  </section>
+</section>
+        
+          <aside id="sidebar">
+  
+    
+  
+    
+  <div class="widget-wrap">
+    <h3 class="widget-title">Tags</h3>
+    <div class="widget">
+      <ul class="tag-list"><li class="tag-list-item"><a class="tag-list-link" href="/tags/Android/">Android</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/C/">C</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Growth/">Growth</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/JavaScript/">JavaScript</a><span class="tag-list-count">3</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Math/">Math</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Performance/">Performance</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/R/">R</a><span class="tag-list-count">2</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Reverse-Engineering/">Reverse Engineering</a><span class="tag-list-count">4</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Swift/">Swift</a><span class="tag-list-count">6</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/iOS/">iOS</a><span class="tag-list-count">27</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/shell/">shell</a><span class="tag-list-count">1</span></li></ul>
+    </div>
+  </div>
+
+  
+    
+  <div class="widget-wrap">
+    <h3 class="widget-title">Tag Cloud</h3>
+    <div class="widget tagcloud">
+      <a href="/tags/Android/" style="font-size: 10px;">Android</a> <a href="/tags/C/" style="font-size: 10px;">C</a> <a href="/tags/Growth/" style="font-size: 10px;">Growth</a> <a href="/tags/JavaScript/" style="font-size: 14px;">JavaScript</a> <a href="/tags/Math/" style="font-size: 10px;">Math</a> <a href="/tags/Performance/" style="font-size: 10px;">Performance</a> <a href="/tags/R/" style="font-size: 12px;">R</a> <a href="/tags/Reverse-Engineering/" style="font-size: 16px;">Reverse Engineering</a> <a href="/tags/Swift/" style="font-size: 18px;">Swift</a> <a href="/tags/iOS/" style="font-size: 20px;">iOS</a> <a href="/tags/shell/" style="font-size: 10px;">shell</a>
+    </div>
+  </div>
+
+  
+    
+  <div class="widget-wrap">
+    <h3 class="widget-title">Archives</h3>
+    <div class="widget">
+      <ul class="archive-list"><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/08/">August 2017</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/07/">July 2017</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/06/">June 2017</a><span class="archive-list-count">3</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/04/">April 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/01/">January 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/10/">October 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/09/">September 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/07/">July 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/05/">May 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/04/">April 2016</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/03/">March 2016</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/02/">February 2016</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/12/">December 2015</a><span class="archive-list-count">6</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/11/">November 2015</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/10/">October 2015</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/09/">September 2015</a><span class="archive-list-count">4</span></li></ul>
+    </div>
+  </div>
+
+  
+    
+  <div class="widget-wrap">
+    <h3 class="widget-title">Recents</h3>
+    <div class="widget">
+      <ul>
+        
+          <li>
+            <a href="/2017/08/06/UITableViewController/">UIKit解剖（-）逆向UITableViewController分析Bug</a>
+          </li>
+        
+          <li>
+            <a href="/2017/07/30/xlog/">微信高性能线上日志系统xlog剖析</a>
+          </li>
+        
+          <li>
+            <a href="/2017/06/29/Macho-2/">深入理解Macho文件（二）- 消失的__OBJC段与新生的__DATA段</a>
+          </li>
+        
+          <li>
+            <a href="/2017/06/13/Macho-1/">深入剖析Macho (1)</a>
+          </li>
+        
+          <li>
+            <a href="/2017/06/01/FBTweak/">从FBTweak 源码剖析一些中阶知识</a>
+          </li>
+        
+      </ul>
+    </div>
+  </div>
+
+  
+</aside>
+        
+      </div>
+      <footer id="footer">
+  
+  <div class="outer">
+    <div id="footer-info" class="inner">
+      &copy; 2017 John Doe<br>
+      Powered by <a href="http://hexo.io/" target="_blank">Hexo</a>
+    </div>
+  </div>
+</footer>
+    </div>
+    <nav id="mobile-nav">
+  
+    <a href="/" class="mobile-nav-link">Home</a>
+  
+    <a href="/archives" class="mobile-nav-link">Archives</a>
+  
+    <a href="/sitemap.xml" class="mobile-nav-link">map</a>
+  
+</nav>
+    
+<script>
+  var disqus_shortname = 'satanwoo-2';
+  
+  var disqus_url = 'http://satanwoo.github.io/2017/08/06/UITableViewController/';
+  
+  (function(){
+    var dsq = document.createElement('script');
+    dsq.type = 'text/javascript';
+    dsq.async = true;
+    dsq.src = '//' + disqus_shortname + '.disqus.com/embed.js';
+    (document.getElementsByTagName('head')[0] || document.getElementsByTagName('body')[0]).appendChild(dsq);
+  })();
+</script>
+
+
+
+  <link rel="stylesheet" href="/fancybox/jquery.fancybox.css" type="text/css">
+  <script src="/fancybox/jquery.fancybox.pack.js" type="text/javascript"></script>
+
+
+<script src="/js/script.js" type="text/javascript"></script>
+
+  </div>
+</body>
+</html>
