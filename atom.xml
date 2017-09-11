@@ -4,7 +4,7 @@
   
   <link href="/atom.xml" rel="self"/>
   <link href="http://satanwoo.github.io/"/>
-  <updated>2017-08-06T14:43:12.000Z</updated>
+  <updated>2017-09-11T15:20:43.000Z</updated>
   <id>http://satanwoo.github.io/</id>
   
   <author>
@@ -13,6 +13,290 @@
   </author>
   
   <generator uri="http://hexo.io/">Hexo</generator>
+  
+  <entry>
+    <title><![CDATA[KVO在不同的二进制中多个符号并存的Crash问题]]></title>
+    <link href="http://satanwoo.github.io/2017/09/11/KVO-CRASH/"/>
+    <id>http://satanwoo.github.io/2017/09/11/KVO-CRASH/</id>
+    <published>2017-09-11T15:14:29.000Z</published>
+    <updated>2017-09-11T15:20:43.000Z</updated>
+    <content type="html"><![CDATA[<p>现在各大公司的App容纳的功能越来越多，导致应用包大小越来越大。而苹果对于<code>text</code>段的大小现在在60MB，为了避免无法上架的问题，所以很多App都开始用了动态库来避免这个问题。</p>
+<p>这两天在帮支付宝开发一个功能的时候，由于支付宝许多模块的代码保密设计，因此只能采用动态库注入的方式进行调试。</p>
+<p>一开始都没啥问题，但是当我在调试一个API接口的时候，却出现了一个必现的和MBProgressHUD有关的Crash问题。今天就让我用这个Crash开始，来探讨下<strong><span style="color:red">KVO在不同的二进制中多个符号并存的Crash问题</span></strong>。</p>
+<h3 id="不同产物中同名符号的处理问题">不同产物中同名符号的处理问题</h3><p>我们都知道，在同一个编译-&gt;Link的最终产物中，符号（类、MetaClass、甚至是全局的函数符号）定义是不能重复的(当然，我们需要排除weak symbol)。否则在<code>ld</code>期间，就会报<code>duplicate symbol</code>这样的错误。</p>
+<p>但是在不同的最终产物里，比如一个主二进制和其相关的动态库，由于这两种MachO类型为产物完全脱离，因此在这两个产物中分别定义相同的符号是完全行得通的。</p>
+<p>有人会问了，那我们在主二进制中定义一个类，在动态库中又定义了一个同名的类，当我在主二进制中加载了动态库后，两个同名的类会冲突吗？</p>
+<p><strong><span style="color:red">答案是不会的</span></strong>，其原因在于苹果使用的是<code>two level namespace</code>的技术。在这种形式下，符号所在的“库”的名称也会作为符号的一部分。链接的时候，<code>staic linker</code>会标记住在这个符号是来自于哪个库的。这样不仅大大减少了<code>dyld</code>搜索符号所需要的时间，也更好对后续库的更新进行了兼容。</p>
+<h3 id="类的加载">类的加载</h3><p>熟悉<code>runtime</code>的人都知道，iOS中的类和其metaClass都是<code>objc_class</code>对象，这些“类”所代表的结构体，在编译期间都存在于Mach-O文件中了，位于<code>objc_data</code>这个section中。</p>
+<p><img src="https://github.com/SatanWoo/BeeHive/blob/master/kvo_crash_1.png?raw=true" alt=""></p>
+<p>而这个对象所包含的如方法、协议等等，则是以<code>class_ro_t</code>的形式存在于<code>objc_const</code>节中。</p>
+<pre><code><span class="keyword">struct</span> <span class="keyword">class_ro_t</span> {
+    <span class="keyword">uint32_t</span> flags;
+    <span class="keyword">uint32_t</span> instanceStart;
+    <span class="keyword">uint32_t</span> instanceSize;
+<span class="preprocessor">#<span class="keyword">ifdef</span> __LP64__</span>
+    <span class="keyword">uint32_t</span> reserved;
+<span class="preprocessor">#<span class="keyword">endif</span></span>
+
+    <span class="keyword">const</span> <span class="keyword">uint8_t</span> * ivarLayout;
+
+    <span class="keyword">const</span> <span class="keyword">char</span> * name;
+    <span class="keyword">method_list_t</span> * baseMethodList;
+    <span class="keyword">protocol_list_t</span> * baseProtocols;
+    <span class="keyword">const</span> <span class="keyword">ivar_list_t</span> * ivars;
+
+    <span class="keyword">const</span> <span class="keyword">uint8_t</span> * weakIvarLayout;
+    <span class="keyword">property_list_t</span> *baseProperties;
+
+    <span class="keyword">method_list_t</span> *baseMethods() <span class="keyword">const</span> {
+        <span class="keyword">return</span> baseMethodList;
+    }
+};
+</code></pre><p><img src="https://github.com/SatanWoo/BeeHive/blob/master/kvo_crash_2.png?raw=true" alt=""></p>
+<p>无论Mach-O的产物如何，这都是静态的数据。当我们在程序使用的过程中想调用这些类，都需要将这些类从二进制中读取并进行<code>realize</code>变成一个正确的类。而整个<code>realize</code>的过程，是在主二进制程序和其依赖的动态库加载完成后进行调用的，realize的过程如下：</p>
+<pre><code><span class="keyword">static</span> Class realizeClass(Class cls)
+{
+    runtimeLock.assertWriting();
+
+    <span class="keyword">const</span> class_ro_t *ro;
+    class_rw_t *rw;
+    Class supercls;
+    Class metacls;
+    <span class="keyword">bool</span> isMeta;
+
+    <span class="keyword">if</span> (!cls) <span class="keyword">return</span> nil;
+
+    <span class="comment">// 1. 如果realize过了，就直接返回了</span>
+    <span class="keyword">if</span> (cls-&gt;isRealized()) <span class="keyword">return</span> cls;
+    assert(cls == remapClass(cls));
+
+    <span class="comment">// fixme verify class is not in an un-dlopened part of the shared cache?</span>
+
+     <span class="comment">// 2. 读取刚刚提到的read only data，将其变成rw的data。</span>
+    ro = (<span class="keyword">const</span> class_ro_t *)cls-&gt;data();
+    <span class="keyword">if</span> (ro-&gt;flags &amp; RO_FUTURE) {
+        <span class="comment">// This was a future class. rw data is already allocated.</span>
+        rw = cls-&gt;data();
+        ro = cls-&gt;data()-&gt;ro;
+        cls-&gt;changeInfo(RW_REALIZED|RW_REALIZING, RW_FUTURE);
+    } <span class="keyword">else</span> {
+        <span class="comment">// Normal class. Allocate writeable class data.</span>
+        rw = (class_rw_t *)calloc(<span class="keyword">sizeof</span>(class_rw_t), <span class="number">1</span>);
+        rw-&gt;ro = ro;
+        rw-&gt;flags = RW_REALIZED|RW_REALIZING;
+        cls-&gt;setData(rw);
+    }
+
+    isMeta = ro-&gt;flags &amp; RO_META;
+
+    rw-&gt;version = isMeta ? <span class="number">7</span> : <span class="number">0</span>;  <span class="comment">// old runtime went up to 6</span>
+
+
+    <span class="comment">// Choose an index for this class.</span>
+    <span class="comment">// Sets cls-&gt;instancesRequireRawIsa if indexes no more indexes are available</span>
+    cls-&gt;chooseClassArrayIndex();
+
+    <span class="keyword">if</span> (PrintConnecting) {
+        _objc_inform(<span class="string">"CLASS: realizing class '%s'%s %p %p #%u"</span>, 
+                     cls-&gt;nameForLogging(), isMeta ? <span class="string">" (meta)"</span> : <span class="string">""</span>, 
+                     (void*)cls, ro, cls-&gt;classArrayIndex());
+    }
+
+    <span class="comment">// Realize superclass and metaclass, if they aren't already.</span>
+    <span class="comment">// This needs to be done after RW_REALIZED is set above, for root classes.</span>
+    <span class="comment">// This needs to be done after class index is chosen, for root metaclasses.</span>
+
+    <span class="comment">// 注意点3：对父类和metaClass先进行realize</span>
+    supercls = realizeClass(remapClass(cls-&gt;superclass));
+    metacls = realizeClass(remapClass(cls-&gt;ISA()));
+
+#<span class="keyword">if</span> SUPPORT_NONPOINTER_ISA
+    <span class="comment">// Disable non-pointer isa for some classes and/or platforms.</span>
+    <span class="comment">// Set instancesRequireRawIsa.</span>
+    <span class="keyword">bool</span> instancesRequireRawIsa = cls-&gt;instancesRequireRawIsa();
+    <span class="keyword">bool</span> rawIsaIsInherited = <span class="keyword">false</span>;
+    <span class="keyword">static</span> <span class="keyword">bool</span> hackedDispatch = <span class="keyword">false</span>;
+
+    <span class="keyword">if</span> (DisableNonpointerIsa) {
+        <span class="comment">// Non-pointer isa disabled by environment or app SDK version</span>
+        instancesRequireRawIsa = <span class="keyword">true</span>;
+    }
+    <span class="keyword">else</span> <span class="keyword">if</span> (!hackedDispatch  &amp;&amp;  !(ro-&gt;flags &amp; RO_META)  &amp;&amp;  
+             <span class="number">0</span> == strcmp(ro-&gt;name, <span class="string">"OS_object"</span>)) 
+    {
+        <span class="comment">// hack for libdispatch et al - isa also acts as vtable pointer</span>
+        hackedDispatch = <span class="keyword">true</span>;
+        instancesRequireRawIsa = <span class="keyword">true</span>;
+    }
+    <span class="keyword">else</span> <span class="keyword">if</span> (supercls  &amp;&amp;  supercls-&gt;superclass  &amp;&amp;  
+             supercls-&gt;instancesRequireRawIsa()) 
+    {
+        <span class="comment">// This is also propagated by addSubclass() </span>
+        <span class="comment">// but nonpointer isa setup needs it earlier.</span>
+        <span class="comment">// Special case: instancesRequireRawIsa does not propagate </span>
+        <span class="comment">// from root class to root metaclass</span>
+        instancesRequireRawIsa = <span class="keyword">true</span>;
+        rawIsaIsInherited = <span class="keyword">true</span>;
+    }
+
+    <span class="keyword">if</span> (instancesRequireRawIsa) {
+        cls-&gt;setInstancesRequireRawIsa(rawIsaIsInherited);
+    }
+<span class="comment">// SUPPORT_NONPOINTER_ISA</span>
+#endif
+
+    <span class="comment">// Update superclass and metaclass in case of remapping</span>
+    <span class="comment">// 更新当前类的父类和meta类</span>
+    cls-&gt;superclass = supercls;
+    cls-&gt;initClassIsa(metacls);
+
+    <span class="comment">// Reconcile instance variable offsets / layout.</span>
+    <span class="comment">// This may reallocate class_ro_t, updating our ro variable.</span>
+    <span class="comment">// 如果有的话，对ivar进行重新的布局</span>
+    <span class="keyword">if</span> (supercls  &amp;&amp;  !isMeta) reconcileInstanceVariables(cls, supercls, ro);
+
+    <span class="comment">// Set fastInstanceSize if it wasn't set already.</span>
+    cls-&gt;setInstanceSize(ro-&gt;instanceSize);
+
+    <span class="comment">// Copy some flags from ro to rw</span>
+    <span class="keyword">if</span> (ro-&gt;flags &amp; RO_HAS_CXX_STRUCTORS) {
+        cls-&gt;setHasCxxDtor();
+        <span class="keyword">if</span> (! (ro-&gt;flags &amp; RO_HAS_CXX_DTOR_ONLY)) {
+            cls-&gt;setHasCxxCtor();
+        }
+    }
+
+    <span class="comment">// Connect this class to its superclass's subclass lists</span>
+    <span class="comment">// 简单理解就是构建层次结构的拓扑关系</span>
+    <span class="keyword">if</span> (supercls) {
+        addSubclass(supercls, cls);
+    } <span class="keyword">else</span> {
+        addRootClass(cls);
+    }
+
+    <span class="comment">// Attach categories</span>
+    <span class="comment">// 把category里面的东西也合并进来进来</span>
+    methodizeClass(cls);
+
+    <span class="keyword">return</span> cls;
+}
+</code></pre><p>从上述代码不难看出，整个过程非常简单，分为几个步骤：</p>
+<ul>
+<li>把从二进制里面读取的readonly data变成rw data，这也是我们在iOS编程中很多运行时黑魔法的基础。</li>
+<li>把父类和metaclass都realize一下，然后建立合理的层次依赖关系。</li>
+<li>根据父类的布局，把自己的<code>ivar</code>布局动态更新，这也是大名鼎鼎的<code>non-fragile layout</code></li>
+<li>把<code>category</code>里面的东西都加载进来。</li>
+<li>整个过程结束。</li>
+</ul>
+<h3 id="KVO的机制">KVO的机制</h3><p>说了这么多铺垫的知识，我们来开始分析下我们程序在加载动态库后会KVO Crash的原因。处于公司数据保密的原因，我构造了一个最简单的场景，这个主二进制和动态库都包含了<code>MBProgressHUD</code>对应的代码，</p>
+<p>我们可以通过<code>nm</code>来查看下符号：</p>
+<p><img src="https://github.com/SatanWoo/BeeHive/blob/master/kvo_crash_3.png?raw=true" alt=""></p>
+<p>在<code>MBProgressHUD</code>里面，有如下一段代码：</p>
+<pre><code>- (<span class="keyword">void</span>)registerForKVO {
+    <span class="keyword">for</span> (<span class="built_in">NSString</span> *keyPath <span class="keyword">in</span> [<span class="keyword">self</span> observableKeypaths]) {
+        [<span class="keyword">self</span> addObserver:<span class="keyword">self</span> forKeyPath:keyPath options:<span class="built_in">NSKeyValueObservingOptionNew</span> context:<span class="literal">NULL</span>];
+    }
+}
+</code></pre><p>它会分别对所有的对应属性进行KVO监听，由于KVO本身的机制是通过创建一个“xxxNotify_KVO类”，所以，整体的调用顺序如下图所示:</p>
+<p><img src="https://github.com/SatanWoo/BeeHive/blob/master/kvo_crash_4.png?raw=true" alt=""></p>
+<p>概括如下：</p>
+<ul>
+<li>整个流程会为<code>MBProgressHUD</code>这个类以<code>NSKVONotifying_MBProgressHUD</code>的名称，动态添加一个类。</li>
+<li>对KVO中使用到的监听的属性进行<code>setter</code>方法的覆写。</li>
+<li>对这个类构建和原先类的父子关系，注册到全局的类表中。</li>
+</ul>
+<p>这几个流程的代码分别如下：</p>
+<ol>
+<li><p>创建类代码非常简单，逻辑上就是这父类-子类的关系构建一个新的类出来：</p>
+<pre><code><span class="function">Class <span class="title">objc_allocateClassPair</span><span class="params">(Class superclass, <span class="keyword">const</span> <span class="keyword">char</span> *name, 
+                             size_t extraBytes)</span>
+</span>{
+    Class cls, meta;
+
+    <span class="function">rwlock_writer_t <span class="title">lock</span><span class="params">(runtimeLock)</span></span>;
+
+    <span class="comment">// Fail if the class name is in use.</span>
+    <span class="comment">// Fail if the superclass isn't kosher.</span>
+    <span class="keyword">if</span> (getClass(name)  ||  !verifySuperclass(superclass, <span class="keyword">true</span><span class="comment">/*rootOK*/</span>)) {
+        <span class="keyword">return</span> nil;
+    }
+
+    <span class="comment">// Allocate new classes.</span>
+    cls  = alloc_class_for_subclass(superclass, extraBytes);
+    meta = alloc_class_for_subclass(superclass, extraBytes);
+
+    <span class="comment">// fixme mangle the name if it looks swift-y?</span>
+    objc_initializeClassPair_internal(superclass, name, cls, meta);
+
+    <span class="keyword">return</span> cls;
+}
+</code></pre></li>
+<li><p>当创建完成后，就会对这个类进行<code>registerClassPair</code>的工作，这一步的目的很简单，就是将类注册到一个全局的map中<code>gdb_objc_realized_classes</code>。</p>
+</li>
+<li></li>
+</ol>
+<h3 id="Crash原因">Crash原因</h3><p>知道了原理，我们来分析Crash的原因就非常简单了，我们先看Crash的堆栈。</p>
+<p><img src="https://github.com/SatanWoo/BeeHive/blob/master/kvo_crash_5.png?raw=true" alt=""></p>
+<p>从汇编中不难看出，<code>[x19, #0x20]</code>对应的地址是个非法访问地址，导致了Crash。而<code>x19</code>寄存器又是从<code>x0</code>中赋值而来，根据函数<code>objc_registerClassPair</code>的参数，<code>x0</code>为<code>Class</code>，那很明显，就是从<code>Class</code>对象的<code>0x20</code>，即32 bytes偏移地方的数据。根据定义，</p>
+<pre><code><span class="class"><span class="keyword">struct</span> <span class="title">objc_class</span> : <span class="title">objc_object</span> {</span>
+    /<span class="regexp">/ Class ISA; /</span><span class="regexp">/ 8byte
+    Class superclass; /</span><span class="regexp">/ 8byte
+    cache_t cache;             /</span><span class="regexp">/ formerly cache pointer and vtable /</span><span class="regexp">/ 4 + 4 + 8
+    class_data_bits_t bits;    /</span><span class="regexp">/ class_rw_t * plus custom rr/alloc</span> flags
+</code></pre><p>我们要获取的数据就是bits。通过输出寄存器，我们发现<code>x0</code>为0，也就是nil。而<code>x0</code>又是从哪来的呢？</p>
+<p>倒推堆栈，我们发现，在函数<code>_NSKVONotifyingCreateInfoWithOriginalClass</code>，我们首先调用了<code>objc_allocateClassPair</code>，将其返回值传入<code>objc_registerClassPair</code>(ARM64 Calling Convention)</p>
+<p><img src="https://github.com/SatanWoo/BeeHive/blob/master/kvo_crash_6.png?raw=true" alt=""></p>
+<p>所以，问题的本质就出现在<code>allocateClassPair</code>返回了nil，而<code>allocateClassPair</code>只有在如下场景下才会返回nil。</p>
+<pre><code><span class="keyword">if</span> (getClass(name)  ||  !verifySuperclass(superclass, <span class="constant">true</span><span class="comment">/*rootOK*/</span>)) {
+    <span class="keyword">return</span> <span class="constant">nil</span>;
+}
+</code></pre><p>通过LLDB调试，在根据name查询<code>NSKVONotifying_MBProgressHUD</code>时，由于全局的类表已经存在了对应的类，所以在<code>getClass</code>就会返回之前注册的类，从而使得<code>allocate</code>直接返回了nil。</p>
+<pre><code><span class="type">NXMapTable</span> *gdb_objc_realized_classes;  // exported <span class="keyword">for</span> debuggers <span class="keyword">in</span> objc-gdb.h
+
+<span class="keyword">static</span> <span class="type">Class</span> getClass_impl(<span class="keyword">const</span> <span class="type">char</span> *name)
+{
+    runtimeLock.assertLocked();
+
+    // allocated <span class="keyword">in</span> _read_images
+    assert(gdb_objc_realized_classes);
+
+    // <span class="type">Try</span> runtime-allocated table
+    <span class="type">Class</span> <span class="literal">result</span> = (<span class="type">Class</span>)<span class="type">NXMapGet</span>(gdb_objc_realized_classes, name);
+    <span class="keyword">if</span> (<span class="literal">result</span>) <span class="keyword">return</span> <span class="literal">result</span>;
+
+    // <span class="type">Try</span> table <span class="keyword">from</span> dyld <span class="literal">shared</span> cache
+    <span class="keyword">return</span> getPreoptimizedClass(name);
+}
+
+<span class="keyword">static</span> <span class="type">Class</span> getClass(<span class="keyword">const</span> <span class="type">char</span> *name)
+{
+    runtimeLock.assertLocked();
+
+    // <span class="type">Try</span> name <span class="keyword">as</span>-<span class="keyword">is</span>
+    <span class="type">Class</span> <span class="literal">result</span> = getClass_impl(name);
+    <span class="keyword">if</span> (<span class="literal">result</span>) <span class="keyword">return</span> <span class="literal">result</span>;
+
+    // <span class="type">Try</span> <span class="type">Swift</span>-mangled equivalent <span class="keyword">of</span> the given name.
+    <span class="keyword">if</span> (<span class="type">char</span> *swName = copySwiftV1MangledName(name)) {
+        <span class="literal">result</span> = getClass_impl(swName);
+        free(swName);
+        <span class="keyword">return</span> <span class="literal">result</span>;
+    }
+
+    <span class="keyword">return</span> <span class="keyword">nil</span>;
+}
+</code></pre><h3 id="结论">结论</h3><p>当两个产物都有相同的类名时，这两个类都会被realize，都能够被正常调用。但是由于全局类表的存在，在动态创建KVO的子类时，只能产生一个。所以就导致allocate失败，从而引发register过程的Crash问题。</p>
+]]></content>
+    <summary type="html">
+    <![CDATA[<p>现在各大公司的App容纳的功能越来越多，导致应用包大小越来越大。而苹果对于<code>text</code>段的大小现在在60MB，为了避免无法上架的问题，所以很多App都开始用了动态库来避免这个问题。</p>
+<p>这两天在帮支付宝开发一个功能的时候，由于支付宝许多模块的]]>
+    </summary>
+    
+      <category term="Reverse Engineering" scheme="http://satanwoo.github.io/tags/Reverse-Engineering/"/>
+    
+      <category term="iOS" scheme="http://satanwoo.github.io/tags/iOS/"/>
+    
+  </entry>
   
   <entry>
     <title><![CDATA[UIKit解剖（-）逆向UITableViewController分析Bug]]></title>
@@ -3078,61 +3362,6 @@ val = edx(<span class="literal">true</span>)
     </summary>
     
       <category term="iOS" scheme="http://satanwoo.github.io/tags/iOS/"/>
-    
-  </entry>
-  
-  <entry>
-    <title><![CDATA[Check Pods Manifest.lock]]></title>
-    <link href="http://satanwoo.github.io/2016/02/27/check-manifest/"/>
-    <id>http://satanwoo.github.io/2016/02/27/check-manifest/</id>
-    <published>2016-02-27T10:23:21.000Z</published>
-    <updated>2016-02-27T10:31:40.000Z</updated>
-    <content type="html"><![CDATA[<p>初次看到这个题目的你，可能还不了解这是个啥。但是，我想下面这个错误提示，你肯定会非常熟悉：</p>
-<pre><code><span class="keyword">error</span>: The sandbox <span class="keyword">is</span> <span class="keyword">not</span> <span class="keyword">in</span> sync <span class="keyword">with</span> <span class="keyword">the</span>  
-Podfile.lock. Run 'pod install' <span class="keyword">or</span> update 
-your CocoaPods installation.
-</code></pre><p>没错，当我们使用<code>cocoapods</code>的时候，经常会遇到的一个问题。其原因在于我们本地的<code>manifest.lock</code>和通过<code>git</code>同步的<code>Pod.lock</code>的产生了差异。</p>
-<p><strong>注：manifest.lock简单可以理解为我们在本地执行一次<code>pod install</code>后生成的当前Podfile的状态的表征文件。而Pod.lock是同步他人更新过Podfile后的状态。</strong></p>
-<p>那么，这个差异报错的原因是什么呢？我们可以打开Xcode项目中对应的<code>Target</code>的<code>Build Phase</code>，可以发现，其中存在在一项名为<code>Check Pods Manifest.lock</code>，是一个<code>shell script</code>，内容如下：</p>
-<pre><code>// <span class="number">1.</span>
-diff <span class="string">"${PODS_ROOT}/../Podfile.lock"</span> <span class="string">"${PODS_ROOT}/Manifest.lock"</span> &gt; /dev/null
-
-// <span class="number">2.</span>
-<span class="keyword">if</span> <span class="string">[[ $? != 0 ]]</span> ; <span class="keyword">then</span>
-
-// <span class="number">3.</span>
-    cat &lt;&lt; EOM
-<span class="built_in">error</span>: The sandbox is <span class="keyword">not</span> <span class="keyword">in</span> sync with the Podfile.lock. Run <span class="string">'pod install'</span> <span class="keyword">or</span> update your CocoaPods installation.
-EOM
-    exit <span class="number">1</span>
-fi
-</code></pre><p>我们来解读下这段代码的意思：</p>
-<ol>
-<li><p>通过diff命令来检查<code>Podfile.lock</code>和<code>Manifest.lock</code>的区别。这个命令中的<code>&gt; /dev/null</code> 可以视为一个<strong>黑洞</strong>，等价于一个只读文件，所有写入它的内容都会永远丢失. 而尝试从它那儿读取内容则什么也读不到。由于在执行<code>diff</code>命令的过程中可能产生大量的标准输出，可能会干扰我们的的工作流程执行，所以我们将它们全部丢弃给<strong>黑洞</strong>，只关心<strong>返回值</strong>。</p>
-</li>
-<li><p><code>if [[ $? != 0 ]] then</code>这个命令指的上一个命令的返回值如果不等于0，就执行xxxx。其中$?也就代表着上一个命令<code>diff</code>的返回值。</p>
-</li>
-<li><p>好，如果返回值不为0，说明有差异，因此通过<code>cat &lt;&lt; EOM</code> 和 <code>EOM</code>将处于这两者之前的内容输出到标准输出。</p>
-</li>
-</ol>
-<h3 id="改造脚本">改造脚本</h3><p>好，既然我们已经读懂了上述的<code>shell script</code>，我们不如将这个错误的提示来进行整改，当有差异的情况下，自动去进行<code>pod install</code>。</p>
-<p>整体改造后的代码如下：</p>
-<pre><code><span class="comment">// 1.</span>
-diff <span class="string">"<span class="subst">${PODS_ROOT}</span>/../Podfile.lock"</span> <span class="string">"<span class="subst">${PODS_ROOT}</span>/Manifest.lock"</span> &gt; /dev/<span class="keyword">null</span>
-
-<span class="comment">// 2.</span>
-<span class="keyword">if</span> [[ $? != <span class="number">0</span> ]] ; then
-
-<span class="comment">// 3.</span>
-    pod install --project-directory=<span class="string">"<span class="subst">${PODS_ROOT}</span>/../"</span>
-fi
-</code></pre>]]></content>
-    <summary type="html">
-    <![CDATA[<p>初次看到这个题目的你，可能还不了解这是个啥。但是，我想下面这个错误提示，你肯定会非常熟悉：</p>
-<pre><code><span class="keyword">error</span>: The sandbox <span class="keyword">is</sp]]>
-    </summary>
-    
-      <category term="shell" scheme="http://satanwoo.github.io/tags/shell/"/>
     
   </entry>
   
