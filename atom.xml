@@ -4,7 +4,7 @@
   
   <link href="/atom.xml" rel="self"/>
   <link href="http://satanwoo.github.io/"/>
-  <updated>2017-09-11T15:20:43.000Z</updated>
+  <updated>2017-09-11T15:23:29.000Z</updated>
   <id>http://satanwoo.github.io/</id>
   
   <author>
@@ -19,7 +19,7 @@
     <link href="http://satanwoo.github.io/2017/09/11/KVO-CRASH/"/>
     <id>http://satanwoo.github.io/2017/09/11/KVO-CRASH/</id>
     <published>2017-09-11T15:14:29.000Z</published>
-    <updated>2017-09-11T15:20:43.000Z</updated>
+    <updated>2017-09-11T15:23:29.000Z</updated>
     <content type="html"><![CDATA[<p>现在各大公司的App容纳的功能越来越多，导致应用包大小越来越大。而苹果对于<code>text</code>段的大小现在在60MB，为了避免无法上架的问题，所以很多App都开始用了动态库来避免这个问题。</p>
 <p>这两天在帮支付宝开发一个功能的时候，由于支付宝许多模块的代码保密设计，因此只能采用动态库注入的方式进行调试。</p>
 <p>一开始都没啥问题，但是当我在调试一个API接口的时候，却出现了一个必现的和MBProgressHUD有关的Crash问题。今天就让我用这个Crash开始，来探讨下<strong><span style="color:red">KVO在不同的二进制中多个符号并存的Crash问题</span></strong>。</p>
@@ -202,8 +202,8 @@
 <p>概括如下：</p>
 <ul>
 <li>整个流程会为<code>MBProgressHUD</code>这个类以<code>NSKVONotifying_MBProgressHUD</code>的名称，动态添加一个类。</li>
-<li>对KVO中使用到的监听的属性进行<code>setter</code>方法的覆写。</li>
 <li>对这个类构建和原先类的父子关系，注册到全局的类表中。</li>
+<li>对KVO中使用到的监听的属性进行<code>setter</code>方法的覆写。</li>
 </ul>
 <p>这几个流程的代码分别如下：</p>
 <ol>
@@ -233,7 +233,8 @@
 </code></pre></li>
 <li><p>当创建完成后，就会对这个类进行<code>registerClassPair</code>的工作，这一步的目的很简单，就是将类注册到一个全局的map中<code>gdb_objc_realized_classes</code>。</p>
 </li>
-<li></li>
+<li><p>重写<code>setter, class, description</code>之类的</p>
+</li>
 </ol>
 <h3 id="Crash原因">Crash原因</h3><p>知道了原理，我们来分析Crash的原因就非常简单了，我们先看Crash的堆栈。</p>
 <p><img src="https://github.com/SatanWoo/BeeHive/blob/master/kvo_crash_5.png?raw=true" alt=""></p>
