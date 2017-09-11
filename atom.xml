@@ -4,7 +4,7 @@
   
   <link href="/atom.xml" rel="self"/>
   <link href="http://satanwoo.github.io/"/>
-  <updated>2017-09-11T15:23:29.000Z</updated>
+  <updated>2017-09-11T15:31:23.000Z</updated>
   <id>http://satanwoo.github.io/</id>
   
   <author>
@@ -19,7 +19,7 @@
     <link href="http://satanwoo.github.io/2017/09/11/KVO-CRASH/"/>
     <id>http://satanwoo.github.io/2017/09/11/KVO-CRASH/</id>
     <published>2017-09-11T15:14:29.000Z</published>
-    <updated>2017-09-11T15:23:29.000Z</updated>
+    <updated>2017-09-11T15:31:23.000Z</updated>
     <content type="html"><![CDATA[<p>现在各大公司的App容纳的功能越来越多，导致应用包大小越来越大。而苹果对于<code>text</code>段的大小现在在60MB，为了避免无法上架的问题，所以很多App都开始用了动态库来避免这个问题。</p>
 <p>这两天在帮支付宝开发一个功能的时候，由于支付宝许多模块的代码保密设计，因此只能采用动态库注入的方式进行调试。</p>
 <p>一开始都没啥问题，但是当我在调试一个API接口的时候，却出现了一个必现的和MBProgressHUD有关的Crash问题。今天就让我用这个Crash开始，来探讨下<strong><span style="color:red">KVO在不同的二进制中多个符号并存的Crash问题</span></strong>。</p>
@@ -52,7 +52,7 @@
         <span class="keyword">return</span> baseMethodList;
     }
 };
-</code></pre><p><img src="https://github.com/SatanWoo/BeeHive/blob/master/kvo_crash_2.png?raw=true" alt=""></p>
+</code></pre><p><img src="https://github.com/SatanWoo/BeeHive/blob/master/kvo_crash_5.png?raw=true" alt=""></p>
 <p>无论Mach-O的产物如何，这都是静态的数据。当我们在程序使用的过程中想调用这些类，都需要将这些类从二进制中读取并进行<code>realize</code>变成一个正确的类。而整个<code>realize</code>的过程，是在主二进制程序和其依赖的动态库加载完成后进行调用的，realize的过程如下：</p>
 <pre><code><span class="keyword">static</span> Class realizeClass(Class cls)
 {
@@ -190,7 +190,7 @@
 </ul>
 <h3 id="KVO的机制">KVO的机制</h3><p>说了这么多铺垫的知识，我们来开始分析下我们程序在加载动态库后会KVO Crash的原因。处于公司数据保密的原因，我构造了一个最简单的场景，这个主二进制和动态库都包含了<code>MBProgressHUD</code>对应的代码，</p>
 <p>我们可以通过<code>nm</code>来查看下符号：</p>
-<p><img src="https://github.com/SatanWoo/BeeHive/blob/master/kvo_crash_3.png?raw=true" alt=""></p>
+<p><img src="https://github.com/SatanWoo/BeeHive/blob/master/kvo_crash_6.png?raw=true" alt=""></p>
 <p>在<code>MBProgressHUD</code>里面，有如下一段代码：</p>
 <pre><code>- (<span class="keyword">void</span>)registerForKVO {
     <span class="keyword">for</span> (<span class="built_in">NSString</span> *keyPath <span class="keyword">in</span> [<span class="keyword">self</span> observableKeypaths]) {
@@ -198,7 +198,7 @@
     }
 }
 </code></pre><p>它会分别对所有的对应属性进行KVO监听，由于KVO本身的机制是通过创建一个“xxxNotify_KVO类”，所以，整体的调用顺序如下图所示:</p>
-<p><img src="https://github.com/SatanWoo/BeeHive/blob/master/kvo_crash_4.png?raw=true" alt=""></p>
+<p><img src="https://github.com/SatanWoo/BeeHive/blob/master/kvo_crash_2.png?raw=true" alt=""></p>
 <p>概括如下：</p>
 <ul>
 <li>整个流程会为<code>MBProgressHUD</code>这个类以<code>NSKVONotifying_MBProgressHUD</code>的名称，动态添加一个类。</li>
@@ -237,7 +237,7 @@
 </li>
 </ol>
 <h3 id="Crash原因">Crash原因</h3><p>知道了原理，我们来分析Crash的原因就非常简单了，我们先看Crash的堆栈。</p>
-<p><img src="https://github.com/SatanWoo/BeeHive/blob/master/kvo_crash_5.png?raw=true" alt=""></p>
+<p><img src="https://github.com/SatanWoo/BeeHive/blob/master/kvo_crash_3.png?raw=true" alt=""></p>
 <p>从汇编中不难看出，<code>[x19, #0x20]</code>对应的地址是个非法访问地址，导致了Crash。而<code>x19</code>寄存器又是从<code>x0</code>中赋值而来，根据函数<code>objc_registerClassPair</code>的参数，<code>x0</code>为<code>Class</code>，那很明显，就是从<code>Class</code>对象的<code>0x20</code>，即32 bytes偏移地方的数据。根据定义，</p>
 <pre><code><span class="class"><span class="keyword">struct</span> <span class="title">objc_class</span> : <span class="title">objc_object</span> {</span>
     /<span class="regexp">/ Class ISA; /</span><span class="regexp">/ 8byte
@@ -246,7 +246,7 @@
     class_data_bits_t bits;    /</span><span class="regexp">/ class_rw_t * plus custom rr/alloc</span> flags
 </code></pre><p>我们要获取的数据就是bits。通过输出寄存器，我们发现<code>x0</code>为0，也就是nil。而<code>x0</code>又是从哪来的呢？</p>
 <p>倒推堆栈，我们发现，在函数<code>_NSKVONotifyingCreateInfoWithOriginalClass</code>，我们首先调用了<code>objc_allocateClassPair</code>，将其返回值传入<code>objc_registerClassPair</code>(ARM64 Calling Convention)</p>
-<p><img src="https://github.com/SatanWoo/BeeHive/blob/master/kvo_crash_6.png?raw=true" alt=""></p>
+<p><img src="https://github.com/SatanWoo/BeeHive/blob/master/kvo_crash_4.png?raw=true" alt=""></p>
 <p>所以，问题的本质就出现在<code>allocateClassPair</code>返回了nil，而<code>allocateClassPair</code>只有在如下场景下才会返回nil。</p>
 <pre><code><span class="keyword">if</span> (getClass(name)  ||  !verifySuperclass(superclass, <span class="constant">true</span><span class="comment">/*rootOK*/</span>)) {
     <span class="keyword">return</span> <span class="constant">nil</span>;
