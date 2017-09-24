@@ -16,7 +16,7 @@
 <meta property="og:image" content="https://github.com/SatanWoo/BeeHive/blob/master/tram_1.png?raw=true">
 <meta property="og:image" content="https://github.com/SatanWoo/BeeHive/blob/master/tram_2.png?raw=true">
 <meta property="og:image" content="https://github.com/SatanWoo/BeeHive/blob/master/tram_4.png?raw=true">
-<meta property="og:updated_time" content="2017-09-24T14:51:36.000Z">
+<meta property="og:updated_time" content="2017-09-24T14:59:43.000Z">
 <meta name="twitter:card" content="summary">
 <meta name="twitter:title" content="基于桥的全量方法Hook方案 - 探究苹果主线程检查实现">
 <meta name="twitter:description" content="最近随着iOS11的正式发布，手淘／天猫也开始逐步用Xcode 9开始编译。在调试过程中，很多同事发现经常报许多API会报线程使用错误的问题。摸索了下，发现是Xcode 9里面带上了一个叫libMainThreadChecker.dylib的动态库，在运行时提供了主线程检查的功能，今天就从探究苹果的实现开始讲起。
@@ -261,56 +261,60 @@ WKContentExtensionStore
 </ul>
 <h3 id="0x2_自己实现">0x2 自己实现</h3><p>当时看到这，关于苹果的实现我觉得实在是太简单了，即使不用私有API，结合现在Github上的轮子我自己造一个估计1、2个小时就解决了。现在回想起来，自己还是<b style="color:red">too simple, sometimes native</b></p>
 <p>大致代码获取<code>UIKit</code>中<code>UIView</code>和<code>UIApplication</code>所有子类的代码如下：</p>
-<p>NSArray <em>findAllUIKitClasse()<br>{<br>    static NSMutableArray </em>viewClasses = nil;<br>    if (!viewClasses) return classes;</p>
-<pre><code>uint32_t image_count = _dyld_image_count();
-<span class="keyword">for</span> (uint32_t image_index = <span class="number">0</span>; image_index &lt; image_count; image_index++) {
-    <span class="keyword">const</span> my_macho_header *mach_header = (<span class="keyword">const</span> my_macho_header *)_dyld_get_image_header(image_index);
+<pre><code><span class="built_in">NSArray</span> *findAll<span class="built_in">UIKitClasse</span>()
+{
+    <span class="keyword">static</span> <span class="built_in">NSMutableArray</span> *viewClasses = <span class="literal">nil</span>;
+    <span class="keyword">if</span> (!viewClasses) <span class="keyword">return</span> classes;
 
-    <span class="keyword">const</span> <span class="keyword">char</span> *image_name = _dyld_get_image_name(image_index);
+    uint32_t image_count = _dyld_image_count();
+    <span class="keyword">for</span> (uint32_t image_index = <span class="number">0</span>; image_index &lt; image_count; image_index++) {
+        <span class="keyword">const</span> my_macho_header *mach_header = (<span class="keyword">const</span> my_macho_header *)_dyld_get_image_header(image_index);
 
-    <span class="built_in">NSString</span> *imageName = [<span class="built_in">NSString</span> stringWithUTF8String:image_name];
-    <span class="keyword">if</span> ([imageName hasSuffix:<span class="string">@"UIKit"</span>]) {
+        <span class="keyword">const</span> <span class="keyword">char</span> *image_name = _dyld_get_image_name(image_index);
 
-        <span class="keyword">unsigned</span> <span class="keyword">int</span> count;
-        <span class="keyword">const</span> <span class="keyword">char</span> **classes;
-        Dl_info info;
+        <span class="built_in">NSString</span> *imageName = [<span class="built_in">NSString</span> stringWithUTF8String:image_name];
+        <span class="keyword">if</span> ([imageName hasSuffix:<span class="string">@"UIKit"</span>]) {
 
-        dladdr(mach_header, &amp;info);
-        classes = objc_copyClassNamesForImage(info<span class="variable">.dli_fname</span>, &amp;count);
+            <span class="keyword">unsigned</span> <span class="keyword">int</span> count;
+            <span class="keyword">const</span> <span class="keyword">char</span> **classes;
+            Dl_info info;
 
-        <span class="keyword">for</span> (<span class="keyword">int</span> i = <span class="number">0</span>; i &lt; count; i++) {
-            <span class="keyword">const</span> <span class="keyword">char</span> *className = (<span class="keyword">const</span> <span class="keyword">char</span> *)classes[i];
+            dladdr(mach_header, &amp;info);
+            classes = objc_copyClassNamesForImage(info<span class="variable">.dli_fname</span>, &amp;count);
 
-            <span class="built_in">NSString</span> *classname = [<span class="built_in">NSString</span> stringWithUTF8String:className];
-            <span class="keyword">if</span> ([classname hasPrefix:<span class="string">@"_"</span>]) {
-                <span class="keyword">continue</span>;
-            }
+            <span class="keyword">for</span> (<span class="keyword">int</span> i = <span class="number">0</span>; i &lt; count; i++) {
+                <span class="keyword">const</span> <span class="keyword">char</span> *className = (<span class="keyword">const</span> <span class="keyword">char</span> *)classes[i];
 
-            Class cls = objc_getClass(className);
-            Class superCls = cls;
-
-            <span class="keyword">bool</span> isNeedChild = <span class="literal">NO</span>;
-            <span class="keyword">while</span> (superCls != [<span class="built_in">NSObject</span> class]) {
-
-                <span class="keyword">if</span> (superCls == <span class="built_in">NSClassFromString</span>(<span class="string">@"UIView"</span>) || superCls == <span class="built_in">NSClassFromString</span>(<span class="string">@"UIApplication"</span>)) {
-                    isNeedChild = <span class="literal">YES</span>;
-                    <span class="keyword">break</span>;
+                <span class="built_in">NSString</span> *classname = [<span class="built_in">NSString</span> stringWithUTF8String:className];
+                <span class="keyword">if</span> ([classname hasPrefix:<span class="string">@"_"</span>]) {
+                    <span class="keyword">continue</span>;
                 }
-                superCls = class_getSuperclass(superCls);
+
+                Class cls = objc_getClass(className);
+                Class superCls = cls;
+
+                <span class="keyword">bool</span> isNeedChild = <span class="literal">NO</span>;
+                <span class="keyword">while</span> (superCls != [<span class="built_in">NSObject</span> class]) {
+
+                    <span class="keyword">if</span> (superCls == <span class="built_in">NSClassFromString</span>(<span class="string">@"UIView"</span>) || superCls == <span class="built_in">NSClassFromString</span>(<span class="string">@"UIApplication"</span>)) {
+                        isNeedChild = <span class="literal">YES</span>;
+                        <span class="keyword">break</span>;
+                    }
+                    superCls = class_getSuperclass(superCls);
+                }
+
+                <span class="keyword">if</span> (isNeedChild) {
+                    <span class="comment">// 备注：需要在这同时对这个类的方法进行Hook。</span>
+                    [viewClasses addObject:cls];
+                }
             }
 
-            <span class="keyword">if</span> (isNeedChild) {
-                <span class="comment">// 备注：需要在这同时对这个类的方法进行Hook。</span>
-                [viewClasses addObject:cls];
-            }
+            <span class="keyword">break</span>;
         }
 
-        <span class="keyword">break</span>;
-    }
-
-<span class="keyword">return</span> viewClasses;
-</code></pre><p>}</p>
-<h4 id="2-1_现有方案Hook的缺陷">2.1 现有方案Hook的缺陷</h4><p>到这，我们就只差把这些类的方法都Hook掉就行了。传统的<code>Method Swizzling</code>肯定不行，那样我们需要对每个方法对应实现一个新的方法进行替换，工作量太大。所以我们需要一个思路能够<b>中心重定向整个过程。</b></p>
+    <span class="keyword">return</span> viewClasses;
+}
+</code></pre><h4 id="2-1_现有方案Hook的缺陷">2.1 现有方案Hook的缺陷</h4><p>到这，我们就只差把这些类的方法都Hook掉就行了。传统的<code>Method Swizzling</code>肯定不行，那样我们需要对每个方法对应实现一个新的方法进行替换，工作量太大。所以我们需要一个思路能够<b>中心重定向整个过程。</b></p>
 <p><b style="color:red">之前跟着网易iOS大佬刘培庆</b>学习iOS的时候，了解到了<code>AnyMethodLog</code>，听说能监控所有类所有方法的执行，于是我就直接套用了这个框架，嘿嘿，使用起来真方便，看起来大功告成了，<b>Build &amp; Run</b>。</p>
 <p>卧槽，怎么运行了就启动崩了，一脸懵逼。</p>
 <p><img src="https://github.com/SatanWoo/BeeHive/blob/master/tram_2.png?raw=true" alt=""></p>
@@ -408,14 +412,14 @@ WKContentExtensionStore
 <pre><code>每个方法置换到不同的IMP桥上 <span class="subst">-&gt; </span>从桥上反推出当前的调用关系（class和<span class="keyword">select</span><span class="subst">or</span>）<span class="subst">-&gt; </span>构造一个中间态新名字 <span class="subst">-&gt; </span>forwardingTargetForSelect<span class="subst">or</span>(<span class="built_in">self</span>, 中间态新名字) 
 </code></pre><p>OK，大功告成。具体桥的实现我待会再单独开篇博客讲一讲。</p>
 <p><b style="color:red">嘿嘿，看起来很简单的任务也学习到了不少新知识。一会把代码开源到Github上。</b></p>
-<h3 id="0x3_遗留问题">0x3 遗留问题</h3><p>我在开启Main Thread后，build了一次产物，但是在通过<code>Mach-O</code>文件中<code>Load Commands</code>部分的时候，却没有发现<code>libMainThreadChecker.dylib</code>的踪影，如下所示：</p>
+<h3 id="0x3_遗留问题">0x3 遗留问题</h3><p>我在开启<code>Main Thread Chekcer</code>后，build了一次产物，但是在通过<code>Mach-O</code>文件中<code>Load Commands</code>部分的时候，却没有发现<code>libMainThreadChecker.dylib</code>的踪影，如下所示：</p>
 <p><img src="https://github.com/SatanWoo/BeeHive/blob/master/tram_4.png?raw=true" alt=""></p>
 <p>符号断点<code>dlopen</code>也并没有发现这个动态库调用的踪影，所以非常好奇苹果是怎么加载这个动态库的，有大佬知道请赐教。</p>
 
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2017/09/24/mainthreadchecker1/" data-id="cj7yv5cjy000d4ri1lvbg7rkr" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2017/09/24/mainthreadchecker1/" data-id="cj7yveotu000dvhi1tpfo8ypo" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2017/09/24/mainthreadchecker1/#disqus_thread" class="article-comment-link">Comments</a>
       
