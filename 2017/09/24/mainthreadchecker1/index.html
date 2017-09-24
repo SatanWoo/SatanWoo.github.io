@@ -1,0 +1,579 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  
+  <title>基于桥的全量方法Hook方案 - 探究苹果主线程检查实现 | Hexo</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+  <meta name="description" content="最近随着iOS11的正式发布，手淘／天猫也开始逐步用Xcode 9开始编译。在调试过程中，很多同事发现经常报许多API会报线程使用错误的问题。摸索了下，发现是Xcode 9里面带上了一个叫libMainThreadChecker.dylib的动态库，在运行时提供了主线程检查的功能，今天就从探究苹果的实现开始讲起。
+0x1 苹果的实现把苹果的动态库拖入hopper里面看看，基本上扫一眼以后，比较可疑">
+<meta property="og:type" content="article">
+<meta property="og:title" content="基于桥的全量方法Hook方案 - 探究苹果主线程检查实现">
+<meta property="og:url" content="http://satanwoo.github.io/2017/09/24/mainthreadchecker1/index.html">
+<meta property="og:site_name" content="Hexo">
+<meta property="og:description" content="最近随着iOS11的正式发布，手淘／天猫也开始逐步用Xcode 9开始编译。在调试过程中，很多同事发现经常报许多API会报线程使用错误的问题。摸索了下，发现是Xcode 9里面带上了一个叫libMainThreadChecker.dylib的动态库，在运行时提供了主线程检查的功能，今天就从探究苹果的实现开始讲起。
+0x1 苹果的实现把苹果的动态库拖入hopper里面看看，基本上扫一眼以后，比较可疑">
+<meta property="og:image" content="https://github.com/SatanWoo/BeeHive/blob/master/tram_1.png?raw=true">
+<meta property="og:image" content="https://github.com/SatanWoo/BeeHive/blob/master/tram_2.png?raw=true">
+<meta property="og:image" content="https://github.com/SatanWoo/BeeHive/blob/master/tram_4.png?raw=true">
+<meta property="og:updated_time" content="2017-09-24T14:51:36.000Z">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="基于桥的全量方法Hook方案 - 探究苹果主线程检查实现">
+<meta name="twitter:description" content="最近随着iOS11的正式发布，手淘／天猫也开始逐步用Xcode 9开始编译。在调试过程中，很多同事发现经常报许多API会报线程使用错误的问题。摸索了下，发现是Xcode 9里面带上了一个叫libMainThreadChecker.dylib的动态库，在运行时提供了主线程检查的功能，今天就从探究苹果的实现开始讲起。
+0x1 苹果的实现把苹果的动态库拖入hopper里面看看，基本上扫一眼以后，比较可疑">
+  
+    <link rel="alternative" href="/atom.xml" title="Hexo" type="application/atom+xml">
+  
+  
+    <link rel="icon" href="/favicon.png">
+  
+  <link rel="stylesheet" href="/css/style.css" type="text/css">
+  
+
+</head>
+<body>
+  <div id="container">
+    <div id="wrap">
+      <header id="header">
+  <div id="banner"></div>
+  <div id="header-outer" class="outer">
+    <div id="header-title" class="inner">
+      <h1 id="logo-wrap">
+        <a href="/" id="logo">Hexo</a>
+      </h1>
+      
+    </div>
+    <div id="header-inner" class="inner">
+      <nav id="main-nav">
+        <a id="main-nav-toggle" class="nav-icon"></a>
+        
+          <a class="main-nav-link" href="/">Home</a>
+        
+          <a class="main-nav-link" href="/archives">Archives</a>
+        
+          <a class="main-nav-link" href="/sitemap.xml">map</a>
+        
+      </nav>
+      <nav id="sub-nav">
+        
+          <a id="nav-rss-link" class="nav-icon" href="/atom.xml" title="RSS Feed"></a>
+        
+        <a id="nav-search-btn" class="nav-icon" title="Search"></a>
+      </nav>
+      <div id="search-form-wrap">
+        <form action="//google.com/search" method="get" accept-charset="UTF-8" class="search-form"><input type="search" name="q" results="0" class="search-form-input" placeholder="Search"><button type="submit" class="search-form-submit">&#xF002;</button><input type="hidden" name="sitesearch" value="http://satanwoo.github.io"></form>
+      </div>
+    </div>
+  </div>
+</header>
+      <div class="outer">
+        <section id="main"><article id="post-mainthreadchecker1" class="article article-type-post" itemscope itemprop="blogPost">
+  <div class="article-meta">
+    <a href="/2017/09/24/mainthreadchecker1/" class="article-date">
+  <time datetime="2017-09-24T14:46:43.000Z" itemprop="datePublished">2017-09-24</time>
+</a>
+    
+  </div>
+  <div class="article-inner">
+    
+    
+      <header class="article-header">
+        
+  
+    <h1 class="article-title" itemprop="name">
+      基于桥的全量方法Hook方案 - 探究苹果主线程检查实现
+    </h1>
+  
+
+      </header>
+    
+    <div class="article-entry" itemprop="articleBody">
+      
+        <p>最近随着iOS11的正式发布，手淘／天猫也开始逐步用Xcode 9开始编译。在调试过程中，很多同事发现经常报许多API会报线程使用错误的问题。摸索了下，发现是Xcode 9里面带上了一个叫<code>libMainThreadChecker.dylib</code>的动态库，在运行时提供了主线程检查的功能，今天就从探究苹果的实现开始讲起。</p>
+<h3 id="0x1_苹果的实现">0x1 苹果的实现</h3><p>把苹果的动态库拖入hopper里面看看，基本上扫一眼以后，比较可疑的是<code>__library_initializer</code>和<code>__library_deintializer</code>。</p>
+<blockquote>
+<p>我看反汇编，第一直觉就是猜，然后都试一把。</p>
+</blockquote>
+<p>我们来看看其伪代码实现，可以分为几个部分来探究：</p>
+<h4 id="1-1_环境变量">1.1 环境变量</h4><p><img src="https://github.com/SatanWoo/BeeHive/blob/master/tram_1.png?raw=true" alt=""></p>
+<p>从图中不难看出，<code>libMainThreadChecker</code>的运行依赖于许多的环境变量，我们可以在<code>Xcode</code>-&gt;<code>Scheme</code>-&gt;<code>Arguments</code>里面一个个输入这些变量进行测试，我发现比较重要的是<code>MTC_VERBOSE</code>这个参数，使用后，可以输出究竟对于哪些类进行了线程监控。</p>
+<pre><code>...
+Swizzling <span class="class"><span class="keyword">class</span>: <span class="typename">UIKeyboardEmojiCollectionViewCell</span></span>
+Swizzling <span class="class"><span class="keyword">class</span>: <span class="typename">UIKeyboardEmojiSectionHeader</span></span>
+Swizzling <span class="class"><span class="keyword">class</span>: <span class="typename">UIPrinterSetupPINScrollView</span></span>
+Swizzling <span class="class"><span class="keyword">class</span>: <span class="typename">UIPrinterSetupPINView</span></span>
+Swizzling <span class="class"><span class="keyword">class</span>: <span class="typename">UIPrinterSetupConnectingView</span></span>
+Swizzling <span class="class"><span class="keyword">class</span>: <span class="typename">UICollectionViewTableHeaderFooterView</span></span>
+Swizzling <span class="class"><span class="keyword">class</span>: <span class="typename">UIPrinterSetupDisplayPINView</span></span>
+Swizzling <span class="class"><span class="keyword">class</span>: <span class="typename">UIStatusBarMapsCompassItemView</span></span>
+Swizzling <span class="class"><span class="keyword">class</span>: <span class="typename">UIStatusBarCarPlayTimeItemView</span></span>
+Swizzling <span class="class"><span class="keyword">class</span>: <span class="typename">UIKeyboardCandidateBarCell</span></span>
+Swizzling <span class="class"><span class="keyword">class</span>: <span class="typename">UIKeyboardCandidateBarCell_SecondaryCandidate</span></span>
+Swizzling <span class="class"><span class="keyword">class</span>: <span class="typename">UIActionSheetiOSDismissActionView</span></span>
+Swizzling <span class="class"><span class="keyword">class</span>: <span class="typename">UIKeyboardCandidateFloatingArrowView</span></span>
+Swizzling <span class="class"><span class="keyword">class</span>: <span class="typename">UIKeyboardCandidateGridOverlayBackgroundView</span></span>
+Swizzling <span class="class"><span class="keyword">class</span>: <span class="typename">UIKeyboardCandidateGridHeaderContainerView</span></span>
+Swizzling <span class="class"><span class="keyword">class</span>: <span class="typename">UIStatusBarBreadcrumbItemView</span></span>
+Swizzling <span class="class"><span class="keyword">class</span>: <span class="typename">UIInterfaceActionGroupView</span></span>
+Swizzling <span class="class"><span class="keyword">class</span>: <span class="typename">UIKeyboardFlipTransitionView</span></span>
+Swizzling <span class="class"><span class="keyword">class</span>: <span class="typename">UIKeyboardAssistantBar</span></span>
+Swizzling <span class="class"><span class="keyword">class</span>: <span class="typename">UITextMagnifier</span></span>
+Swizzling <span class="class"><span class="keyword">class</span>: <span class="typename">UIKeyboardSliceTransitionView</span></span>
+Swizzling <span class="class"><span class="keyword">class</span>: <span class="typename">UIWKSelectionView</span></span>
+Swizzled <span class="number">10717</span> methods <span class="keyword">in</span> <span class="number">384</span> classes.
+</code></pre><p>可以看出，苹果会在启动前对于这些类进行所谓的线程监控。</p>
+<h4 id="1-2_逻辑">1.2 逻辑</h4><p>看完了输出，我们来看看其中的逻辑实现，如下所示：</p>
+<pre><code>CFAbsoluteTimeGetCurrent();
+   var_270 = intrinsic_movsd(var_270, xmm0);
+   *_indirect__main_thread_checker_on_report = dlsym(<span class="number">0xfffffffffffffffd</span>, <span class="string">"__main_thread_checker_on_report"</span>);
+   <span class="keyword">if</span> (objc_getClass(<span class="string">"UIView"</span>) != <span class="number">0x0</span>) {
+           *_XXKitImage = dyld_image_header_containing_address(objc_getClass(<span class="string">"UIView"</span>));
+           *_CoreFoundationImage = dyld_image_header_containing_address(_CFArrayGetCount);
+           rax = objc_getClass(<span class="string">"WKWebView"</span>);
+           rax = dyld_image_header_containing_address(rax);
+           *_WebKitImage = rax;
+           *_InlineCallsMachHeaders = *_XXKitImage;
+           *<span class="number">0x1ec3e8</span> = *_CoreFoundationImage;
+           *<span class="number">0x1ec3f0</span> = rax;
+           *___CATransaction = objc_getClass(<span class="string">"CATransaction"</span>);
+           *___NSGraphicsContext = objc_getClass(<span class="string">"NSGraphicsContext"</span>);
+           *_SEL_currentState = sel_registerName(<span class="string">"currentState"</span>);
+           *_SEL_currentContext = sel_registerName(<span class="string">"currentContext"</span>);
+           *_MyOwnMachHeader = dyld_image_header_containing_address(___library_initializer);
+           *_classesToSwizzle = CFArrayCreateMutable(<span class="number">0x0</span>, <span class="number">0x200</span>, <span class="number">0x0</span>);
+           var_240 = objc_getClass(<span class="string">"UIView"</span>);
+           _FindClassesToSwizzleInImage(*_XXKitImage, &amp;var_240, <span class="number">0x2</span>);
+           <span class="keyword">if</span> (*_WebKitImage != <span class="number">0x0</span>) {
+                   var_230 = objc_getClass(<span class="string">"WKWebView"</span>);
+                   *(&amp;var_230 + <span class="number">0x8</span>) = objc_getClass(<span class="string">"WKWebsiteDataStore"</span>);
+                   *(&amp;var_230 + <span class="number">0x10</span>) = objc_getClass(<span class="string">"WKUserScript"</span>);
+                   *(&amp;var_230 + <span class="number">0x18</span>) = objc_getClass(<span class="string">"WKUserContentController"</span>);
+                   *(&amp;var_230 + <span class="number">0x20</span>) = objc_getClass(<span class="string">"WKScriptMessage"</span>);
+                   *(&amp;var_230 + <span class="number">0x28</span>) = objc_getClass(<span class="string">"WKProcessPool"</span>);
+                   *(&amp;var_230 + <span class="number">0x30</span>) = objc_getClass(<span class="string">"WKProcessGroup"</span>);
+                   *(&amp;var_230 + <span class="number">0x38</span>) = objc_getClass(<span class="string">"WKContentExtensionStore"</span>);
+                   _FindClassesToSwizzleInImage(*_WebKitImage, &amp;var_230, <span class="number">0x8</span>);
+           }
+           rcx = CFArrayGetCount(*_classesToSwizzle);
+           <span class="keyword">if</span> (rcx != <span class="number">0x0</span>) {
+                   rax = <span class="number">0x0</span>;
+                   var_278 = rcx;
+                   <span class="keyword">do</span> {
+                           var_288 = rax;
+                           rax = CFArrayGetValueAtIndex(*_classesToSwizzle, rax);
+                           var_258 = rax;
+                           rbx = objc_getClass(rax);
+                           var_290 = dyld_image_header_containing_address(rbx);
+                           var_230 = <span class="number">0x0</span>;
+                           var_280 = rbx;
+                           r14 = class_copyMethodList(rbx, &amp;var_230);
+                           <span class="keyword">if</span> (var_230 != <span class="number">0x0</span>) {
+                                   rbx = <span class="number">0x0</span>;
+                                   <span class="keyword">do</span> {
+                                           r13 = *(r14 + rbx * <span class="number">0x8</span>);
+                                           r12 = method_getName(r13);
+                                           r15 = sel_getName(r12);
+                                           <span class="keyword">if</span> ((((((((((((((((*(<span class="keyword">int8_t</span> *)r15 != <span class="number">0x5f</span>) &amp;&amp; (dyld_image_header_containing_address(method_getImplementation(r13)) == var_290)) &amp;&amp; (((*(<span class="keyword">int8_t</span> *)_envIgnoreRetainRelease == <span class="number">0x0</span>) || (((<span class="built_in">strcmp</span>(r15, <span class="string">"retain"</span>) != <span class="number">0x0</span>) &amp;&amp; (<span class="built_in">strcmp</span>(r15, <span class="string">"release"</span>) != <span class="number">0x0</span>)) &amp;&amp; (<span class="built_in">strcmp</span>(r15, <span class="string">"autorelease"</span>) != <span class="number">0x0</span>))))) &amp;&amp; (((*(<span class="keyword">int8_t</span> *)_envIgnoreDealloc == <span class="number">0x0</span>) || ((<span class="built_in">strcmp</span>(r15, <span class="string">"dealloc"</span>) != <span class="number">0x0</span>) &amp;&amp; (<span class="built_in">strcmp</span>(r15, <span class="string">".cxx_destruct"</span>) != <span class="number">0x0</span>))))) &amp;&amp; (((*(<span class="keyword">int8_t</span> *)_envIgnoreNSObjectThreadSafeMethods == <span class="number">0x0</span>) || ((((<span class="built_in">strcmp</span>(r15, <span class="string">"description"</span>) != <span class="number">0x0</span>) &amp;&amp; (<span class="built_in">strcmp</span>(r15, <span class="string">"debugDescription"</span>) != <span class="number">0x0</span>)) &amp;&amp; (<span class="built_in">strcmp</span>(r15, <span class="string">"self"</span>) != <span class="number">0x0</span>)) &amp;&amp; (<span class="built_in">strcmp</span>(r15, <span class="string">"class"</span>) != <span class="number">0x0</span>))))) &amp;&amp; (<span class="built_in">strcmp</span>(r15, <span class="string">"beginBackgroundTaskWithExpirationHandler:"</span>) != <span class="number">0x0</span>)) &amp;&amp; (<span class="built_in">strcmp</span>(r15, <span class="string">"beginBackgroundTaskWithName:expirationHandler:"</span>) != <span class="number">0x0</span>)) &amp;&amp; (<span class="built_in">strcmp</span>(r15, <span class="string">"endBackgroundTask:"</span>) != <span class="number">0x0</span>)) &amp;&amp; (<span class="built_in">strcmp</span>(r15, <span class="string">"lockFocus"</span>) != <span class="number">0x0</span>)) &amp;&amp; (<span class="built_in">strcmp</span>(r15, <span class="string">"lockFocusIfCanDraw"</span>) != <span class="number">0x0</span>)) &amp;&amp; (<span class="built_in">strcmp</span>(r15, <span class="string">"lockFocusIfCanDrawInContext:"</span>) != <span class="number">0x0</span>)) &amp;&amp; (<span class="built_in">strcmp</span>(r15, <span class="string">"unlockFocus"</span>) != <span class="number">0x0</span>)) &amp;&amp; (<span class="built_in">strcmp</span>(r15, <span class="string">"openGLContext"</span>) != <span class="number">0x0</span>)) &amp;&amp; (<span class="built_in">strncmp</span>(r15, <span class="string">"webThread"</span>, <span class="number">0x9</span>) != <span class="number">0x0</span>)) &amp;&amp; (<span class="built_in">strncmp</span>(r15, <span class="string">"nsli_"</span>, <span class="number">0x5</span>) != <span class="number">0x0</span>)) &amp;&amp; (<span class="built_in">strncmp</span>(r15, <span class="string">"nsis_"</span>, <span class="number">0x5</span>) != <span class="number">0x0</span>)) {
+                                                   <span class="keyword">if</span> (*_userSuppressedClasses != <span class="number">0x0</span>) {
+                                                           rax = CFStringCreateWithCStringNoCopy(<span class="number">0x0</span>, var_258, <span class="number">0x8000100</span>, *_kCFAllocatorNull);
+                                                           var_244 = CFSetContainsValue(*_userSuppressedClasses, rax) != <span class="number">0x0</span> ? <span class="number">0x1</span> : <span class="number">0x0</span>;
+                                                           CFRelease(rax);
+                                                   }
+                                                   <span class="keyword">else</span> {
+                                                           var_244 = <span class="number">0x0</span>;
+                                                   }
+                                                   <span class="keyword">if</span> (*_userSuppressedSelectors != <span class="number">0x0</span>) {
+                                                           rax = CFStringCreateWithCStringNoCopy(<span class="number">0x0</span>, r15, <span class="number">0x8000100</span>, *_kCFAllocatorNull);
+                                                           var_250 = rax;
+                                                           <span class="keyword">if</span> (CFSetContainsValue(*_userSuppressedSelectors, rax) != <span class="number">0x0</span>) {
+                                                                   var_244 = <span class="number">0x1</span>;
+                                                           }
+                                                           CFRelease(var_250);
+                                                   }
+                                                   <span class="keyword">if</span> (*_userSuppressedMethods != <span class="number">0x0</span>) {
+                                                           rax = CFStringCreateWithFormat(<span class="number">0x0</span>, <span class="number">0x0</span>, @<span class="string">"-[%s %s]"</span>);
+                                                           var_250 = CFSetContainsValue(*_userSuppressedMethods, rax);
+                                                           CFRelease(rax);
+                                                           rax = var_250 | var_244;
+                                                           <span class="keyword">if</span> (rax == <span class="number">0x0</span>) {
+                                                                   _addSwizzler(r13, r12, var_258, r15, <span class="number">0x1</span>);
+                                                           }
+                                                           <span class="keyword">else</span> {
+                                                                   *_userSuppressionsCount = *_userSuppressionsCount + <span class="number">0x1</span>;
+                                                           }
+                                                   }
+                                                   <span class="keyword">else</span> {
+                                                           <span class="keyword">if</span> (var_244 != <span class="number">0x0</span>) {
+                                                                   *_userSuppressionsCount = *_userSuppressionsCount + <span class="number">0x1</span>;
+                                                           }
+                                                           <span class="keyword">else</span> {
+                                                                   _addSwizzler(r13, r12, var_258, r15, <span class="number">0x1</span>);
+                                                           }
+                                                   }
+                                           }
+                                           rbx = rbx + <span class="number">0x1</span>;
+                                   } <span class="keyword">while</span> (rbx &lt; var_230);
+                           }
+                           _objc_flush_caches(var_280);
+                           <span class="built_in">free</span>(r14);
+                           rax = var_288 + <span class="number">0x1</span>;
+                           rcx = var_278;
+                   } <span class="keyword">while</span> (rax != rcx);
+           }
+           *_totalSwizzledClasses = rcx;
+           <span class="keyword">if</span> (*(<span class="keyword">int8_t</span> *)_envVerbose != <span class="number">0x0</span>) {
+                   rdx = *_totalSwizzledMethods;
+                   <span class="built_in">fprintf</span>(*___stderrp, <span class="string">"Swizzled %zu methods in %zu classes.\n"</span>, rdx, rcx);
+           }
+</code></pre><p>代码乍一看很多，其实逻辑非常简单，概述如下：</p>
+<ul>
+<li>通过获取<code>UIView的类实体</code>(不理解类实体的去看runtime)所在的地址来反推所在的image（二进制产物，基本是动态库），这里基本能猜测是<code>UIKit</code>。</li>
+<li>从<code>UIKit</code>中获取所有继承自<code>UIView</code>和<code>UIApplication</code>的类及其子类(这也是你为什么会在刚刚上文提到的输出中发现<code>UIIBApplication</code>这种不知道啥类的原因)，过滤到带<code>_</code>的私有类，然后对剩下的类的所有的方法进行Swizzle。</li>
+<li><b style="color:red">对于需要Swizzle的方法，要额外判断是不是真正属于<code>UIKit</code>这个动态库的。</b> 比如我们在调试的时候，Xcode会加载<code>libViewDebugging.dylib</code>等不会用于用于线上的动态库，里面会给<code>UIView</code>填上很多奇奇怪怪的方法。</li>
+<li><p>过滤如下的方法，以及以<code>nsli_</code>和<code>nsis_</code>开头的方法。</p>
+<pre><code>retain
+release
+autorelease
+.cxx_destruct
+description
+debugDescription
+class
+self
+beginBackgroundTaskWithExpiratonHandler
+<span class="label">beginBackgroundTaskWithName:</span>expirationHandler:
+<span class="label">endBackgroundTask:</span>
+<span class="label">opneGLContext:</span>
+<span class="label">lockFocusIfCanDrawInContext:</span>
+lockFocus
+lockFocusIfCanDraw
+unlockFocus
+</code></pre></li>
+<li><p>可选，如果还要检查<code>WebKit</code>相关的方法，还可以Hook如下这些类的子类：</p>
+<pre><code><span class="title">WKWebView</span>
+WKWebsiteDataStore
+WKUserScript
+WKUserContentController
+WKScriptMessage
+WKProcessPool
+WKProcessGroup
+WKContentExtensionStore
+</code></pre></li>
+</ul>
+<h3 id="0x2_自己实现">0x2 自己实现</h3><p>当时看到这，关于苹果的实现我觉得实在是太简单了，即使不用私有API，结合现在Github上的轮子我自己造一个估计1、2个小时就解决了。现在回想起来，自己还是<b style="color:red">too simple, sometimes native</b></p>
+<p>大致代码获取<code>UIKit</code>中<code>UIView</code>和<code>UIApplication</code>所有子类的代码如下：</p>
+<p>NSArray <em>findAllUIKitClasse()<br>{<br>    static NSMutableArray </em>viewClasses = nil;<br>    if (!viewClasses) return classes;</p>
+<pre><code>uint32_t image_count = _dyld_image_count();
+<span class="keyword">for</span> (uint32_t image_index = <span class="number">0</span>; image_index &lt; image_count; image_index++) {
+    <span class="keyword">const</span> my_macho_header *mach_header = (<span class="keyword">const</span> my_macho_header *)_dyld_get_image_header(image_index);
+
+    <span class="keyword">const</span> <span class="keyword">char</span> *image_name = _dyld_get_image_name(image_index);
+
+    <span class="built_in">NSString</span> *imageName = [<span class="built_in">NSString</span> stringWithUTF8String:image_name];
+    <span class="keyword">if</span> ([imageName hasSuffix:<span class="string">@"UIKit"</span>]) {
+
+        <span class="keyword">unsigned</span> <span class="keyword">int</span> count;
+        <span class="keyword">const</span> <span class="keyword">char</span> **classes;
+        Dl_info info;
+
+        dladdr(mach_header, &amp;info);
+        classes = objc_copyClassNamesForImage(info<span class="variable">.dli_fname</span>, &amp;count);
+
+        <span class="keyword">for</span> (<span class="keyword">int</span> i = <span class="number">0</span>; i &lt; count; i++) {
+            <span class="keyword">const</span> <span class="keyword">char</span> *className = (<span class="keyword">const</span> <span class="keyword">char</span> *)classes[i];
+
+            <span class="built_in">NSString</span> *classname = [<span class="built_in">NSString</span> stringWithUTF8String:className];
+            <span class="keyword">if</span> ([classname hasPrefix:<span class="string">@"_"</span>]) {
+                <span class="keyword">continue</span>;
+            }
+
+            Class cls = objc_getClass(className);
+            Class superCls = cls;
+
+            <span class="keyword">bool</span> isNeedChild = <span class="literal">NO</span>;
+            <span class="keyword">while</span> (superCls != [<span class="built_in">NSObject</span> class]) {
+
+                <span class="keyword">if</span> (superCls == <span class="built_in">NSClassFromString</span>(<span class="string">@"UIView"</span>) || superCls == <span class="built_in">NSClassFromString</span>(<span class="string">@"UIApplication"</span>)) {
+                    isNeedChild = <span class="literal">YES</span>;
+                    <span class="keyword">break</span>;
+                }
+                superCls = class_getSuperclass(superCls);
+            }
+
+            <span class="keyword">if</span> (isNeedChild) {
+                <span class="comment">// 备注：需要在这同时对这个类的方法进行Hook。</span>
+                [viewClasses addObject:cls];
+            }
+        }
+
+        <span class="keyword">break</span>;
+    }
+
+<span class="keyword">return</span> viewClasses;
+</code></pre><p>}</p>
+<h4 id="2-1_现有方案Hook的缺陷">2.1 现有方案Hook的缺陷</h4><p>到这，我们就只差把这些类的方法都Hook掉就行了。传统的<code>Method Swizzling</code>肯定不行，那样我们需要对每个方法对应实现一个新的方法进行替换，工作量太大。所以我们需要一个思路能够<b>中心重定向整个过程。</b></p>
+<p><b style="color:red">之前跟着网易iOS大佬刘培庆</b>学习iOS的时候，了解到了<code>AnyMethodLog</code>，听说能监控所有类所有方法的执行，于是我就直接套用了这个框架，嘿嘿，使用起来真方便，看起来大功告成了，<b>Build &amp; Run</b>。</p>
+<p>卧槽，怎么运行了就启动崩了，一脸懵逼。</p>
+<p><img src="https://github.com/SatanWoo/BeeHive/blob/master/tram_2.png?raw=true" alt=""></p>
+<p>没事，我换个开源库<code>BigBang</code>改改。卧槽，还是崩了。这下必须要开下源码分析下原因了。</p>
+<p>从<code>AnyMethodLog</code>的实现来看，如下所示：</p>
+<pre><code><span class="built_in">BOOL</span> qhd_replaceMethod(Class cls, SEL originSelector, <span class="keyword">char</span> *returnType) {
+    Method originMethod = class_getInstanceMethod(cls, originSelector);
+    <span class="keyword">if</span> (originMethod == <span class="literal">nil</span>) {
+        <span class="keyword">return</span> <span class="literal">NO</span>;
+    }
+    <span class="keyword">const</span> <span class="keyword">char</span> *originTypes = method_getTypeEncoding(originMethod);
+    IMP msgForwardIMP = _objc_msgForward;
+<span class="preprocessor">#if !defined(__arm64__)</span>
+    <span class="keyword">if</span> (qhd_isStructType(returnType)) {
+        <span class="comment">//Reference JSPatch:</span>
+        <span class="comment">//In some cases that returns struct, we should use the '_stret' API:</span>
+        <span class="comment">//http://sealiesoftware.com/blog/archive/2008/10/30/objc_explain_objc_msgSend_stret.html</span>
+        <span class="comment">//NSMethodSignature knows the detail but has no API to return, we can only get the info from debugDescription.</span>
+        <span class="built_in">NSMethodSignature</span> *methodSignature = [<span class="built_in">NSMethodSignature</span> signatureWithObjCTypes:originTypes];
+        <span class="keyword">if</span> ([methodSignature<span class="variable">.debugDescription</span> rangeOfString:<span class="string">@"is special struct return? YES"</span>]<span class="variable">.location</span> != <span class="built_in">NSNotFound</span>) {
+            msgForwardIMP = (IMP)_objc_msgForward_stret;
+        }
+    }
+<span class="preprocessor">#endif</span>
+
+    IMP originIMP = method_getImplementation(originMethod);
+
+    <span class="keyword">if</span> (originIMP == <span class="literal">nil</span> || originIMP == msgForwardIMP) {
+        <span class="keyword">return</span> <span class="literal">NO</span>;
+    }
+
+    <span class="comment">//把原方法的IMP换成_objc_msgForward，使之触发forwardInvocation方法</span>
+    class_replaceMethod(cls, originSelector, msgForwardIMP, originTypes);
+
+    <span class="comment">//把方法forwardInvocation的IMP换成qhd_forwardInvocation</span>
+    class_replaceMethod(cls, <span class="keyword">@selector</span>(forwardInvocation:), (IMP)qhd_forwardInvocation, <span class="string">"v@:@"</span>);
+
+    <span class="comment">//创建一个新方法，IMP就是原方法的原来的IMP，那么只要在qhd_forwardInvocation调用新方法即可</span>
+    SEL newSelecotr = qhd_createNewSelector(originSelector);
+    <span class="built_in">BOOL</span> isAdd = class_addMethod(cls, newSelecotr, originIMP, originTypes);
+    <span class="keyword">if</span> (!isAdd) {
+        DEV_LOG(<span class="string">@"class_addMethod fail"</span>);
+    }
+
+    <span class="keyword">return</span> <span class="literal">YES</span>;
+}
+
+    <span class="comment">// 中心重定向函数</span>
+<span class="keyword">void</span> qhd_forwardInvocation(<span class="keyword">id</span> target, SEL selector, <span class="built_in">NSInvocation</span> *invocation) {
+    <span class="built_in">NSArray</span> *argList = qhd_method_arguments(invocation);
+
+    SEL originSelector = invocation<span class="variable">.selector</span>;
+
+    <span class="built_in">NSString</span> *originSelectorString = <span class="built_in">NSStringFromSelector</span>(originSelector);
+
+
+
+    [invocation setSelector:qhd_createNewSelector(originSelector)];
+    [invocation setTarget:target];
+
+    [invocation invoke];
+}
+</code></pre><p>作者的意图比较简单，主要可以概述为如下几点：</p>
+<ul>
+<li>把每个类的<code>forwardInvocation</code>，替换成自己实现的一个C函数。</li>
+<li>把需要Hook原来<code>selector</code>获取的<code>method</code>的IMP指向<code>objc_msgForward</code>，通过其触发消息转发，也就是触发forwardInvocation;</li>
+<li>对每个需要重定向的<code>selector</code>，生成一个特定的格式的新<code>selector</code>，将其IMP指向原来<code>method</code>的IMP。</li>
+<li>对于刚刚重定向的C函数，通过<code>NSInvocation</code>获取要调用的target和selector，再次将这个<code>selector</code>生成特定格式的新<code>selector</code>，反射调用。</li>
+</ul>
+<blockquote>
+<p>为啥能把OC的函数<code>forwardInvocation</code>换成C函数，原因就在于只要补上OC函数隐式的前两个参数<code>self, selector</code>，让其的函数签名一致即可。</p>
+</blockquote>
+<p><b style="color:red">读到这，看起来没有啥问题吧？为什么会崩溃呢！！<br><br>原因在于这种调用方式，缺少了super上下文。<br></b></p>
+<p>假设我们现在对<code>UIView</code>、<code>UIButton</code>都Hook了<code>initWithFrame:</code>这个方法，在调用<code>[[UIView alloc] initWithFrame:]</code>和<code>[[UIButton alloc] initWithFrame:]</code>都会定向到C函数<code>qhd_forwardInvocation</code>中，在<code>UIView</code>调用的时候没问题。但是在<code>UIButton</code>调用的时候，由于其内部实现获取了<code>super initWithFrame:</code>，就产生了循环定向的问题。</p>
+<p><b style="color:red">问题本质的原因是，由于我们对于父类、子类同名的方法都换成了同一个IMP，那么不论是走<code>objc_msgSend</code>抑或是<code>objc_msgSendSuper2</code>，获取到的IMP都是一致的。而在Hook之前，<code>objc_msgSendSuper2</code>拿到的是super_imp, <code>objc_msgSend</code>拿到是imp，从而不会有问题。</b> </p>
+<h4 id="2-2_基于桥的全量Hook方法">2.2 基于桥的全量Hook方法</h4><p>好，上面的一个小节我们说，如果我们把所有方法都重定向到一个IMP上的时候，就会丧失关于继承关系之间的父子上下文关系，导致重定向循环。所以，我们需要一个思路，能够正确解决上下文的问题。</p>
+<p>首先我们来回顾下runtime的消息转发机制：</p>
+<pre><code><span class="number">1.</span> 调用resolveInstanceMethod:方法 (或 resolveClassMethod:)。允许用户在此时为该 Class 动态添加实现。如果有实现了，则调用并返回YES，那么重新开始objc_msgSend流程。这一次对象会响应这个选择器，一般是因为它已经调用过class_addMethod。如果仍没实现，继续下面的动作。
+
+<span class="number">2.</span> 调用forwardingTargetForSelector:方法，尝试找到一个能响应该消息的对象。如果获取到，则直接把消息转发给它，返回非 nil 对象。否则返回 nil ，继续下面的动作。注意，这里不要返回 self ，否则会形成死循环。
+
+<span class="number">3.</span> 调用methodSignatureForSelector:方法，尝试获得一个方法签名。如果获取不到，则直接调用doesNotRecognizeSelector抛出异常。如果能获取，则返回非nil：创建一个 NSlnvocation 并传给forwardInvocation:。
+
+<span class="number">4.</span> 调用forwardInvocation:方法，将第<span class="number">3</span>步获取到的方法签名包装成 Invocation 传入，如何处理就在这里面了，并返回非ni。
+
+<span class="number">5.</span> 调用doesNotRecognizeSelector: ，默认的实现是抛出异常。如果第<span class="number">3</span>步没能获得一个方法签名，执行该步骤。
+</code></pre><p><b style="color:red">对于我们来说，我们至少要在第四步之前（确切的是第三步之前），我们就要保留好<code>super</code>上下文。一旦到了<code>forwardInvocation</code>函数，留给我们的又只有<code>self</code>这样的残缺信息了。 </b></p>
+<p><b>哎，我就是卡在这思考了一天，最终我想出了一个思路。</b></p>
+<ul>
+<li>提供一个桩<code>WZQMessageStub</code>，这个桩保留了class和selector，拼接成不一样的函数名，这样就能区分<code>UIButton</code>和<code>UIView</code>的同名<code>initWithFrame:</code>方法，<b style="color:red">因为不同的selector找到的IMP肯定不一样。</b></li>
+<li>在<code>NSObject</code>里面实现<code>forwardingTargetForSelector</code>，在消息转发的时候指定把消息全部转发给<code>WZQMessageStub</code>。</li>
+<li><code>WZQMessageStub</code>实现<code>methodSignatureForSelector</code>和<code>forwardInvocation:</code>方法，承担真正的方法反射调用的职责。</li>
+</ul>
+<p>好，思路确定了，难点还剩一个。对于<code>forwardingTargetForSelector</code>这个函数来说，能拿到的参数也是<code>target</code>和<code>selector</code>。在<code>super</code>和<code>self</code>调用场景下，这个参数毫无价值，因此我们需要从<code>selector</code>上着手。如果不做任何改变，我们这里拿到的<code>selector</code>肯定是诸如<code>initWithFrame:</code>的<code>old selector</code>，所以我们需要在这之前桥一下，可以按照下述流程理解：</p>
+<pre><code>每个方法置换到不同的IMP桥上 <span class="subst">-&gt; </span>从桥上反推出当前的调用关系（class和<span class="keyword">select</span><span class="subst">or</span>）<span class="subst">-&gt; </span>构造一个中间态新名字 <span class="subst">-&gt; </span>forwardingTargetForSelect<span class="subst">or</span>(<span class="built_in">self</span>, 中间态新名字) 
+</code></pre><p>OK，大功告成。具体桥的实现我待会再单独开篇博客讲一讲。</p>
+<p><b style="color:red">嘿嘿，看起来很简单的任务也学习到了不少新知识。一会把代码开源到Github上。</b></p>
+<h3 id="0x3_遗留问题">0x3 遗留问题</h3><p>我在开启Main Thread后，build了一次产物，但是在通过<code>Mach-O</code>文件中<code>Load Commands</code>部分的时候，却没有发现<code>libMainThreadChecker.dylib</code>的踪影，如下所示：</p>
+<p><img src="https://github.com/SatanWoo/BeeHive/blob/master/tram_4.png?raw=true" alt=""></p>
+<p>符号断点<code>dlopen</code>也并没有发现这个动态库调用的踪影，所以非常好奇苹果是怎么加载这个动态库的，有大佬知道请赐教。</p>
+
+      
+    </div>
+    <footer class="article-footer">
+      <a data-url="http://satanwoo.github.io/2017/09/24/mainthreadchecker1/" data-id="cj7yv5cjy000d4ri1lvbg7rkr" class="article-share-link">Share</a>
+      
+        <a href="http://satanwoo.github.io/2017/09/24/mainthreadchecker1/#disqus_thread" class="article-comment-link">Comments</a>
+      
+      
+  <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Reverse-Engineering/">Reverse Engineering</a></li><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
+
+    </footer>
+  </div>
+  
+    
+<nav id="article-nav">
+  
+  
+    <a href="/2017/09/11/KVO-CRASH/" id="article-nav-older" class="article-nav-link-wrap">
+      <strong class="article-nav-caption">Older</strong>
+      <div class="article-nav-title">KVO在不同的二进制中多个符号并存的Crash问题</div>
+    </a>
+  
+</nav>
+
+  
+</article>
+
+<div id="disqus_thread"></div>
+<script>
+
+/**
+*  RECOMMENDED CONFIGURATION VARIABLES: EDIT AND UNCOMMENT THE SECTION BELOW TO INSERT DYNAMIC VALUES FROM YOUR PLATFORM OR CMS.
+*  LEARN WHY DEFINING THESE VARIABLES IS IMPORTANT: https://disqus.com/admin/universalcode/#configuration-variables*/
+/*
+var disqus_config = function () {
+this.page.url = PAGE_URL;  // Replace PAGE_URL with your page's canonical URL variable
+this.page.identifier = PAGE_IDENTIFIER; // Replace PAGE_IDENTIFIER with your page's unique identifier variable
+};
+*/
+(function() { // DON'T EDIT BELOW THIS LINE
+var d = document, s = d.createElement('script');
+s.src = 'https://satanwoo-2.disqus.com/embed.js';
+s.setAttribute('data-timestamp', +new Date());
+(d.head || d.body).appendChild(s);
+})();
+</script>
+<noscript>Please enable JavaScript to view the <a href="https://disqus.com/?ref_noscript">comments powered by Disqus.</a></noscript>
+                                
+  <section id="comments">
+    <div id="disqus_thread">
+      <noscript>Please enable JavaScript to view the <a href="//disqus.com/?ref_noscript">comments powered by Disqus.</a></noscript>
+    </div>
+  </section>
+</section>
+        
+          <aside id="sidebar">
+  
+    
+  
+    
+  <div class="widget-wrap">
+    <h3 class="widget-title">Tags</h3>
+    <div class="widget">
+      <ul class="tag-list"><li class="tag-list-item"><a class="tag-list-link" href="/tags/Android/">Android</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/C/">C</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Growth/">Growth</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/JavaScript/">JavaScript</a><span class="tag-list-count">3</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Math/">Math</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Performance/">Performance</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/R/">R</a><span class="tag-list-count">2</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Reverse-Engineering/">Reverse Engineering</a><span class="tag-list-count">6</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Swift/">Swift</a><span class="tag-list-count">6</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/iOS/">iOS</a><span class="tag-list-count">29</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/shell/">shell</a><span class="tag-list-count">1</span></li></ul>
+    </div>
+  </div>
+
+  
+    
+  <div class="widget-wrap">
+    <h3 class="widget-title">Tag Cloud</h3>
+    <div class="widget tagcloud">
+      <a href="/tags/Android/" style="font-size: 10px;">Android</a> <a href="/tags/C/" style="font-size: 10px;">C</a> <a href="/tags/Growth/" style="font-size: 10px;">Growth</a> <a href="/tags/JavaScript/" style="font-size: 15px;">JavaScript</a> <a href="/tags/Math/" style="font-size: 10px;">Math</a> <a href="/tags/Performance/" style="font-size: 10px;">Performance</a> <a href="/tags/R/" style="font-size: 12.5px;">R</a> <a href="/tags/Reverse-Engineering/" style="font-size: 17.5px;">Reverse Engineering</a> <a href="/tags/Swift/" style="font-size: 17.5px;">Swift</a> <a href="/tags/iOS/" style="font-size: 20px;">iOS</a> <a href="/tags/shell/" style="font-size: 10px;">shell</a>
+    </div>
+  </div>
+
+  
+    
+  <div class="widget-wrap">
+    <h3 class="widget-title">Archives</h3>
+    <div class="widget">
+      <ul class="archive-list"><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/09/">September 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/08/">August 2017</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/07/">July 2017</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/06/">June 2017</a><span class="archive-list-count">3</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/04/">April 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/01/">January 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/10/">October 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/09/">September 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/07/">July 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/05/">May 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/04/">April 2016</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/03/">March 2016</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/02/">February 2016</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/12/">December 2015</a><span class="archive-list-count">6</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/11/">November 2015</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/10/">October 2015</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/09/">September 2015</a><span class="archive-list-count">4</span></li></ul>
+    </div>
+  </div>
+
+  
+    
+  <div class="widget-wrap">
+    <h3 class="widget-title">Recents</h3>
+    <div class="widget">
+      <ul>
+        
+          <li>
+            <a href="/2017/09/24/mainthreadchecker1/">基于桥的全量方法Hook方案 - 探究苹果主线程检查实现</a>
+          </li>
+        
+          <li>
+            <a href="/2017/09/11/KVO-CRASH/">KVO在不同的二进制中多个符号并存的Crash问题</a>
+          </li>
+        
+          <li>
+            <a href="/2017/08/06/UITableViewController/">UIKit解剖（-）逆向UITableViewController分析Bug</a>
+          </li>
+        
+          <li>
+            <a href="/2017/07/30/xlog/">微信高性能线上日志系统xlog剖析</a>
+          </li>
+        
+          <li>
+            <a href="/2017/06/29/Macho-2/">深入理解Macho文件（二）- 消失的__OBJC段与新生的__DATA段</a>
+          </li>
+        
+      </ul>
+    </div>
+  </div>
+
+  
+</aside>
+        
+      </div>
+      <footer id="footer">
+  
+  <div class="outer">
+    <div id="footer-info" class="inner">
+      &copy; 2017 John Doe<br>
+      Powered by <a href="http://hexo.io/" target="_blank">Hexo</a>
+    </div>
+  </div>
+</footer>
+    </div>
+    <nav id="mobile-nav">
+  
+    <a href="/" class="mobile-nav-link">Home</a>
+  
+    <a href="/archives" class="mobile-nav-link">Archives</a>
+  
+    <a href="/sitemap.xml" class="mobile-nav-link">map</a>
+  
+</nav>
+    
+<script>
+  var disqus_shortname = 'satanwoo-2';
+  
+  var disqus_url = 'http://satanwoo.github.io/2017/09/24/mainthreadchecker1/';
+  
+  (function(){
+    var dsq = document.createElement('script');
+    dsq.type = 'text/javascript';
+    dsq.async = true;
+    dsq.src = '//' + disqus_shortname + '.disqus.com/embed.js';
+    (document.getElementsByTagName('head')[0] || document.getElementsByTagName('body')[0]).appendChild(dsq);
+  })();
+</script>
+
+
+
+  <link rel="stylesheet" href="/fancybox/jquery.fancybox.css" type="text/css">
+  <script src="/fancybox/jquery.fancybox.pack.js" type="text/javascript"></script>
+
+
+<script src="/js/script.js" type="text/javascript"></script>
+
+  </div>
+</body>
+</html>
