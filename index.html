@@ -62,6 +62,410 @@
       <div class="outer">
         <section id="main">
   
+    <article id="post-abort" class="article article-type-post" itemscope itemprop="blogPost">
+  <div class="article-meta">
+    <a href="/2017/10/18/abort/" class="article-date">
+  <time datetime="2017-10-18T14:46:01.000Z" itemprop="datePublished">2017-10-18</time>
+</a>
+    
+  </div>
+  <div class="article-inner">
+    
+    
+      <header class="article-header">
+        
+  
+    <h1 itemprop="name">
+      <a class="article-title" href="/2017/10/18/abort/">iOS内存abort(Jetsam) 原理探究</a>
+    </h1>
+  
+
+      </header>
+    
+    <div class="article-entry" itemprop="articleBody">
+      
+        <h3 id="招人">招人</h3><p>手淘架构组招人 iOS／Android 皆可，地点杭州，有兴趣的请联系我！！</p>
+<h3 id="iOS内存abort(Jetsam)_原理探究">iOS内存abort(Jetsam) 原理探究</h3><p>苹果最近开源了iOS系统上的XNU内核代码，加上最近又开始负责手淘/猫客的稳定性及性能相关的工作，所以赶紧拜读下苹果的大作。今天主要开始想分析跟abort相关的内存Jetsam原理。</p>
+<h3 id="什么是Jetsam">什么是Jetsam</h3><p>关于Jetsam，可能有些人还不是很理解。我们可以从<strong>手机设置-&gt;隐私-&gt;分析</strong>这条路径看看系统的日志，会发现手机上有许多<code>JetsamEvent</code>开头的日志。打开这些日志，一般会显示一些内存大小，CPU时间什么的数据。</p>
+<p>之所以会发生这么JetsamEvent，主要还是由于iOS设备不存在交换区导致的内存受限，所以iOS内核不得不把一些<strong>优先级不高或者占用内存过大的</strong>杀掉。这些<code>JetsamEvent</code>就是系统在杀掉App后记录的一些数据信息。</p>
+<blockquote>
+<p>当然，CPU使用率过高，也算JetsamEvent，但是相对内存来说，这种情况相对来说较少</p>
+</blockquote>
+<p>从某种程度来说，JetsamEvent是一种另类的Crash事件，但是在常规的Crash捕获工具中，由于iOS上能捕获的信号量的限制，所以因为内存导致App被杀掉是无法被捕获的。为此，许多业界的前辈通过设计<code>flag</code>的方式自己记录所谓的<code>abort</code>事件来采集数据。但是这种采集的abort，一般情况下都只能简单的记录次数，而没有详细的堆栈。</p>
+<h3 id="源码探究">源码探究</h3><p>MacOS/iOS是一个从BSD衍生而来的系统。其内核是Mach，但是对于上层暴露的接口一般都是基于BSD层对于Mach包装后的。虽然说Mach是个微内核的架构，真正的虚拟内存管理是在其中进行，但是BSD对于内存管理提供了相对较为上层的接口，同时，各种常见的<strong>JetSam事件也是由BSD产生</strong>，所以，我们从<code>bsd_init</code>这个函数作为入口，来探究下原理。</p>
+<p><code>bsd_init</code>中基本都是在初始化各个子系统，比如虚拟内存管理等等。</p>
+<p>跟内存相关的包括如下几步可能：</p>
+<pre><code><span class="number">1.</span> 初始化BSD内存Zone，这个Zone是基于Mach内核的zone构建
+kmeminit();
+
+<span class="number">2.</span> iOS上独有的特性，内存和进程的休眠的常驻监控线程
+<span class="preprocessor">#<span class="keyword">if</span> CONFIG_FREEZE</span>
+<span class="preprocessor">#<span class="keyword">ifndef</span> CONFIG_MEMORYSTATUS</span>
+    <span class="preprocessor">#<span class="keyword">error</span> <span class="string">"CONFIG_FREEZE defined without matching CONFIG_MEMORYSTATUS"</span></span>
+<span class="preprocessor">#<span class="keyword">endif</span></span>
+    <span class="comment">/* Initialise background freezing */</span>
+    bsd_init_kprintf(<span class="string">"calling memorystatus_freeze_init\n"</span>);
+    memorystatus_freeze_init();
+<span class="preprocessor">#<span class="keyword">endif</span>&gt;</span>
+
+<span class="number">3.</span> iOS独有，JetSAM（即低内存事件的常驻监控线程）
+<span class="preprocessor">#<span class="keyword">if</span> CONFIG_MEMORYSTATUS</span>
+    <span class="comment">/* Initialize kernel memory status notifications */</span>
+    bsd_init_kprintf(<span class="string">"calling memorystatus_init\n"</span>);
+    memorystatus_init();
+<span class="preprocessor">#<span class="keyword">endif</span> <span class="comment">/* CONFIG_MEMORYSTATUS */</span></span>
+</code></pre><p>这两步代码都是调用<code>kern_memorystatus.c</code>里面暴露的接口，主要的作用就是从内核中开启了两个最高优先级的线程，来监控整个系统的内存情况。</p>
+<p>首先先来看看<code>CONFIG_FREEZE</code>涉及的功能。当启用这个效果的时候，内核会对<strong>进程</strong>进行冷冻而不是Kill。</p>
+<p>这个冷冻的功能是通过在内核中启动一个<code>memorystatus_freeze_thread</code>进行。这个线程在收到信号后调用<code>memorystatus_freeze_top_process</code>进行冷冻。</p>
+<p>当然，涉及到进程休眠相关的代码，就需要谈谈苹果系统里面其他相关概念了。扯开又是一个比较大的话题，后续单独开文章来进行阐述。</p>
+<p>回到iOS Abort问题上的话，我们只需要关注<code>memorystatus_init</code>即可，去除平台无关的代码后如下：</p>
+<pre><code>__private_extern__ <span class="keyword">void</span>
+memorystatus_init(<span class="keyword">void</span>)
+{
+    thread_t thread = THREAD_NULL;
+    kern_return_t result;
+    <span class="keyword">int</span> i;
+
+    <span class="comment">/* Init buckets */</span>
+    <span class="comment">// 注意点1：优先级数组，每个数组都持有了一个同优先级进程的列表</span>
+    <span class="keyword">for</span> (i = <span class="number">0</span>; i &lt; MEMSTAT_BUCKET_COUNT; i++) {
+        TAILQ_INIT(&amp;memstat_bucket[i]<span class="variable">.list</span>);
+        memstat_bucket[i]<span class="variable">.count</span> = <span class="number">0</span>;
+    }
+    memorystatus_idle_demotion_call = thread_call_allocate((thread_call_func_t)memorystatus_perform_idle_demotion, <span class="literal">NULL</span>);
+
+<span class="preprocessor">#if CONFIG_JETSAM</span>
+
+    nanoseconds_to_absolutetime((uint64_t)DEFERRED_IDLE_EXIT_TIME_SECS * <span class="built_in">NSEC_PER_SEC</span>, &amp;memorystatus_sysprocs_idle_delay_time);
+    nanoseconds_to_absolutetime((uint64_t)DEFERRED_IDLE_EXIT_TIME_SECS * <span class="built_in">NSEC_PER_SEC</span>, &amp;memorystatus_apps_idle_delay_time);
+
+    <span class="comment">/* Apply overrides */</span>
+    <span class="comment">// 注意点2：获取一系列内核参数</span>
+    PE_get_default(<span class="string">"kern.jetsam_delta"</span>, &amp;delta_percentage, <span class="keyword">sizeof</span>(delta_percentage));
+    <span class="keyword">if</span> (delta_percentage == <span class="number">0</span>) {
+        delta_percentage = <span class="number">5</span>;
+    }
+    assert(delta_percentage &lt; <span class="number">100</span>);
+    PE_get_default(<span class="string">"kern.jetsam_critical_threshold"</span>, &amp;critical_threshold_percentage, <span class="keyword">sizeof</span>(critical_threshold_percentage));
+    assert(critical_threshold_percentage &lt; <span class="number">100</span>);
+    PE_get_default(<span class="string">"kern.jetsam_idle_offset"</span>, &amp;idle_offset_percentage, <span class="keyword">sizeof</span>(idle_offset_percentage));
+    assert(idle_offset_percentage &lt; <span class="number">100</span>);
+    PE_get_default(<span class="string">"kern.jetsam_pressure_threshold"</span>, &amp;pressure_threshold_percentage, <span class="keyword">sizeof</span>(pressure_threshold_percentage));
+    assert(pressure_threshold_percentage &lt; <span class="number">100</span>);
+    PE_get_default(<span class="string">"kern.jetsam_freeze_threshold"</span>, &amp;freeze_threshold_percentage, <span class="keyword">sizeof</span>(freeze_threshold_percentage));
+    assert(freeze_threshold_percentage &lt; <span class="number">100</span>);
+
+    <span class="keyword">if</span> (!PE_parse_boot_argn(<span class="string">"jetsam_aging_policy"</span>, &amp;jetsam_aging_policy,
+            <span class="keyword">sizeof</span> (jetsam_aging_policy))) {
+
+        <span class="keyword">if</span> (!PE_get_default(<span class="string">"kern.jetsam_aging_policy"</span>, &amp;jetsam_aging_policy,
+                <span class="keyword">sizeof</span>(jetsam_aging_policy))) {
+
+            jetsam_aging_policy = kJetsamAgingPolicyLegacy;
+        }
+    }
+
+    <span class="keyword">if</span> (jetsam_aging_policy &gt; kJetsamAgingPolicyMax) {
+        jetsam_aging_policy = kJetsamAgingPolicyLegacy;
+    }
+
+    <span class="keyword">switch</span> (jetsam_aging_policy) {
+
+        <span class="keyword">case</span> kJetsamAgingPolicyNone:
+            system_procs_aging_band = JETSAM_PRIORITY_IDLE;
+            applications_aging_band = JETSAM_PRIORITY_IDLE;
+            <span class="keyword">break</span>;
+
+        <span class="keyword">case</span> kJetsamAgingPolicyLegacy:
+            <span class="comment">/*
+             * Legacy behavior where some daemons get a 10s protection once
+             * AND only before the first clean-&gt;dirty-&gt;clean transition before
+             * going into IDLE band.
+             */</span>
+            system_procs_aging_band = JETSAM_PRIORITY_AGING_BAND1;
+            applications_aging_band = JETSAM_PRIORITY_IDLE;
+            <span class="keyword">break</span>;
+
+        <span class="keyword">case</span> kJetsamAgingPolicySysProcsReclaimedFirst:
+            system_procs_aging_band = JETSAM_PRIORITY_AGING_BAND1;
+            applications_aging_band = JETSAM_PRIORITY_AGING_BAND2;
+            <span class="keyword">break</span>;
+
+        <span class="keyword">case</span> kJetsamAgingPolicyAppsReclaimedFirst:
+            system_procs_aging_band = JETSAM_PRIORITY_AGING_BAND2;
+            applications_aging_band = JETSAM_PRIORITY_AGING_BAND1;
+            <span class="keyword">break</span>;
+
+        <span class="keyword">default</span>:
+            <span class="keyword">break</span>;
+    }
+
+    <span class="comment">/*
+     * The aging bands cannot overlap with the JETSAM_PRIORITY_ELEVATED_INACTIVE
+     * band and must be below it in priority. This is so that we don't have to make
+     * our 'aging' code worry about a mix of processes, some of which need to age
+     * and some others that need to stay elevated in the jetsam bands.
+     */</span>
+    assert(JETSAM_PRIORITY_ELEVATED_INACTIVE &gt; system_procs_aging_band);
+    assert(JETSAM_PRIORITY_ELEVATED_INACTIVE &gt; applications_aging_band);
+
+    <span class="comment">/* Take snapshots for idle-exit kills by default? First check the boot-arg... */</span>
+    <span class="keyword">if</span> (!PE_parse_boot_argn(<span class="string">"jetsam_idle_snapshot"</span>, &amp;memorystatus_idle_snapshot, <span class="keyword">sizeof</span> (memorystatus_idle_snapshot))) {
+            <span class="comment">/* ...no boot-arg, so check the device tree */</span>
+            PE_get_default(<span class="string">"kern.jetsam_idle_snapshot"</span>, &amp;memorystatus_idle_snapshot, <span class="keyword">sizeof</span>(memorystatus_idle_snapshot));
+    }
+
+    memorystatus_delta = delta_percentage * atop_64(max_mem) / <span class="number">100</span>;
+    memorystatus_available_pages_critical_idle_offset = idle_offset_percentage * atop_64(max_mem) / <span class="number">100</span>;
+    memorystatus_available_pages_critical_base = (critical_threshold_percentage / delta_percentage) * memorystatus_delta;
+    memorystatus_policy_more_free_offset_pages = (policy_more_free_offset_percentage / delta_percentage) * memorystatus_delta;
+
+    <span class="comment">/* Jetsam Loop Detection */</span>
+    <span class="keyword">if</span> (max_mem &lt;= (<span class="number">512</span> * <span class="number">1024</span> * <span class="number">1024</span>)) {
+        <span class="comment">/* 512 MB devices */</span>
+        memorystatus_jld_eval_period_msecs = <span class="number">8000</span>;    <span class="comment">/* 8000 msecs == 8 second window */</span>
+    } <span class="keyword">else</span> {
+        <span class="comment">/* 1GB and larger devices */</span>
+        memorystatus_jld_eval_period_msecs = <span class="number">6000</span>;    <span class="comment">/* 6000 msecs == 6 second window */</span>
+    }
+
+    memorystatus_jld_enabled = <span class="literal">TRUE</span>;
+
+    <span class="comment">/* No contention at this point */</span>
+    memorystatus_update_levels_locked(<span class="literal">FALSE</span>);
+
+<span class="preprocessor">#endif /* CONFIG_JETSAM */</span>
+
+    memorystatus_jetsam_snapshot_max = maxproc;
+    memorystatus_jetsam_snapshot = 
+        (memorystatus_jetsam_snapshot_t*)kalloc(<span class="keyword">sizeof</span>(memorystatus_jetsam_snapshot_t) +
+        <span class="keyword">sizeof</span>(memorystatus_jetsam_snapshot_entry_t) * memorystatus_jetsam_snapshot_max);
+    <span class="keyword">if</span> (!memorystatus_jetsam_snapshot) {
+        panic(<span class="string">"Could not allocate memorystatus_jetsam_snapshot"</span>);
+    }
+
+    nanoseconds_to_absolutetime((uint64_t)JETSAM_SNAPSHOT_TIMEOUT_SECS * <span class="built_in">NSEC_PER_SEC</span>, &amp;memorystatus_jetsam_snapshot_timeout);
+
+    memset(&amp;memorystatus_at_boot_snapshot, <span class="number">0</span>, <span class="keyword">sizeof</span>(memorystatus_jetsam_snapshot_t));
+
+    result = kernel_thread_start_priority(memorystatus_thread, <span class="literal">NULL</span>, <span class="number">95</span> <span class="comment">/* MAXPRI_KERNEL */</span>, &amp;thread);
+    <span class="keyword">if</span> (result == KERN_SUCCESS) {
+        thread_deallocate(thread);
+    } <span class="keyword">else</span> {
+        panic(<span class="string">"Could not create memorystatus_thread"</span>);
+    }
+}
+</code></pre><p><strong><b style="color:red">下面先介绍几个知识点</b></strong></p>
+<ul>
+<li><p>内核里面对于所有的进程都有一个优先级的分布，通过一个数组维护，数组每一项是一个进程的list。这个数组的大小是<code>JETSAM_PRIORITY_MAX + 1</code>。其结构体定义如下：</p>
+<pre><code>typedef struct memstat_bucket {
+    <span class="type">TAILQ_HEAD</span>(, <span class="keyword">proc</span>) list;
+    <span class="type">int</span> count;
+} memstat_bucket_t;
+</code></pre><p>这结构体非常通俗易懂。</p>
+</li>
+<li><p>线程在Mach下采用了不同的优先级，其中<code>MAXPRI_KERNEL</code>代表的是分配给内核可用范围内最高优先级的线程。其他级别还有如下这些：</p>
+</li>
+</ul>
+<hr>
+<pre><code><span class="keyword">*</span> // 优先级最高的实时线程 (不太清楚谁用)
+ <span class="keyword">*</span> 127        Reserved (real-time)
+ <span class="keyword">*</span>                A
+ <span class="keyword">*</span>                +
+ <span class="keyword">*</span>            (32 levels)
+ <span class="keyword">*</span>                +
+ <span class="keyword">*</span>                V
+ <span class="keyword">*</span> 96        Reserved (real-time)
+ <span class="keyword">*</span> // 给内核用的线程优先级(MAXPRI_KERNEL)
+ <span class="keyword">*</span> 95        Kernel mode only
+ <span class="keyword">*</span>                A
+ <span class="keyword">*</span>                +
+ <span class="keyword">*</span>            (16 levels)
+ <span class="keyword">*</span>                +
+ <span class="keyword">*</span>                V
+ <span class="keyword">*</span> 80        Kernel mode only
+ <span class="keyword">*</span> // 给操作系统分配的线程优先级
+ <span class="keyword">*</span> 79        System high priority
+ <span class="keyword">*</span>                A
+ <span class="keyword">*</span>                +
+ <span class="keyword">*</span>            (16 levels)
+ <span class="keyword">*</span>                +
+ <span class="keyword">*</span>                V
+ <span class="keyword">*</span> 64        System high priority
+ <span class="keyword">*</span> // 剩下的全是用户态的普通程序可以用的
+ <span class="keyword">*</span> 63        Elevated priorities
+ <span class="keyword">*</span>                A
+ <span class="keyword">*</span>                +
+ <span class="keyword">*</span>            (12 levels)
+ <span class="keyword">*</span>                +
+ <span class="keyword">*</span>                V
+ <span class="keyword">*</span> 52        Elevated priorities
+ <span class="keyword">*</span> 51        Elevated priorities (incl. BSD +nice)
+ <span class="keyword">*</span>                A
+ <span class="keyword">*</span>                +
+ <span class="keyword">*</span>            (20 levels)
+ <span class="keyword">*</span>                +
+ <span class="keyword">*</span>                V
+ <span class="keyword">*</span> 32        Elevated priorities (incl. BSD +nice)
+ <span class="keyword">*</span> 31        Default (default base for threads)
+ <span class="keyword">*</span> 30        Lowered priorities (incl. BSD -nice)
+ <span class="keyword">*</span>                A
+ <span class="keyword">*</span>                +
+ <span class="keyword">*</span>            (20 levels)
+ <span class="keyword">*</span>                +
+ <span class="keyword">*</span>                V
+ <span class="keyword">*</span> 11        Lowered priorities (incl. BSD -nice)
+ <span class="keyword">*</span> 10        Lowered priorities (aged pri's)
+ <span class="keyword">*</span>                A
+ <span class="keyword">*</span>                +
+ <span class="keyword">*</span>            (11 levels)
+ <span class="keyword">*</span>                +
+ <span class="keyword">*</span>                V
+ <span class="keyword">*</span> 0        Lowered priorities (aged pri's / idle)
+ <span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span>
+</code></pre><ul>
+<li>从上图不难看出，用户态的应用程序的线程<strong>不</strong>可能高于操作系统和内核。而且，在用户态的应用程序间的线程优先级分配也有区别，前台活动的应用程序优先级高于后台的应用程序。<b style="color:red">iOS上大名鼎鼎的SpringBoard是应用程序中优先级最高的程序。</b></li>
+<li>当然线程的优先级也不是一成不变。Mach会针对每一个线程的利用率和整体系统负载动态调整优先级。如果耗费CPU太多就降低优先级，如果一个线程过度挨饿CPU则会提升其优先级。<b style="color:red">但是无论怎么变，程序都不能超过其所在的线程优先级区间范围。</b></li>
+</ul>
+<p>好，预备知识说完，那苹果究竟是怎么处理<code>JetSam</code>事件呢？</p>
+<pre><code><span class="literal">result</span> = kernel_thread_start_priority(memorystatus_thread, <span class="type">NULL</span>, <span class="number">95</span> /* <span class="type">MAXPRI_KERNEL</span> */, &amp;thread);
+</code></pre><p>苹果其实处理的思路非常简单。如上述代码，BSD层起了一个内核优先级最高的线程<code>VM_memorystatus</code>，这个线程会在维护两个列表，一个是我们之前提到的基于进程优先级的进程列表，还有一个是所谓的内存快照列表，即保存了每个进程消耗的内存页<code>memorystatus_jetsam_snapshot</code>。</p>
+<p>这个常驻线程接受从内核对于内存的守护程序<code>pageout</code>通过内核调用给每个App进程发送的内存压力通知，来处理事件，这个事件转发成上层的UI事件就是平常我们会收到的全局内存警告或者每个ViewController里面的<code>didReceiveMemoryWarning</code>。</p>
+<p><b style="color:red">当然，我们自己开发的App是不会主动注册监听这个内存警告事件的，帮助我们在底层完成这一切的都是<code>libdispatch</code>，如果你感兴趣的话，可以钻研下<code>_dispatch_source_type_memorypressure</code>和<code>__dispatch_source_type_memorystatus</code>。</b></p>
+<p>那么在哪些情况下会出现内存压力呢？我们来看一看<code>memorystatus_action_needed</code>这段函数： </p>
+<pre><code><span class="function"><span class="keyword">static</span> boolean_t
+<span class="title">memorystatus_action_needed</span><span class="params">(<span class="keyword">void</span>)</span>
+</span>{
+<span class="preprocessor">#<span class="keyword">if</span> CONFIG_EMBEDDED</span>
+    <span class="keyword">return</span> (is_reason_thrashing(kill_under_pressure_cause) ||
+            is_reason_zone_map_exhaustion(kill_under_pressure_cause) ||
+           memorystatus_available_pages &lt;= memorystatus_available_pages_pressure);
+<span class="preprocessor">#<span class="keyword">else</span> <span class="comment">/* CONFIG_EMBEDDED */</span></span>
+    <span class="keyword">return</span> (is_reason_thrashing(kill_under_pressure_cause) ||
+            is_reason_zone_map_exhaustion(kill_under_pressure_cause));
+<span class="preprocessor">#<span class="keyword">endif</span> <span class="comment">/* CONFIG_EMBEDDED */</span></span>
+}
+</code></pre><p>概括来说：</p>
+<p>频繁的的页面换进换出<code>is_reason_thrashing</code>，Mach Zone耗尽了<code>is_reason_zone_map_exhaustion</code>（这个涉及Mach内核的虚拟内存管理了，单独写）以及可用的页低于一个门槛了<code>memorystatus_available_pages</code>。</p>
+<p>在这几种情况下，就会准备去Kill 进程了。但是，在这个处理下面，有一段代码特别有意思，我们看看这个函数<code>memorystatus_act_aggressive</code>：</p>
+<pre><code><span class="keyword">if</span> ( (jld_bucket_count == <span class="number">0</span>) || 
+     (jld_now_msecs &gt; (jld_timestamp_msecs + memorystatus_jld_eval_period_msecs))) {
+
+    <span class="comment">/* 
+     * Refresh evaluation parameters 
+     */</span>
+    jld_timestamp_msecs     = jld_now_msecs;
+    jld_idle_kill_candidates = jld_bucket_count;
+    *jld_idle_kills         = <span class="number">0</span>;
+    jld_eval_aggressive_count = <span class="number">0</span>;
+    jld_priority_band_max    = JETSAM_PRIORITY_UI_SUPPORT;
+}
+</code></pre><p>这段代码很明显，是基于某个时间间隔在做条件判断。如果不满足这个判断，后续真正执行的Kill也不会走到。那我们来看看<code>memorystatus_jld_eval_period_msecs</code>这个变量：</p>
+<pre><code><span class="comment">/* Jetsam Loop Detection */</span>
+<span class="keyword">if</span> (max_mem &lt;= (<span class="number">512</span> * <span class="number">1024</span> * <span class="number">1024</span>)) {
+    <span class="comment">/* 512 MB devices */</span>
+    memorystatus_jld_eval_period_msecs = <span class="number">8000</span>;    <span class="comment">/* 8000 msecs == 8 second window */</span>
+} <span class="keyword">else</span> {
+    <span class="comment">/* 1GB and larger devices */</span>
+    memorystatus_jld_eval_period_msecs = <span class="number">6000</span>;    <span class="comment">/* 6000 msecs == 6 second window */</span>
+}
+</code></pre><p>这个时间窗口是根据设备的物理内存上限来设定的，但是无论如何，看起来至少有个<strong><span style="color:red">6秒</span></strong>的时间可以给我们来做点事情。</p>
+<p>当然，如果满足了时间窗口的需求，就会根据我们提到的优先级进程列表进行寻找可杀目标：</p>
+<pre><code>proc_list_lock()<span class="comment">;</span>
+switch (jetsam_aging_policy) {
+case kJetsamAgingPolicyLegacy:
+    bucket = &amp;memstat_bucket[JETSAM_PRIORITY_IDLE]<span class="comment">;</span>
+    jld_bucket_count = bucket-&gt;count<span class="comment">;</span>
+    bucket = &amp;memstat_bucket[JETSAM_PRIORITY_AGING_BAND1]<span class="comment">;</span>
+    jld_bucket_count += bucket-&gt;count<span class="comment">;</span>
+    break<span class="comment">;</span>
+case kJetsamAgingPolicySysProcsReclaimedFirst:
+case kJetsamAgingPolicyAppsReclaimedFirst:
+    bucket = &amp;memstat_bucket[JETSAM_PRIORITY_IDLE]<span class="comment">;</span>
+    jld_bucket_count = bucket-&gt;count<span class="comment">;</span>
+    bucket = &amp;memstat_bucket[system_procs_aging_band]<span class="comment">;</span>
+    jld_bucket_count += bucket-&gt;count<span class="comment">;</span>
+    bucket = &amp;memstat_bucket[applications_aging_band]<span class="comment">;</span>
+    jld_bucket_count += bucket-&gt;count<span class="comment">;</span>
+    break<span class="comment">;</span>
+case kJetsamAgingPolicyNone:
+default:
+    bucket = &amp;memstat_bucket[JETSAM_PRIORITY_IDLE]<span class="comment">;</span>
+    jld_bucket_count = bucket-&gt;count<span class="comment">;</span>
+    break<span class="comment">;</span>
+}
+
+bucket = &amp;memstat_bucket[JETSAM_PRIORITY_ELEVATED_INACTIVE]<span class="comment">;</span>
+elevated_bucket_count = bucket-&gt;count<span class="comment">;</span>
+</code></pre><p><b style="color:red">需要注意的是，JETSAM不一定只杀一个进程，他可能会大杀特杀，杀掉N多进程。</b></p>
+<pre><code><span class="keyword">if</span> (memorystatus_avail_pages_below_pressure()) {
+    <span class="comment">/*
+     * Still under pressure.
+     * Find another pinned processes.
+     */</span>
+    <span class="keyword">continue</span>;
+} <span class="keyword">else</span> {
+    <span class="keyword">return</span> <span class="keyword">TRUE</span>;
+}
+</code></pre><p>至于杀进程的话，最终都会落到函数<code>memorystatus_do_kill</code>-&gt;<code>jetsam_do_kill</code>去执行。</p>
+<h3 id="其他">其他</h3><p>看苹果代码的时候，发现了不少内核的参数，一一进行了尝试后，发现<code>sysctlname</code>和<code>sysctl</code>的系统调用都被苹果禁用了，比如这些：</p>
+<pre><code><span class="string">"kern.jetsam_delta"</span>
+<span class="string">"kern.jetsam_critical_threshold"</span>
+<span class="string">"kern.jetsam_idle_offset"</span>
+<span class="string">"kern.jetsam_pressure_threshold"</span>
+<span class="string">"kern.jetsam_freeze_threshold"</span>
+<span class="string">"kern.jetsam_aging_policy"</span>
+</code></pre><p>不过，我试了下通过<code>kern.boottime</code>获取机器的开机时间还是可以的，代码示例如下：</p>
+<pre><code><span class="keyword">size_t</span> size;
+sysctlbyname(<span class="string">"kern.boottime"</span>, <span class="literal">NULL</span>, &amp;size, <span class="literal">NULL</span>, <span class="number">0</span>);
+
+<span class="keyword">char</span> *boot_time = <span class="built_in">malloc</span>(size);
+sysctlbyname(<span class="string">"kern.boottime"</span>, boot_time, &amp;size, <span class="literal">NULL</span>, <span class="number">0</span>);
+
+<span class="keyword">uint32_t</span> timestamp = <span class="number">0</span>;
+<span class="built_in">memcpy</span>(&amp;timestamp, boot_time, <span class="keyword">sizeof</span>(<span class="keyword">uint32_t</span>));
+<span class="built_in">free</span>(boot_time);
+
+NSDate* bootTime = [NSDate dateWithTimeIntervalSince1970:timestamp];
+</code></pre><h3 id="最后">最后</h3><p>嘻嘻，技术原理研究了一些，心里顿时对解决公司的Abort问题有了一定的眉目。嘿嘿，我写了个DEMO验证了我的思路，是可行的。哇咔咔。等我的好消息吧～</p>
+
+      
+    </div>
+    <footer class="article-footer">
+      <a data-url="http://satanwoo.github.io/2017/10/18/abort/" data-id="cj8x5l5yb000ybui1tbwvvb66" class="article-share-link">Share</a>
+      
+        <a href="http://satanwoo.github.io/2017/10/18/abort/#disqus_thread" class="article-comment-link">Comments</a>
+      
+      
+  <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/XNU/">XNU</a></li><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
+
+    </footer>
+  </div>
+  
+</article>
+
+<div id="disqus_thread"></div>
+<script>
+
+/**
+*  RECOMMENDED CONFIGURATION VARIABLES: EDIT AND UNCOMMENT THE SECTION BELOW TO INSERT DYNAMIC VALUES FROM YOUR PLATFORM OR CMS.
+*  LEARN WHY DEFINING THESE VARIABLES IS IMPORTANT: https://disqus.com/admin/universalcode/#configuration-variables*/
+/*
+var disqus_config = function () {
+this.page.url = PAGE_URL;  // Replace PAGE_URL with your page's canonical URL variable
+this.page.identifier = PAGE_IDENTIFIER; // Replace PAGE_IDENTIFIER with your page's unique identifier variable
+};
+*/
+(function() { // DON'T EDIT BELOW THIS LINE
+var d = document, s = d.createElement('script');
+s.src = 'https://satanwoo-2.disqus.com/embed.js';
+s.setAttribute('data-timestamp', +new Date());
+(d.head || d.body).appendChild(s);
+})();
+</script>
+<noscript>Please enable JavaScript to view the <a href="https://disqus.com/?ref_noscript">comments powered by Disqus.</a></noscript>
+                                
+  
     <article id="post-mainthreadchecker1" class="article article-type-post" itemscope itemprop="blogPost">
   <div class="article-meta">
     <a href="/2017/09/24/mainthreadchecker1/" class="article-date">
@@ -414,7 +818,7 @@ WKContentExtensionStore
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2017/09/24/mainthreadchecker1/" data-id="cj7yveotu000dvhi1tpfo8ypo" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2017/09/24/mainthreadchecker1/" data-id="cj8x5l5xp000dbui14wxtncp7" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2017/09/24/mainthreadchecker1/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -741,7 +1145,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2017/09/11/KVO-CRASH/" data-id="cj7yveovy0025vhi1d7wno9py" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2017/09/11/KVO-CRASH/" data-id="cj8x5l6070029bui1avy5y8mm" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2017/09/11/KVO-CRASH/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -1037,7 +1441,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2017/08/06/UITableViewController/" data-id="cj7yveoul0010vhi1zvc245ap" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2017/08/06/UITableViewController/" data-id="cj8x5l5yj0014bui1g52aqgi3" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2017/08/06/UITableViewController/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -1328,7 +1732,7 @@ BOOT_RUN_EXIT(appender_close);
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2017/07/30/xlog/" data-id="cj7yveotj0003vhi1ek14bvtz" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2017/07/30/xlog/" data-id="cj8x5l5wy0003bui1g59sq5aq" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2017/07/30/xlog/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -1631,7 +2035,7 @@ ldp    x9, x17, [x12]        <span class="comment">// {x9, x17} = *bucket</span>
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2017/06/29/Macho-2/" data-id="cj7yveovi001rvhi1uzg719b3" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2017/06/29/Macho-2/" data-id="cj8x5l5zp001vbui1887s6k7x" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2017/06/29/Macho-2/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -1920,7 +2324,7 @@ _magic = [cursor readBigInt32];
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2017/06/13/Macho-1/" data-id="cj7yveovl001tvhi11yrwfat7" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2017/06/13/Macho-1/" data-id="cj8x5l5zr001xbui1a63xe8go" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2017/06/13/Macho-1/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -2182,7 +2586,7 @@ _attribute__((section (<span class="string">"__DATA, MinyiSpecific"</span>))) <s
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2017/06/01/FBTweak/" data-id="cj7yveow7002gvhi1qtftbuke" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2017/06/01/FBTweak/" data-id="cj8x5l60j002kbui1itz0uzeb" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2017/06/01/FBTweak/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -2322,7 +2726,7 @@ foo(&amp;s, <span class="number">1</span>, <span class="number">2</span>);
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2017/04/23/ARM64IndirectReturn/" data-id="cj7yveowp002xvhi1ne2mxzc4" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2017/04/23/ARM64IndirectReturn/" data-id="cj8x5l6110031bui1ii3is1au" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2017/04/23/ARM64IndirectReturn/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -2493,7 +2897,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2017/04/18/CalculateTwoArrayDiff/" data-id="cj7yveowl002tvhi1mo6smuxu" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2017/04/18/CalculateTwoArrayDiff/" data-id="cj8x5l60z002xbui1qrrhvo2g" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2017/04/18/CalculateTwoArrayDiff/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -2683,7 +3087,7 @@ dispatch_group_create(<span class="keyword">void</span>)
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2017/01/07/DispatchGroupCrash/" data-id="cj7yveowc002kvhi1t3ketzgf" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2017/01/07/DispatchGroupCrash/" data-id="cj8x5l60o002obui17h9l8n2o" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2017/01/07/DispatchGroupCrash/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -2931,7 +3335,7 @@ func <span class="function"><span class="title">resultFromBatchObjects</span><sp
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2017/01/07/JSONRPCKit/" data-id="cj7yveow00028vhi1kbqjyjfh" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2017/01/07/JSONRPCKit/" data-id="cj8x5l609002cbui180du0mq0" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2017/01/07/JSONRPCKit/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -3215,7 +3619,7 @@ dispatch_sync(dq, ^{
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/10/23/multithread-dangling-pointer/" data-id="cj7yveots000bvhi1ta63tnhv" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/10/23/multithread-dangling-pointer/" data-id="cj8x5l5xm000bbui1830kor6j" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/10/23/multithread-dangling-pointer/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -3371,7 +3775,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/09/17/uiwindow-iOS/" data-id="cj7yveoto0007vhi1gfsi0yet" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/09/17/uiwindow-iOS/" data-id="cj8x5l5xg0007bui1fb2pjkck" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/09/17/uiwindow-iOS/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -3531,7 +3935,7 @@ OSSpinUnlock(&amp;_lock)<span class="comment">;</span>
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/07/10/immutable-thread/" data-id="cj7yveotw000hvhi133ai6ond" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/07/10/immutable-thread/" data-id="cj8x5l5xs000hbui11lf7vdxw" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/07/10/immutable-thread/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -3655,7 +4059,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/05/02/Spotify/" data-id="cj7yveouv001bvhi12omqbqum" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/05/02/Spotify/" data-id="cj8x5l5yx001fbui12nksnxlu" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/05/02/Spotify/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -3783,7 +4187,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/04/26/blank-space-in-html/" data-id="cj7yveouf000wvhi1vk8ocnub" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/04/26/blank-space-in-html/" data-id="cj8x5l5y9000wbui1nhk3j16g" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/04/26/blank-space-in-html/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -4041,7 +4445,7 @@ Elapsed application CPU <span class="keyword">time</span> (seconds): <span class
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/04/11/dispatch-once/" data-id="cj7yveou1000mvhi1i10t2nmp" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/04/11/dispatch-once/" data-id="cj8x5l5xx000mbui1y8v6l591" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/04/11/dispatch-once/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -4258,7 +4662,7 @@ a4.<span class="function"><span class="title">staticInfo</span><span class="para
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/03/22/dispatch-in-swift/" data-id="cj7yveou3000ovhi1c4nkm739" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/03/22/dispatch-in-swift/" data-id="cj8x5l5xz000obui1fi2mxdox" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/03/22/dispatch-in-swift/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -4372,7 +4776,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/03/14/RxSwift/" data-id="cj7yveov0001gvhi108gxr57q" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/03/14/RxSwift/" data-id="cj8x5l5z4001kbui120ou8fd9" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/03/14/RxSwift/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -4482,7 +4886,7 @@ val = edx(<span class="literal">true</span>)
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/03/14/SizeUp/" data-id="cj7yveouy001evhi1s2idc3ti" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/03/14/SizeUp/" data-id="cj8x5l5z1001ibui1mdr3s0pn" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/03/14/SizeUp/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -4644,7 +5048,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/03/14/DXXcodeConsoleUnicodePlugin/" data-id="cj7yveowh002pvhi1dg9o32yk" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/03/14/DXXcodeConsoleUnicodePlugin/" data-id="cj8x5l60t002tbui1v2hojhgg" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/03/14/DXXcodeConsoleUnicodePlugin/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -4743,7 +5147,7 @@ fi
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/02/27/check-manifest/" data-id="cj7yveoud000tvhi12v49i35l" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/02/27/check-manifest/" data-id="cj8x5l5y7000tbui1yz4j48qi" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/02/27/check-manifest/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -4875,7 +5279,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/02/27/pod-install-plugin/" data-id="cj7yveotq0009vhi10vara3eo" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/02/27/pod-install-plugin/" data-id="cj8x5l5xj0009bui1foolrd8e" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/02/27/pod-install-plugin/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -5153,7 +5557,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/02/27/FBKVOController/" data-id="cj7yveowa002ivhi1eh70y9qi" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/02/27/FBKVOController/" data-id="cj8x5l60l002mbui1mb2pcftp" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/02/27/FBKVOController/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -5289,7 +5693,7 @@ selectedTitleLabelsContentView<span class="class">.layer</span><span class="clas
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/02/05/DGRunKeeperSwitch/" data-id="cj7yveowi002rvhi1563pvx3x" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/02/05/DGRunKeeperSwitch/" data-id="cj8x5l60w002vbui13dfpb5m6" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/02/05/DGRunKeeperSwitch/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -5567,7 +5971,7 @@ NSLayoutConstraint *constraint = [NSLayoutConstraint <span class="string">constr
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/02/05/PureLayout/" data-id="cj7yveovb001nvhi1fupcs01m" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/02/05/PureLayout/" data-id="cj8x5l5zh001rbui1m1yvoytl" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/02/05/PureLayout/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -5915,7 +6319,7 @@ extension Task {
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/12/30/Refactor-Mega-ViewController/" data-id="cj7yveov7001lvhi1y4wcc4i9" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/12/30/Refactor-Mega-ViewController/" data-id="cj8x5l5zd001pbui1zwfmd45m" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2015/12/30/Refactor-Mega-ViewController/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -6088,7 +6492,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/12/20/Learn-R-2/" data-id="cj7yveovn001vvhi1t55vu50z" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/12/20/Learn-R-2/" data-id="cj8x5l5zt001zbui1vtd6end1" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2015/12/20/Learn-R-2/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -6164,177 +6568,12 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/12/15/Regression-Model-1/" data-id="cj7yveov2001ivhi1wd6q4cu8" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/12/15/Regression-Model-1/" data-id="cj8x5l5z9001mbui10g4vb4wz" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2015/12/15/Regression-Model-1/#disqus_thread" class="article-comment-link">Comments</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Math/">Math</a></li></ul>
-
-    </footer>
-  </div>
-  
-</article>
-
-<div id="disqus_thread"></div>
-<script>
-
-/**
-*  RECOMMENDED CONFIGURATION VARIABLES: EDIT AND UNCOMMENT THE SECTION BELOW TO INSERT DYNAMIC VALUES FROM YOUR PLATFORM OR CMS.
-*  LEARN WHY DEFINING THESE VARIABLES IS IMPORTANT: https://disqus.com/admin/universalcode/#configuration-variables*/
-/*
-var disqus_config = function () {
-this.page.url = PAGE_URL;  // Replace PAGE_URL with your page's canonical URL variable
-this.page.identifier = PAGE_IDENTIFIER; // Replace PAGE_IDENTIFIER with your page's unique identifier variable
-};
-*/
-(function() { // DON'T EDIT BELOW THIS LINE
-var d = document, s = d.createElement('script');
-s.src = 'https://satanwoo-2.disqus.com/embed.js';
-s.setAttribute('data-timestamp', +new Date());
-(d.head || d.body).appendChild(s);
-})();
-</script>
-<noscript>Please enable JavaScript to view the <a href="https://disqus.com/?ref_noscript">comments powered by Disqus.</a></noscript>
-                                
-  
-    <article id="post-Learn-R-1" class="article article-type-post" itemscope itemprop="blogPost">
-  <div class="article-meta">
-    <a href="/2015/12/13/Learn-R-1/" class="article-date">
-  <time datetime="2015-12-13T07:03:36.000Z" itemprop="datePublished">2015-12-13</time>
-</a>
-    
-  </div>
-  <div class="article-inner">
-    
-    
-      <header class="article-header">
-        
-  
-    <h1 itemprop="name">
-      <a class="article-title" href="/2015/12/13/Learn-R-1/">一步步学R（1）</a>
-    </h1>
-  
-
-      </header>
-    
-    <div class="article-entry" itemprop="articleBody">
-      
-        <h3 id="系列连载">系列连载</h3><p><a href="http://satanwoo.github.io/2015/12/13/Learn-R-1/">一步步学R（1）</a><br><a href="http://satanwoo.github.io/2015/12/20/Learn-R-2/">一步步学R（2）</a></p>
-<p>嘿嘿，作为一名天才，当然要掌握一定的数据分析能力啦，所以从今天起，我们来一步步学习R这门有意思的语言。</p>
-<p>这一系列的文章的开发环境都是基于Mac的。</p>
-<h3 id="安装">安装</h3><ol>
-<li>首先你要安装R语言的环境 <a href="https://cran.r-project.org/" target="_blank" rel="external">安装点我</a></li>
-<li>可选：安装RStudio（类似于Matlab），安装之前必须已经安装了R <a href="https://www.rstudio.com/" target="_blank" rel="external">安装点我</a></li>
-</ol>
-<h3 id="基础知识">基础知识</h3><h4 id="R里面的基础类型">R里面的基础类型</h4><ul>
-<li>Character，如 “a”，”haha”</li>
-<li>Number（实数），如 5， 5.5</li>
-<li><p>Integer（整数），如 5，6</p>
-<p>  <strong>要注意的是，默认情况，所有的整数类型都为实数，如果要特定为整数，需要加L，如5L</strong></p>
-</li>
-<li><p>Logical，如TRUE, FALSE</p>
-<p>  <strong>FALSE = 0，TRUE为一切非0数，可以简写为F/T</strong></p>
-</li>
-<li><p>Complex（复数），如 5 + 7i</p>
-</li>
-</ul>
-<h4 id="操作">操作</h4><p><code>x &lt;- 5</code> 表示将5赋值给x<br><code>x</code>      表示输出x，效果等同于<code>print(x)</code></p>
-<h4 id="向量">向量</h4><p>虽然向量不是一个基本类型，但是却是R语言中非常关键的一种数据结构</p>
-<p><code>x &lt;- 5</code> 这句语句虽然表面上看起来是定义了一个<strong>Number</strong>类型的x，值为5。但是实质上却是构建了一个大小为1的向量，通过<code>x</code>语句我们可以得到一下结果：</p>
-<pre><code>&gt; x
-[<span class="number">1</span>] <span class="number">5</span>
-</code></pre><p>所以<code>x</code> 等同于语句 <code>x[1]</code>，会输出5。</p>
-<p><strong>注意：R语言里面的数据索引从1开始</strong></p>
-<p>除了默认构造的向量以外，我们可以通过<code>vector(class, size)</code>来构建指定类型和大小的向量，如：</p>
-<pre><code>&gt; k &lt;- <span class="function"><span class="title">vector</span><span class="params">(<span class="string">'logical'</span>, <span class="number">5</span>L)</span></span>
-&gt; z &lt;- <span class="function"><span class="title">vector</span><span class="params">(<span class="string">"complex"</span>, <span class="number">7</span>)</span></span>
-</code></pre><p>以上两句我们分别构建了一个名为k的logical向量，大小5以及一个复数向量，大小为7。</p>
-<p><strong>注意：在R的向量里，同一个向量只能包含相同类型的对象，如果包含了不相同，会进行隐式转换，如果不能转换就会报错。</strong></p>
-<p>如：</p>
-<pre><code>&gt; k &lt;- <span class="function"><span class="title">c</span><span class="params">(T, <span class="string">"a"</span>)</span></span>
-&gt; k
-[<span class="number">1</span>] <span class="string">"TRUE"</span> <span class="string">"a"</span> 
-</code></pre><p>当然也可以强制转换：</p>
-<p><code>as.character</code>， <code>as.logical</code>， <code>as.numeric</code>，<code>as.complex</code>，<code>as.integer</code></p>
-<h4 id="list">list</h4><p>list是一种可以同时保存多个类型对象的数据结构，通过<code>list(a, b, c, d)</code>进行构建。</p>
-<h4 id="Matrix">Matrix</h4><p>matrix就是多维向量，通过函数<code>matrix(data, nrows, ncols)</code> 构建，默认是按列排列数据，可以通过更改byrow=T来按照行来构建。</p>
-<h4 id="Factor">Factor</h4><p>简单理解，就是分类定义的数组，比如，<code>x &lt;- factor(c(&#39;yes&#39;, &#39;no&#39;, &#39;yes&#39;, &#39;no&#39;, &#39;yes&#39;))</code>  ，虽然看起来构建了一个和Character类型的向量差不多，但是实质上，我们可以通过</p>
-<pre><code>&gt; x &lt;- <span class="function"><span class="title">factor</span><span class="params">(c(<span class="string">'yes'</span>, <span class="string">'no'</span>, <span class="string">'yes'</span>)</span></span>)
-&gt; <span class="function"><span class="title">levels</span><span class="params">(x)</span></span>
-[<span class="number">1</span>] <span class="string">"no"</span>  <span class="string">"yes"</span>
-</code></pre><p>这个向量代表了几种分类。</p>
-<h4 id="Missing_Values">Missing Values</h4><p>Na和NaN, <strong>NaN仅代表数值计算的不存在，而Na是代表一切的不存在，即Na包含NaN</strong><br>我们可以通过<code>is.Na</code>和<code>is.NaN</code>来进行判断。</p>
-<h4 id="Data_Frames">Data Frames</h4><p>Data Frames简单理解就是一个表格，但是与Matrix不同的是，她可以包含不同类型的data，也就是说，<strong>DataFrames的每一列都是一个list</strong>。</p>
-<pre><code>&gt; k &lt;- data.<span class="function"><span class="title">frame</span><span class="params">(foo = <span class="number">1</span>:<span class="number">3</span>, w = c(T, F, F)</span></span>, row<span class="class">.names</span> = <span class="function"><span class="title">c</span><span class="params">(<span class="string">'1'</span>, <span class="string">'a'</span>, <span class="string">'k'</span>)</span></span>)
-&gt; k
-  foo     w
-<span class="number">1</span>   <span class="number">1</span>  TRUE
-<span class="tag">a</span>   <span class="number">2</span> FALSE
-k   <span class="number">3</span> FALSE
-</code></pre><p><strong>需要注意的是，每一个list的长度，都必须完全一样</strong>。</p>
-<h4 id="Names（别名）">Names（别名）</h4><p>对于一个向量、list或者matrix等等，我们都可以为里面的元素加上别名，如:</p>
-<pre><code>&gt; x &lt;- <span class="number">1</span>:<span class="number">3</span>
-&gt; <span class="function"><span class="title">names</span><span class="params">(x)</span></span> &lt;- <span class="function"><span class="title">c</span><span class="params">(T, F, <span class="string">"ha"</span>)</span></span>
-&gt; x
- TRUE FALSE    ha 
-    <span class="number">1</span>     <span class="number">2</span>     <span class="number">3</span> 
-</code></pre><p>其中，这些别名都会以字符串的形式存在，因此，你可以通过x[“TRUE”]来访问元素1。</p>
-<hr>
-<h3 id="进阶的R_哈哈哈">进阶的R 哈哈哈</h3><h4 id="Partical_Matching">Partical Matching</h4><p>R里面有个很酷的特性叫做Partial Matching。比如你定义了如下的list：<code>x &lt;- list(caonikljslkdfj = 5)</code>，每次都要输入<code>caonikljslkdfj</code>势必很麻烦，因此你可以使用<strong>$</strong>来获取，如<code>x$c</code> 即可以得到5了。</p>
-<h4 id="Subset">Subset</h4><p>在R里面，获取数据或者构建数据简直就是a piece of cake。(哈哈哈，英语好就是屌啊)</p>
-<p>比如有这样一个向量<code>x &lt;- c(1, 2, 3, 4, 5)</code>，</p>
-<p>你可以<code>x[1]</code> 来获取元素1，也可以通过<code>x[1:3]</code>来获取元素1到元素3。同样，你也可以通过<code>x[x &gt; 2]</code> 来获取元素中值比2大的元素。</p>
-<p>你也可以通过logical来构建另外的向量，如：</p>
-<pre><code>&gt; u &lt;- x &gt; <span class="number">2</span>
-&gt; u
-[<span class="number">1</span>] <span class="literal">FALSE</span> <span class="literal">FALSE</span>  <span class="literal">TRUE</span>  <span class="literal">TRUE</span>  <span class="literal">TRUE</span>
-</code></pre><p>而对于Matrix类型来说，<code>c &lt;- matrix(1:3, nrows = 3, ncols = 1)</code>，你可以使用<code>c[1, ]</code>来获取第一行所有列的数据，或者<code>c[,1]</code>来获取第一列所有行的数据。</p>
-<h4 id="[]_vs_[[]]_vs_$">[] vs [[]] vs $</h4><p>首先，这三个符号都可以获取元素，但是区别在于：</p>
-<ul>
-<li>[]返回的是和变量本身类型相同的东西，如果对list使用[]，那么返回的就是list，如果对向量使用，返回的就是向量，无关取出的元素本身的类型。</li>
-<li>[]可以获取多个元素，而[[]]和$不行。</li>
-<li>$可以模糊匹配（Partial Matching），而[[]]不行，如果要启用模糊匹配，得使用[[name, exact = F]]</li>
-<li>$不可以使用计算值，[[]]可以</li>
-</ul>
-<p>是不是很拗口？让我们来看几个例子，在看例子之前强调一点，</p>
-<p><strong>元素并非特指一个，而是一个基本的数据结构，比如对于向量 <code>x &lt;- 1:5</code>来说，里面的元素1到元素5分别都是一个元素。而对于<code>c&lt;- list(foo = 1:3, bar = 0.5)</code>来说，foo和bar都分别是一个元素，尽管foo本身仍然是个向量。</strong></p>
-<h5 id="例子">例子</h5><p>对于<code>c &lt;- list(foo = 1:3, bar = 0.6)</code>定义的一个list，我们分别使用：</p>
-<pre><code>&gt; c[<span class="string">"foo"</span>]
-$foo
-[<span class="number">1</span>] <span class="number">1</span> <span class="number">2</span> <span class="number">3</span>
-
-&gt; c[[<span class="string">"foo"</span>]]
-[<span class="number">1</span>] <span class="number">1</span> <span class="number">2</span> <span class="number">3</span>
-&gt; c$foo
-[<span class="number">1</span>] <span class="number">1</span> <span class="number">2</span> <span class="number">3</span>
-</code></pre><p>可以看到，通过［］取出的foo元素仍然是list，而[[]]和$取出的都是向量元素本身了。</p>
-<p>再比如计算变量的差别：</p>
-<pre><code>&gt; name &lt;- <span class="string">"foo"</span>
-&gt; c[[name]]
-[<span class="number">1</span>] <span class="number">1</span> <span class="number">2</span> <span class="number">3</span>
-&gt; c$name
-<span class="literal">NULL</span>
-</code></pre><p>可以看到，[[]]可以使用计算变量，而$不可以。<strong>这点其实和JavaScript里面的dot和[]操作符很类似的</strong></p>
-<p>模糊匹配差别：</p>
-<pre><code>&gt; c$f
-[<span class="number">1</span>] <span class="number">1</span> <span class="number">2</span> <span class="number">3</span>
-&gt; c[[<span class="string">"f"</span>]]
-<span class="literal">NULL</span>
-&gt; c[[<span class="string">"f"</span>, exact = F]]
-[<span class="number">1</span>] <span class="number">1</span> <span class="number">2</span> <span class="number">3</span>
-</code></pre><h4 id="向量化操作">向量化操作</h4><p><strong>R里面的所有计算操作都是并行的</strong>。</p>
-<p>因此，如果要计算两个Matrix的乘积，需要使用<code>%*%</code>，否则如果直接使用<code>*</code>就是对应位置的元素相乘而已。</p>
-
-      
-    </div>
-    <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/12/13/Learn-R-1/" data-id="cj7yveovp001yvhi11co18jch" class="article-share-link">Share</a>
-      
-        <a href="http://satanwoo.github.io/2015/12/13/Learn-R-1/#disqus_thread" class="article-comment-link">Comments</a>
-      
-      
-  <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/R/">R</a></li></ul>
 
     </footer>
   </div>
@@ -6378,7 +6617,7 @@ s.setAttribute('data-timestamp', +new Date());
   <div class="widget-wrap">
     <h3 class="widget-title">Tags</h3>
     <div class="widget">
-      <ul class="tag-list"><li class="tag-list-item"><a class="tag-list-link" href="/tags/Android/">Android</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/C/">C</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Growth/">Growth</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/JavaScript/">JavaScript</a><span class="tag-list-count">3</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Math/">Math</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Performance/">Performance</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/R/">R</a><span class="tag-list-count">2</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Reverse-Engineering/">Reverse Engineering</a><span class="tag-list-count">6</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Swift/">Swift</a><span class="tag-list-count">6</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/iOS/">iOS</a><span class="tag-list-count">29</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/shell/">shell</a><span class="tag-list-count">1</span></li></ul>
+      <ul class="tag-list"><li class="tag-list-item"><a class="tag-list-link" href="/tags/Android/">Android</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/C/">C</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Growth/">Growth</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/JavaScript/">JavaScript</a><span class="tag-list-count">3</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Math/">Math</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Performance/">Performance</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/R/">R</a><span class="tag-list-count">2</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Reverse-Engineering/">Reverse Engineering</a><span class="tag-list-count">6</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Swift/">Swift</a><span class="tag-list-count">6</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/XNU/">XNU</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/iOS/">iOS</a><span class="tag-list-count">30</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/shell/">shell</a><span class="tag-list-count">1</span></li></ul>
     </div>
   </div>
 
@@ -6387,7 +6626,7 @@ s.setAttribute('data-timestamp', +new Date());
   <div class="widget-wrap">
     <h3 class="widget-title">Tag Cloud</h3>
     <div class="widget tagcloud">
-      <a href="/tags/Android/" style="font-size: 10px;">Android</a> <a href="/tags/C/" style="font-size: 10px;">C</a> <a href="/tags/Growth/" style="font-size: 10px;">Growth</a> <a href="/tags/JavaScript/" style="font-size: 15px;">JavaScript</a> <a href="/tags/Math/" style="font-size: 10px;">Math</a> <a href="/tags/Performance/" style="font-size: 10px;">Performance</a> <a href="/tags/R/" style="font-size: 12.5px;">R</a> <a href="/tags/Reverse-Engineering/" style="font-size: 17.5px;">Reverse Engineering</a> <a href="/tags/Swift/" style="font-size: 17.5px;">Swift</a> <a href="/tags/iOS/" style="font-size: 20px;">iOS</a> <a href="/tags/shell/" style="font-size: 10px;">shell</a>
+      <a href="/tags/Android/" style="font-size: 10px;">Android</a> <a href="/tags/C/" style="font-size: 10px;">C</a> <a href="/tags/Growth/" style="font-size: 10px;">Growth</a> <a href="/tags/JavaScript/" style="font-size: 15px;">JavaScript</a> <a href="/tags/Math/" style="font-size: 10px;">Math</a> <a href="/tags/Performance/" style="font-size: 10px;">Performance</a> <a href="/tags/R/" style="font-size: 12.5px;">R</a> <a href="/tags/Reverse-Engineering/" style="font-size: 17.5px;">Reverse Engineering</a> <a href="/tags/Swift/" style="font-size: 17.5px;">Swift</a> <a href="/tags/XNU/" style="font-size: 10px;">XNU</a> <a href="/tags/iOS/" style="font-size: 20px;">iOS</a> <a href="/tags/shell/" style="font-size: 10px;">shell</a>
     </div>
   </div>
 
@@ -6396,7 +6635,7 @@ s.setAttribute('data-timestamp', +new Date());
   <div class="widget-wrap">
     <h3 class="widget-title">Archives</h3>
     <div class="widget">
-      <ul class="archive-list"><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/09/">September 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/08/">August 2017</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/07/">July 2017</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/06/">June 2017</a><span class="archive-list-count">3</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/04/">April 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/01/">January 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/10/">October 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/09/">September 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/07/">July 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/05/">May 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/04/">April 2016</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/03/">March 2016</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/02/">February 2016</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/12/">December 2015</a><span class="archive-list-count">6</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/11/">November 2015</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/10/">October 2015</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/09/">September 2015</a><span class="archive-list-count">4</span></li></ul>
+      <ul class="archive-list"><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/10/">October 2017</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/09/">September 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/08/">August 2017</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/07/">July 2017</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/06/">June 2017</a><span class="archive-list-count">3</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/04/">April 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/01/">January 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/10/">October 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/09/">September 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/07/">July 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/05/">May 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/04/">April 2016</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/03/">March 2016</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/02/">February 2016</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/12/">December 2015</a><span class="archive-list-count">6</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/11/">November 2015</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/10/">October 2015</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/09/">September 2015</a><span class="archive-list-count">4</span></li></ul>
     </div>
   </div>
 
@@ -6406,6 +6645,10 @@ s.setAttribute('data-timestamp', +new Date());
     <h3 class="widget-title">Recents</h3>
     <div class="widget">
       <ul>
+        
+          <li>
+            <a href="/2017/10/18/abort/">iOS内存abort(Jetsam) 原理探究</a>
+          </li>
         
           <li>
             <a href="/2017/09/24/mainthreadchecker1/">基于桥的全量方法Hook方案 - 探究苹果主线程检查实现</a>
@@ -6421,10 +6664,6 @@ s.setAttribute('data-timestamp', +new Date());
         
           <li>
             <a href="/2017/07/30/xlog/">微信高性能线上日志系统xlog剖析</a>
-          </li>
-        
-          <li>
-            <a href="/2017/06/29/Macho-2/">深入理解Macho文件（二）- 消失的__OBJC段与新生的__DATA段</a>
           </li>
         
       </ul>

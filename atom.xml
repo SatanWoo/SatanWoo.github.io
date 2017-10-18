@@ -4,7 +4,7 @@
   
   <link href="/atom.xml" rel="self"/>
   <link href="http://satanwoo.github.io/"/>
-  <updated>2017-09-24T14:59:43.000Z</updated>
+  <updated>2017-10-18T14:49:00.000Z</updated>
   <id>http://satanwoo.github.io/</id>
   
   <author>
@@ -15,11 +15,373 @@
   <generator uri="http://hexo.io/">Hexo</generator>
   
   <entry>
+    <title><![CDATA[iOS内存abort(Jetsam) 原理探究]]></title>
+    <link href="http://satanwoo.github.io/2017/10/18/abort/"/>
+    <id>http://satanwoo.github.io/2017/10/18/abort/</id>
+    <published>2017-10-18T14:46:01.000Z</published>
+    <updated>2017-10-18T14:49:00.000Z</updated>
+    <content type="html"><![CDATA[<h3 id="招人">招人</h3><p>手淘架构组招人 iOS／Android 皆可，地点杭州，有兴趣的请联系我！！</p>
+<h3 id="iOS内存abort(Jetsam)_原理探究">iOS内存abort(Jetsam) 原理探究</h3><p>苹果最近开源了iOS系统上的XNU内核代码，加上最近又开始负责手淘/猫客的稳定性及性能相关的工作，所以赶紧拜读下苹果的大作。今天主要开始想分析跟abort相关的内存Jetsam原理。</p>
+<h3 id="什么是Jetsam">什么是Jetsam</h3><p>关于Jetsam，可能有些人还不是很理解。我们可以从<strong>手机设置-&gt;隐私-&gt;分析</strong>这条路径看看系统的日志，会发现手机上有许多<code>JetsamEvent</code>开头的日志。打开这些日志，一般会显示一些内存大小，CPU时间什么的数据。</p>
+<p>之所以会发生这么JetsamEvent，主要还是由于iOS设备不存在交换区导致的内存受限，所以iOS内核不得不把一些<strong>优先级不高或者占用内存过大的</strong>杀掉。这些<code>JetsamEvent</code>就是系统在杀掉App后记录的一些数据信息。</p>
+<blockquote>
+<p>当然，CPU使用率过高，也算JetsamEvent，但是相对内存来说，这种情况相对来说较少</p>
+</blockquote>
+<p>从某种程度来说，JetsamEvent是一种另类的Crash事件，但是在常规的Crash捕获工具中，由于iOS上能捕获的信号量的限制，所以因为内存导致App被杀掉是无法被捕获的。为此，许多业界的前辈通过设计<code>flag</code>的方式自己记录所谓的<code>abort</code>事件来采集数据。但是这种采集的abort，一般情况下都只能简单的记录次数，而没有详细的堆栈。</p>
+<h3 id="源码探究">源码探究</h3><p>MacOS/iOS是一个从BSD衍生而来的系统。其内核是Mach，但是对于上层暴露的接口一般都是基于BSD层对于Mach包装后的。虽然说Mach是个微内核的架构，真正的虚拟内存管理是在其中进行，但是BSD对于内存管理提供了相对较为上层的接口，同时，各种常见的<strong>JetSam事件也是由BSD产生</strong>，所以，我们从<code>bsd_init</code>这个函数作为入口，来探究下原理。</p>
+<p><code>bsd_init</code>中基本都是在初始化各个子系统，比如虚拟内存管理等等。</p>
+<p>跟内存相关的包括如下几步可能：</p>
+<pre><code><span class="number">1.</span> 初始化BSD内存Zone，这个Zone是基于Mach内核的zone构建
+kmeminit();
+
+<span class="number">2.</span> iOS上独有的特性，内存和进程的休眠的常驻监控线程
+<span class="preprocessor">#<span class="keyword">if</span> CONFIG_FREEZE</span>
+<span class="preprocessor">#<span class="keyword">ifndef</span> CONFIG_MEMORYSTATUS</span>
+    <span class="preprocessor">#<span class="keyword">error</span> <span class="string">"CONFIG_FREEZE defined without matching CONFIG_MEMORYSTATUS"</span></span>
+<span class="preprocessor">#<span class="keyword">endif</span></span>
+    <span class="comment">/* Initialise background freezing */</span>
+    bsd_init_kprintf(<span class="string">"calling memorystatus_freeze_init\n"</span>);
+    memorystatus_freeze_init();
+<span class="preprocessor">#<span class="keyword">endif</span>&gt;</span>
+
+<span class="number">3.</span> iOS独有，JetSAM（即低内存事件的常驻监控线程）
+<span class="preprocessor">#<span class="keyword">if</span> CONFIG_MEMORYSTATUS</span>
+    <span class="comment">/* Initialize kernel memory status notifications */</span>
+    bsd_init_kprintf(<span class="string">"calling memorystatus_init\n"</span>);
+    memorystatus_init();
+<span class="preprocessor">#<span class="keyword">endif</span> <span class="comment">/* CONFIG_MEMORYSTATUS */</span></span>
+</code></pre><p>这两步代码都是调用<code>kern_memorystatus.c</code>里面暴露的接口，主要的作用就是从内核中开启了两个最高优先级的线程，来监控整个系统的内存情况。</p>
+<p>首先先来看看<code>CONFIG_FREEZE</code>涉及的功能。当启用这个效果的时候，内核会对<strong>进程</strong>进行冷冻而不是Kill。</p>
+<p>这个冷冻的功能是通过在内核中启动一个<code>memorystatus_freeze_thread</code>进行。这个线程在收到信号后调用<code>memorystatus_freeze_top_process</code>进行冷冻。</p>
+<p>当然，涉及到进程休眠相关的代码，就需要谈谈苹果系统里面其他相关概念了。扯开又是一个比较大的话题，后续单独开文章来进行阐述。</p>
+<p>回到iOS Abort问题上的话，我们只需要关注<code>memorystatus_init</code>即可，去除平台无关的代码后如下：</p>
+<pre><code>__private_extern__ <span class="keyword">void</span>
+memorystatus_init(<span class="keyword">void</span>)
+{
+    thread_t thread = THREAD_NULL;
+    kern_return_t result;
+    <span class="keyword">int</span> i;
+
+    <span class="comment">/* Init buckets */</span>
+    <span class="comment">// 注意点1：优先级数组，每个数组都持有了一个同优先级进程的列表</span>
+    <span class="keyword">for</span> (i = <span class="number">0</span>; i &lt; MEMSTAT_BUCKET_COUNT; i++) {
+        TAILQ_INIT(&amp;memstat_bucket[i]<span class="variable">.list</span>);
+        memstat_bucket[i]<span class="variable">.count</span> = <span class="number">0</span>;
+    }
+    memorystatus_idle_demotion_call = thread_call_allocate((thread_call_func_t)memorystatus_perform_idle_demotion, <span class="literal">NULL</span>);
+
+<span class="preprocessor">#if CONFIG_JETSAM</span>
+
+    nanoseconds_to_absolutetime((uint64_t)DEFERRED_IDLE_EXIT_TIME_SECS * <span class="built_in">NSEC_PER_SEC</span>, &amp;memorystatus_sysprocs_idle_delay_time);
+    nanoseconds_to_absolutetime((uint64_t)DEFERRED_IDLE_EXIT_TIME_SECS * <span class="built_in">NSEC_PER_SEC</span>, &amp;memorystatus_apps_idle_delay_time);
+
+    <span class="comment">/* Apply overrides */</span>
+    <span class="comment">// 注意点2：获取一系列内核参数</span>
+    PE_get_default(<span class="string">"kern.jetsam_delta"</span>, &amp;delta_percentage, <span class="keyword">sizeof</span>(delta_percentage));
+    <span class="keyword">if</span> (delta_percentage == <span class="number">0</span>) {
+        delta_percentage = <span class="number">5</span>;
+    }
+    assert(delta_percentage &lt; <span class="number">100</span>);
+    PE_get_default(<span class="string">"kern.jetsam_critical_threshold"</span>, &amp;critical_threshold_percentage, <span class="keyword">sizeof</span>(critical_threshold_percentage));
+    assert(critical_threshold_percentage &lt; <span class="number">100</span>);
+    PE_get_default(<span class="string">"kern.jetsam_idle_offset"</span>, &amp;idle_offset_percentage, <span class="keyword">sizeof</span>(idle_offset_percentage));
+    assert(idle_offset_percentage &lt; <span class="number">100</span>);
+    PE_get_default(<span class="string">"kern.jetsam_pressure_threshold"</span>, &amp;pressure_threshold_percentage, <span class="keyword">sizeof</span>(pressure_threshold_percentage));
+    assert(pressure_threshold_percentage &lt; <span class="number">100</span>);
+    PE_get_default(<span class="string">"kern.jetsam_freeze_threshold"</span>, &amp;freeze_threshold_percentage, <span class="keyword">sizeof</span>(freeze_threshold_percentage));
+    assert(freeze_threshold_percentage &lt; <span class="number">100</span>);
+
+    <span class="keyword">if</span> (!PE_parse_boot_argn(<span class="string">"jetsam_aging_policy"</span>, &amp;jetsam_aging_policy,
+            <span class="keyword">sizeof</span> (jetsam_aging_policy))) {
+
+        <span class="keyword">if</span> (!PE_get_default(<span class="string">"kern.jetsam_aging_policy"</span>, &amp;jetsam_aging_policy,
+                <span class="keyword">sizeof</span>(jetsam_aging_policy))) {
+
+            jetsam_aging_policy = kJetsamAgingPolicyLegacy;
+        }
+    }
+
+    <span class="keyword">if</span> (jetsam_aging_policy &gt; kJetsamAgingPolicyMax) {
+        jetsam_aging_policy = kJetsamAgingPolicyLegacy;
+    }
+
+    <span class="keyword">switch</span> (jetsam_aging_policy) {
+
+        <span class="keyword">case</span> kJetsamAgingPolicyNone:
+            system_procs_aging_band = JETSAM_PRIORITY_IDLE;
+            applications_aging_band = JETSAM_PRIORITY_IDLE;
+            <span class="keyword">break</span>;
+
+        <span class="keyword">case</span> kJetsamAgingPolicyLegacy:
+            <span class="comment">/*
+             * Legacy behavior where some daemons get a 10s protection once
+             * AND only before the first clean-&gt;dirty-&gt;clean transition before
+             * going into IDLE band.
+             */</span>
+            system_procs_aging_band = JETSAM_PRIORITY_AGING_BAND1;
+            applications_aging_band = JETSAM_PRIORITY_IDLE;
+            <span class="keyword">break</span>;
+
+        <span class="keyword">case</span> kJetsamAgingPolicySysProcsReclaimedFirst:
+            system_procs_aging_band = JETSAM_PRIORITY_AGING_BAND1;
+            applications_aging_band = JETSAM_PRIORITY_AGING_BAND2;
+            <span class="keyword">break</span>;
+
+        <span class="keyword">case</span> kJetsamAgingPolicyAppsReclaimedFirst:
+            system_procs_aging_band = JETSAM_PRIORITY_AGING_BAND2;
+            applications_aging_band = JETSAM_PRIORITY_AGING_BAND1;
+            <span class="keyword">break</span>;
+
+        <span class="keyword">default</span>:
+            <span class="keyword">break</span>;
+    }
+
+    <span class="comment">/*
+     * The aging bands cannot overlap with the JETSAM_PRIORITY_ELEVATED_INACTIVE
+     * band and must be below it in priority. This is so that we don't have to make
+     * our 'aging' code worry about a mix of processes, some of which need to age
+     * and some others that need to stay elevated in the jetsam bands.
+     */</span>
+    assert(JETSAM_PRIORITY_ELEVATED_INACTIVE &gt; system_procs_aging_band);
+    assert(JETSAM_PRIORITY_ELEVATED_INACTIVE &gt; applications_aging_band);
+
+    <span class="comment">/* Take snapshots for idle-exit kills by default? First check the boot-arg... */</span>
+    <span class="keyword">if</span> (!PE_parse_boot_argn(<span class="string">"jetsam_idle_snapshot"</span>, &amp;memorystatus_idle_snapshot, <span class="keyword">sizeof</span> (memorystatus_idle_snapshot))) {
+            <span class="comment">/* ...no boot-arg, so check the device tree */</span>
+            PE_get_default(<span class="string">"kern.jetsam_idle_snapshot"</span>, &amp;memorystatus_idle_snapshot, <span class="keyword">sizeof</span>(memorystatus_idle_snapshot));
+    }
+
+    memorystatus_delta = delta_percentage * atop_64(max_mem) / <span class="number">100</span>;
+    memorystatus_available_pages_critical_idle_offset = idle_offset_percentage * atop_64(max_mem) / <span class="number">100</span>;
+    memorystatus_available_pages_critical_base = (critical_threshold_percentage / delta_percentage) * memorystatus_delta;
+    memorystatus_policy_more_free_offset_pages = (policy_more_free_offset_percentage / delta_percentage) * memorystatus_delta;
+
+    <span class="comment">/* Jetsam Loop Detection */</span>
+    <span class="keyword">if</span> (max_mem &lt;= (<span class="number">512</span> * <span class="number">1024</span> * <span class="number">1024</span>)) {
+        <span class="comment">/* 512 MB devices */</span>
+        memorystatus_jld_eval_period_msecs = <span class="number">8000</span>;    <span class="comment">/* 8000 msecs == 8 second window */</span>
+    } <span class="keyword">else</span> {
+        <span class="comment">/* 1GB and larger devices */</span>
+        memorystatus_jld_eval_period_msecs = <span class="number">6000</span>;    <span class="comment">/* 6000 msecs == 6 second window */</span>
+    }
+
+    memorystatus_jld_enabled = <span class="literal">TRUE</span>;
+
+    <span class="comment">/* No contention at this point */</span>
+    memorystatus_update_levels_locked(<span class="literal">FALSE</span>);
+
+<span class="preprocessor">#endif /* CONFIG_JETSAM */</span>
+
+    memorystatus_jetsam_snapshot_max = maxproc;
+    memorystatus_jetsam_snapshot = 
+        (memorystatus_jetsam_snapshot_t*)kalloc(<span class="keyword">sizeof</span>(memorystatus_jetsam_snapshot_t) +
+        <span class="keyword">sizeof</span>(memorystatus_jetsam_snapshot_entry_t) * memorystatus_jetsam_snapshot_max);
+    <span class="keyword">if</span> (!memorystatus_jetsam_snapshot) {
+        panic(<span class="string">"Could not allocate memorystatus_jetsam_snapshot"</span>);
+    }
+
+    nanoseconds_to_absolutetime((uint64_t)JETSAM_SNAPSHOT_TIMEOUT_SECS * <span class="built_in">NSEC_PER_SEC</span>, &amp;memorystatus_jetsam_snapshot_timeout);
+
+    memset(&amp;memorystatus_at_boot_snapshot, <span class="number">0</span>, <span class="keyword">sizeof</span>(memorystatus_jetsam_snapshot_t));
+
+    result = kernel_thread_start_priority(memorystatus_thread, <span class="literal">NULL</span>, <span class="number">95</span> <span class="comment">/* MAXPRI_KERNEL */</span>, &amp;thread);
+    <span class="keyword">if</span> (result == KERN_SUCCESS) {
+        thread_deallocate(thread);
+    } <span class="keyword">else</span> {
+        panic(<span class="string">"Could not create memorystatus_thread"</span>);
+    }
+}
+</code></pre><p><strong><b style="color:red">下面先介绍几个知识点</b></strong></p>
+<ul>
+<li><p>内核里面对于所有的进程都有一个优先级的分布，通过一个数组维护，数组每一项是一个进程的list。这个数组的大小是<code>JETSAM_PRIORITY_MAX + 1</code>。其结构体定义如下：</p>
+<pre><code>typedef struct memstat_bucket {
+    <span class="type">TAILQ_HEAD</span>(, <span class="keyword">proc</span>) list;
+    <span class="type">int</span> count;
+} memstat_bucket_t;
+</code></pre><p>这结构体非常通俗易懂。</p>
+</li>
+<li><p>线程在Mach下采用了不同的优先级，其中<code>MAXPRI_KERNEL</code>代表的是分配给内核可用范围内最高优先级的线程。其他级别还有如下这些：</p>
+</li>
+</ul>
+<hr>
+<pre><code><span class="keyword">*</span> // 优先级最高的实时线程 (不太清楚谁用)
+ <span class="keyword">*</span> 127        Reserved (real-time)
+ <span class="keyword">*</span>                A
+ <span class="keyword">*</span>                +
+ <span class="keyword">*</span>            (32 levels)
+ <span class="keyword">*</span>                +
+ <span class="keyword">*</span>                V
+ <span class="keyword">*</span> 96        Reserved (real-time)
+ <span class="keyword">*</span> // 给内核用的线程优先级(MAXPRI_KERNEL)
+ <span class="keyword">*</span> 95        Kernel mode only
+ <span class="keyword">*</span>                A
+ <span class="keyword">*</span>                +
+ <span class="keyword">*</span>            (16 levels)
+ <span class="keyword">*</span>                +
+ <span class="keyword">*</span>                V
+ <span class="keyword">*</span> 80        Kernel mode only
+ <span class="keyword">*</span> // 给操作系统分配的线程优先级
+ <span class="keyword">*</span> 79        System high priority
+ <span class="keyword">*</span>                A
+ <span class="keyword">*</span>                +
+ <span class="keyword">*</span>            (16 levels)
+ <span class="keyword">*</span>                +
+ <span class="keyword">*</span>                V
+ <span class="keyword">*</span> 64        System high priority
+ <span class="keyword">*</span> // 剩下的全是用户态的普通程序可以用的
+ <span class="keyword">*</span> 63        Elevated priorities
+ <span class="keyword">*</span>                A
+ <span class="keyword">*</span>                +
+ <span class="keyword">*</span>            (12 levels)
+ <span class="keyword">*</span>                +
+ <span class="keyword">*</span>                V
+ <span class="keyword">*</span> 52        Elevated priorities
+ <span class="keyword">*</span> 51        Elevated priorities (incl. BSD +nice)
+ <span class="keyword">*</span>                A
+ <span class="keyword">*</span>                +
+ <span class="keyword">*</span>            (20 levels)
+ <span class="keyword">*</span>                +
+ <span class="keyword">*</span>                V
+ <span class="keyword">*</span> 32        Elevated priorities (incl. BSD +nice)
+ <span class="keyword">*</span> 31        Default (default base for threads)
+ <span class="keyword">*</span> 30        Lowered priorities (incl. BSD -nice)
+ <span class="keyword">*</span>                A
+ <span class="keyword">*</span>                +
+ <span class="keyword">*</span>            (20 levels)
+ <span class="keyword">*</span>                +
+ <span class="keyword">*</span>                V
+ <span class="keyword">*</span> 11        Lowered priorities (incl. BSD -nice)
+ <span class="keyword">*</span> 10        Lowered priorities (aged pri's)
+ <span class="keyword">*</span>                A
+ <span class="keyword">*</span>                +
+ <span class="keyword">*</span>            (11 levels)
+ <span class="keyword">*</span>                +
+ <span class="keyword">*</span>                V
+ <span class="keyword">*</span> 0        Lowered priorities (aged pri's / idle)
+ <span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span>
+</code></pre><ul>
+<li>从上图不难看出，用户态的应用程序的线程<strong>不</strong>可能高于操作系统和内核。而且，在用户态的应用程序间的线程优先级分配也有区别，前台活动的应用程序优先级高于后台的应用程序。<b style="color:red">iOS上大名鼎鼎的SpringBoard是应用程序中优先级最高的程序。</b></li>
+<li>当然线程的优先级也不是一成不变。Mach会针对每一个线程的利用率和整体系统负载动态调整优先级。如果耗费CPU太多就降低优先级，如果一个线程过度挨饿CPU则会提升其优先级。<b style="color:red">但是无论怎么变，程序都不能超过其所在的线程优先级区间范围。</b></li>
+</ul>
+<p>好，预备知识说完，那苹果究竟是怎么处理<code>JetSam</code>事件呢？</p>
+<pre><code><span class="literal">result</span> = kernel_thread_start_priority(memorystatus_thread, <span class="type">NULL</span>, <span class="number">95</span> /* <span class="type">MAXPRI_KERNEL</span> */, &amp;thread);
+</code></pre><p>苹果其实处理的思路非常简单。如上述代码，BSD层起了一个内核优先级最高的线程<code>VM_memorystatus</code>，这个线程会在维护两个列表，一个是我们之前提到的基于进程优先级的进程列表，还有一个是所谓的内存快照列表，即保存了每个进程消耗的内存页<code>memorystatus_jetsam_snapshot</code>。</p>
+<p>这个常驻线程接受从内核对于内存的守护程序<code>pageout</code>通过内核调用给每个App进程发送的内存压力通知，来处理事件，这个事件转发成上层的UI事件就是平常我们会收到的全局内存警告或者每个ViewController里面的<code>didReceiveMemoryWarning</code>。</p>
+<p><b style="color:red">当然，我们自己开发的App是不会主动注册监听这个内存警告事件的，帮助我们在底层完成这一切的都是<code>libdispatch</code>，如果你感兴趣的话，可以钻研下<code>_dispatch_source_type_memorypressure</code>和<code>__dispatch_source_type_memorystatus</code>。</b></p>
+<p>那么在哪些情况下会出现内存压力呢？我们来看一看<code>memorystatus_action_needed</code>这段函数： </p>
+<pre><code><span class="function"><span class="keyword">static</span> boolean_t
+<span class="title">memorystatus_action_needed</span><span class="params">(<span class="keyword">void</span>)</span>
+</span>{
+<span class="preprocessor">#<span class="keyword">if</span> CONFIG_EMBEDDED</span>
+    <span class="keyword">return</span> (is_reason_thrashing(kill_under_pressure_cause) ||
+            is_reason_zone_map_exhaustion(kill_under_pressure_cause) ||
+           memorystatus_available_pages &lt;= memorystatus_available_pages_pressure);
+<span class="preprocessor">#<span class="keyword">else</span> <span class="comment">/* CONFIG_EMBEDDED */</span></span>
+    <span class="keyword">return</span> (is_reason_thrashing(kill_under_pressure_cause) ||
+            is_reason_zone_map_exhaustion(kill_under_pressure_cause));
+<span class="preprocessor">#<span class="keyword">endif</span> <span class="comment">/* CONFIG_EMBEDDED */</span></span>
+}
+</code></pre><p>概括来说：</p>
+<p>频繁的的页面换进换出<code>is_reason_thrashing</code>，Mach Zone耗尽了<code>is_reason_zone_map_exhaustion</code>（这个涉及Mach内核的虚拟内存管理了，单独写）以及可用的页低于一个门槛了<code>memorystatus_available_pages</code>。</p>
+<p>在这几种情况下，就会准备去Kill 进程了。但是，在这个处理下面，有一段代码特别有意思，我们看看这个函数<code>memorystatus_act_aggressive</code>：</p>
+<pre><code><span class="keyword">if</span> ( (jld_bucket_count == <span class="number">0</span>) || 
+     (jld_now_msecs &gt; (jld_timestamp_msecs + memorystatus_jld_eval_period_msecs))) {
+
+    <span class="comment">/* 
+     * Refresh evaluation parameters 
+     */</span>
+    jld_timestamp_msecs     = jld_now_msecs;
+    jld_idle_kill_candidates = jld_bucket_count;
+    *jld_idle_kills         = <span class="number">0</span>;
+    jld_eval_aggressive_count = <span class="number">0</span>;
+    jld_priority_band_max    = JETSAM_PRIORITY_UI_SUPPORT;
+}
+</code></pre><p>这段代码很明显，是基于某个时间间隔在做条件判断。如果不满足这个判断，后续真正执行的Kill也不会走到。那我们来看看<code>memorystatus_jld_eval_period_msecs</code>这个变量：</p>
+<pre><code><span class="comment">/* Jetsam Loop Detection */</span>
+<span class="keyword">if</span> (max_mem &lt;= (<span class="number">512</span> * <span class="number">1024</span> * <span class="number">1024</span>)) {
+    <span class="comment">/* 512 MB devices */</span>
+    memorystatus_jld_eval_period_msecs = <span class="number">8000</span>;    <span class="comment">/* 8000 msecs == 8 second window */</span>
+} <span class="keyword">else</span> {
+    <span class="comment">/* 1GB and larger devices */</span>
+    memorystatus_jld_eval_period_msecs = <span class="number">6000</span>;    <span class="comment">/* 6000 msecs == 6 second window */</span>
+}
+</code></pre><p>这个时间窗口是根据设备的物理内存上限来设定的，但是无论如何，看起来至少有个<strong><span style="color:red">6秒</span></strong>的时间可以给我们来做点事情。</p>
+<p>当然，如果满足了时间窗口的需求，就会根据我们提到的优先级进程列表进行寻找可杀目标：</p>
+<pre><code>proc_list_lock()<span class="comment">;</span>
+switch (jetsam_aging_policy) {
+case kJetsamAgingPolicyLegacy:
+    bucket = &amp;memstat_bucket[JETSAM_PRIORITY_IDLE]<span class="comment">;</span>
+    jld_bucket_count = bucket-&gt;count<span class="comment">;</span>
+    bucket = &amp;memstat_bucket[JETSAM_PRIORITY_AGING_BAND1]<span class="comment">;</span>
+    jld_bucket_count += bucket-&gt;count<span class="comment">;</span>
+    break<span class="comment">;</span>
+case kJetsamAgingPolicySysProcsReclaimedFirst:
+case kJetsamAgingPolicyAppsReclaimedFirst:
+    bucket = &amp;memstat_bucket[JETSAM_PRIORITY_IDLE]<span class="comment">;</span>
+    jld_bucket_count = bucket-&gt;count<span class="comment">;</span>
+    bucket = &amp;memstat_bucket[system_procs_aging_band]<span class="comment">;</span>
+    jld_bucket_count += bucket-&gt;count<span class="comment">;</span>
+    bucket = &amp;memstat_bucket[applications_aging_band]<span class="comment">;</span>
+    jld_bucket_count += bucket-&gt;count<span class="comment">;</span>
+    break<span class="comment">;</span>
+case kJetsamAgingPolicyNone:
+default:
+    bucket = &amp;memstat_bucket[JETSAM_PRIORITY_IDLE]<span class="comment">;</span>
+    jld_bucket_count = bucket-&gt;count<span class="comment">;</span>
+    break<span class="comment">;</span>
+}
+
+bucket = &amp;memstat_bucket[JETSAM_PRIORITY_ELEVATED_INACTIVE]<span class="comment">;</span>
+elevated_bucket_count = bucket-&gt;count<span class="comment">;</span>
+</code></pre><p><b style="color:red">需要注意的是，JETSAM不一定只杀一个进程，他可能会大杀特杀，杀掉N多进程。</b></p>
+<pre><code><span class="keyword">if</span> (memorystatus_avail_pages_below_pressure()) {
+    <span class="comment">/*
+     * Still under pressure.
+     * Find another pinned processes.
+     */</span>
+    <span class="keyword">continue</span>;
+} <span class="keyword">else</span> {
+    <span class="keyword">return</span> <span class="keyword">TRUE</span>;
+}
+</code></pre><p>至于杀进程的话，最终都会落到函数<code>memorystatus_do_kill</code>-&gt;<code>jetsam_do_kill</code>去执行。</p>
+<h3 id="其他">其他</h3><p>看苹果代码的时候，发现了不少内核的参数，一一进行了尝试后，发现<code>sysctlname</code>和<code>sysctl</code>的系统调用都被苹果禁用了，比如这些：</p>
+<pre><code><span class="string">"kern.jetsam_delta"</span>
+<span class="string">"kern.jetsam_critical_threshold"</span>
+<span class="string">"kern.jetsam_idle_offset"</span>
+<span class="string">"kern.jetsam_pressure_threshold"</span>
+<span class="string">"kern.jetsam_freeze_threshold"</span>
+<span class="string">"kern.jetsam_aging_policy"</span>
+</code></pre><p>不过，我试了下通过<code>kern.boottime</code>获取机器的开机时间还是可以的，代码示例如下：</p>
+<pre><code><span class="keyword">size_t</span> size;
+sysctlbyname(<span class="string">"kern.boottime"</span>, <span class="literal">NULL</span>, &amp;size, <span class="literal">NULL</span>, <span class="number">0</span>);
+
+<span class="keyword">char</span> *boot_time = <span class="built_in">malloc</span>(size);
+sysctlbyname(<span class="string">"kern.boottime"</span>, boot_time, &amp;size, <span class="literal">NULL</span>, <span class="number">0</span>);
+
+<span class="keyword">uint32_t</span> timestamp = <span class="number">0</span>;
+<span class="built_in">memcpy</span>(&amp;timestamp, boot_time, <span class="keyword">sizeof</span>(<span class="keyword">uint32_t</span>));
+<span class="built_in">free</span>(boot_time);
+
+NSDate* bootTime = [NSDate dateWithTimeIntervalSince1970:timestamp];
+</code></pre><h3 id="最后">最后</h3><p>嘻嘻，技术原理研究了一些，心里顿时对解决公司的Abort问题有了一定的眉目。嘿嘿，我写了个DEMO验证了我的思路，是可行的。哇咔咔。等我的好消息吧～</p>
+]]></content>
+    <summary type="html">
+    <![CDATA[<h3 id="招人">招人</h3><p>手淘架构组招人 iOS／Android 皆可，地点杭州，有兴趣的请联系我！！</p>
+<h3 id="iOS内存abort(Jetsam)_原理探究">iOS内存abort(Jetsam) 原理探究</h3><p>苹果最近开源了iOS系]]>
+    </summary>
+    
+      <category term="XNU" scheme="http://satanwoo.github.io/tags/XNU/"/>
+    
+      <category term="iOS" scheme="http://satanwoo.github.io/tags/iOS/"/>
+    
+  </entry>
+  
+  <entry>
     <title><![CDATA[基于桥的全量方法Hook方案 - 探究苹果主线程检查实现]]></title>
     <link href="http://satanwoo.github.io/2017/09/24/mainthreadchecker1/"/>
     <id>http://satanwoo.github.io/2017/09/24/mainthreadchecker1/</id>
     <published>2017-09-24T14:46:43.000Z</published>
-    <updated>2017-09-24T14:59:43.000Z</updated>
+    <updated>2017-09-24T15:01:10.000Z</updated>
     <content type="html"><![CDATA[<p>最近随着iOS11的正式发布，手淘／天猫也开始逐步用Xcode 9开始编译。在调试过程中，很多同事发现经常报许多API会报线程使用错误的问题。摸索了下，发现是Xcode 9里面带上了一个叫<code>libMainThreadChecker.dylib</code>的动态库，在运行时提供了主线程检查的功能，今天就从探究苹果的实现开始讲起。</p>
 <h3 id="0x1_苹果的实现">0x1 苹果的实现</h3><p>把苹果的动态库拖入hopper里面看看，基本上扫一眼以后，比较可疑的是<code>__library_initializer</code>和<code>__library_deintializer</code>。</p>
 <blockquote>
@@ -3524,71 +3886,6 @@ a4.<span class="function"><span class="title">staticInfo</span><span class="para
     </summary>
     
       <category term="Swift" scheme="http://satanwoo.github.io/tags/Swift/"/>
-    
-  </entry>
-  
-  <entry>
-    <title><![CDATA[逆向工程SizeUp]]></title>
-    <link href="http://satanwoo.github.io/2016/03/14/SizeUp/"/>
-    <id>http://satanwoo.github.io/2016/03/14/SizeUp/</id>
-    <published>2016-03-13T16:20:57.000Z</published>
-    <updated>2016-03-22T12:48:47.000Z</updated>
-    <content type="html"><![CDATA[<p>这几天把《汇编语言》好好复习一遍，心里痒痒，就想找个软件来逆向破解一发。破啥好呢？网上逆向工程的教程一大堆，主要都是<em>Sketch</em>啦，<em>Reveal</em>啦，那我照着做一遍也没啥意思啊，体现不出我中国iOS第12人的特点啊。干脆我找个小众一点的软件破解吧。于是，我就盯上了我每天都非常喜欢使用的<strong>SizeUp</strong>，这是一款非常快速的窗口管理软件，可以通过快捷键将窗口扩展到指定的大小和位置，配合外接显示屏简直酷炫到飞起。</p>
-<p><img src="http://7lrzqz.com1.z0.glb.clouddn.com/%E5%B1%8F%E5%B9%95%E5%BF%AB%E7%85%A7%202016-03-09%20%E4%B8%8B%E5%8D%8810.46.45.png" alt=""></p>
-<p>但是这个App有个很大的问题，虽然它是免费的，但是它每次启动的时候，包括你使用的过程中，都会时不时蹦出一个提示你购买的弹框，而且弹框上的取消按钮一定要过5秒才能点击关闭，真是让人蛋疼。</p>
-<p><img src="http://7lrzqz.com1.z0.glb.clouddn.com/%E5%B1%8F%E5%B9%95%E5%BF%AB%E7%85%A7%202016-03-13%20%E4%B8%8B%E5%8D%8811.22.04.png" alt=""></p>
-<p>所以，我就讲逆向的目标定在了将这个<strong>可恶的</strong>弹窗给干掉。</p>
-<h4 id="准备工作">准备工作</h4><p>首先破解必须要准备的就是逆向工具了，由于这是个Mac app，所以我们无需使用到iPhone。所以，我简单的将SizeUp进行了一次备份就开始了。</p>
-<p>逆向一个app，我们当然要去分析其汇编代码，因此必不可少的工具就是IDA或者<strong>Hopper</strong>。在这里，请允许我个人强烈推荐Hopper，那傻瓜式的操作，非常适合我这种高智商人才，哇哈哈。Hopper也是支持免费的，但是免费版不能重新生成可执行文件，所以我先从网上下载了一个破解版的Hopper。</p>
-<h4 id="逆向开始">逆向开始</h4><p>首先我们将SizeUp拖入Hopper，得到一系列的汇编代码。这么多的代码我们从哪里下手呢? 答案是<strong>关键字</strong>。在弹窗提示我们购买的界面中，出现了很多关键字，比如<code>license</code>抑或是<code>demo</code>。首先让我们从license开始尝试。我们在Hopper界面左上侧的搜索框中输入license，会得到如下结果：</p>
-<p><img src="http://7lrzqz.com1.z0.glb.clouddn.com/%E5%B1%8F%E5%B9%95%E5%BF%AB%E7%85%A7%202016-03-13%20%E4%B8%8B%E5%8D%8811.24.09.png" alt=""></p>
-<p>从结果来看，我们大致猜测SizeUp的逻辑如下：</p>
-<ol>
-<li>初始化程序</li>
-<li>检查存储的license</li>
-<li>（如果有）多个，检查最好的一个（可能是有效期最长的）</li>
-<li>和服务器进行验证</li>
-</ol>
-<p>上述这段逻辑主要来自于高亮的<code>+[License xxx]</code>函数调用。</p>
-<p>从上述这段逻辑，我们可以看出，想要伪造license是不可能的了，这是因为牵涉了服务器验证。所以我们只能把想法转变成，干掉本地相关的逻辑。本地逻辑不外乎判断某种分支条件，根据结果进行某些页面的跳转，<strong>比如弹出Demo界面</strong>。</p>
-<p>好，现在我们来试试<strong>Demo</strong>关键字，搜索结果如下：</p>
-<p><img src="http://7lrzqz.com1.z0.glb.clouddn.com/%E5%B1%8F%E5%B9%95%E5%BF%AB%E7%85%A7%202016-03-13%20%E4%B8%8B%E5%8D%8811.24.28.png" alt=""></p>
-<p>从这个关键字的搜索结果来看，我们得到了不少有价值的信息，比如<strong>DemoDialogController</strong>。哈哈哈哈，苹果经典的MVC设计模式这时候起了很大的作用，搞过开发的人一般都会知道Controller一般对应的就是一个ViewController。如果你不信，我们继续往下看，可以看到一个<code>-[DemoDialogController showDemoDialog]</code>，这个提示够明显了吧，这分明就是说：老子就是那个界面，你快来把我干掉吧。</p>
-<p>好，大功告成一半了，我们已经找到了我们要干掉的界面，现在我们只要干掉分支判断逻辑就好了。于是，我们继续跟着Demo关键字走，不久，我们发现了<code>+[License isDemo]</code>这个嫌疑犯。卧槽，这时候，我这天赋异禀的大脑中形成了这样一段代码：</p>
-<pre><code><span class="tag">if</span> ([License isDemo]) {
-    <span class="attr_selector">[[[DemoDialogController alloc]</span> <span class="tag">init</span>] <span class="tag">showDemoDialog</span>]
-} <span class="tag">else</span> {
-    <span class="comment">// Follow your heart</span>
-}
-</code></pre><p>是不是和我猜测的一样呢？</p>
-<p>去掉前面的函数压栈，我们来着重看看这段代码：</p>
-<p><img src="http://7lrzqz.com1.z0.glb.clouddn.com/%E5%B1%8F%E5%B9%95%E5%BF%AB%E7%85%A7%202016-03-13%20%E4%B8%8B%E5%8D%8811.51.30.png" alt=""></p>
-<pre><code><span class="keyword">mov</span> <span class="literal">edx</span>, <span class="number">0x1</span>
-<span class="keyword">test</span> <span class="literal">al</span>, <span class="literal">al</span>
-<span class="keyword">je</span> <span class="number">0x1000008bd9</span>
-....
-....
-<span class="keyword">mov</span> <span class="literal">eax</span>, <span class="literal">edx</span>
-</code></pre><p>这段代码不熟悉汇编的人可能不太懂，我将其转换一下。</p>
-<pre><code>edx = <span class="literal">true</span>(YES)
-<span class="keyword">if</span> al == <span class="number">0</span>
-{
-    <span class="keyword">goto</span> <span class="number">0x1000008bd9</span>
-}
-
-... <span class="number">0x1000008bd9</span>:
-val = edx(<span class="literal">true</span>)
-<span class="keyword">return</span> val
-</code></pre><p>理解了吧，就是首先将0x1（即YES）放入<code>edx</code>寄存器，然后判断<code>al</code>代表的某种分支条件是不是0，如果是0，通过<code>je</code>命令跳转到<code>0x1000008bd9</code>地址。这个地址后面的指令就是讲<code>edx</code>的值塞入<code>eax</code>中，而<code>eax</code>是<strong>x86指令集中默认存放函数返回值的寄存器</strong>。</p>
-<p>事情到这，是不是基本理清思路了？我们只需要将je跳转的条件极其后面语句干掉就好了。我在这里采用了更暴力的做法，直接在函数一开始就讲false塞入<code>eax</code>寄存器，然后直接调用<code>ret</code>进行返回。</p>
-<p><img src="http://7lrzqz.com1.z0.glb.clouddn.com/%E5%B1%8F%E5%B9%95%E5%BF%AB%E7%85%A7%202016-03-14%20%E4%B8%8A%E5%8D%8812.00.45.png" alt=""></p>
-<h4 id="结语">结语</h4><p>是不是逆向工程看起来也没那么难呢？其实，SizeUp这种利用函数返回至做文章的逆向是最简单的，下次我们来挑战下更难的逆向目标！</p>
-]]></content>
-    <summary type="html">
-    <![CDATA[<p>这几天把《汇编语言》好好复习一遍，心里痒痒，就想找个软件来逆向破解一发。破啥好呢？网上逆向工程的教程一大堆，主要都是<em>Sketch</em>啦，<em>Reveal</em>啦，那我照着做一遍也没啥意思啊，体现不出我中国iOS第12人的特点啊。干脆我找个小众一点的软件]]>
-    </summary>
-    
-      <category term="Reverse Engineering" scheme="http://satanwoo.github.io/tags/Reverse-Engineering/"/>
     
   </entry>
   
