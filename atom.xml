@@ -4,7 +4,7 @@
   
   <link href="/atom.xml" rel="self"/>
   <link href="http://satanwoo.github.io/"/>
-  <updated>2017-10-18T14:49:00.000Z</updated>
+  <updated>2017-10-18T14:51:11.000Z</updated>
   <id>http://satanwoo.github.io/</id>
   
   <author>
@@ -19,14 +19,11 @@
     <link href="http://satanwoo.github.io/2017/10/18/abort/"/>
     <id>http://satanwoo.github.io/2017/10/18/abort/</id>
     <published>2017-10-18T14:46:01.000Z</published>
-    <updated>2017-10-18T14:49:00.000Z</updated>
+    <updated>2017-10-18T14:51:11.000Z</updated>
     <content type="html"><![CDATA[<h3 id="招人">招人</h3><p>手淘架构组招人 iOS／Android 皆可，地点杭州，有兴趣的请联系我！！</p>
 <h3 id="iOS内存abort(Jetsam)_原理探究">iOS内存abort(Jetsam) 原理探究</h3><p>苹果最近开源了iOS系统上的XNU内核代码，加上最近又开始负责手淘/猫客的稳定性及性能相关的工作，所以赶紧拜读下苹果的大作。今天主要开始想分析跟abort相关的内存Jetsam原理。</p>
 <h3 id="什么是Jetsam">什么是Jetsam</h3><p>关于Jetsam，可能有些人还不是很理解。我们可以从<strong>手机设置-&gt;隐私-&gt;分析</strong>这条路径看看系统的日志，会发现手机上有许多<code>JetsamEvent</code>开头的日志。打开这些日志，一般会显示一些内存大小，CPU时间什么的数据。</p>
 <p>之所以会发生这么JetsamEvent，主要还是由于iOS设备不存在交换区导致的内存受限，所以iOS内核不得不把一些<strong>优先级不高或者占用内存过大的</strong>杀掉。这些<code>JetsamEvent</code>就是系统在杀掉App后记录的一些数据信息。</p>
-<blockquote>
-<p>当然，CPU使用率过高，也算JetsamEvent，但是相对内存来说，这种情况相对来说较少</p>
-</blockquote>
 <p>从某种程度来说，JetsamEvent是一种另类的Crash事件，但是在常规的Crash捕获工具中，由于iOS上能捕获的信号量的限制，所以因为内存导致App被杀掉是无法被捕获的。为此，许多业界的前辈通过设计<code>flag</code>的方式自己记录所谓的<code>abort</code>事件来采集数据。但是这种采集的abort，一般情况下都只能简单的记录次数，而没有详细的堆栈。</p>
 <h3 id="源码探究">源码探究</h3><p>MacOS/iOS是一个从BSD衍生而来的系统。其内核是Mach，但是对于上层暴露的接口一般都是基于BSD层对于Mach包装后的。虽然说Mach是个微内核的架构，真正的虚拟内存管理是在其中进行，但是BSD对于内存管理提供了相对较为上层的接口，同时，各种常见的<strong>JetSam事件也是由BSD产生</strong>，所以，我们从<code>bsd_init</code>这个函数作为入口，来探究下原理。</p>
 <p><code>bsd_init</code>中基本都是在初始化各个子系统，比如虚拟内存管理等等。</p>
