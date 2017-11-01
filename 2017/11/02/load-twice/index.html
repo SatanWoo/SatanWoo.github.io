@@ -1,0 +1,364 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  
+  <title>注意系统库的坑之load函数调用多次 | Hexo</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+  <meta name="description" content="水文一篇
+
+今天在群友逆向企业微信的时候，发现了一个比较有意思的现象了，发现对于NSObject添加的load的方法执行了两次，导致原本意图的Swizzle出现了问题。
+之前在个人的理解中，load和initialize函数有所不同，load是在加载二进制程序的时候，将这些二进制程序中的类中包含的load方法进行一一调用，调用过程中不会有调用父类的情况。而initialize则不同，是在类第一次使">
+<meta property="og:type" content="article">
+<meta property="og:title" content="注意系统库的坑之load函数调用多次">
+<meta property="og:url" content="http://satanwoo.github.io/2017/11/02/load-twice/index.html">
+<meta property="og:site_name" content="Hexo">
+<meta property="og:description" content="水文一篇
+
+今天在群友逆向企业微信的时候，发现了一个比较有意思的现象了，发现对于NSObject添加的load的方法执行了两次，导致原本意图的Swizzle出现了问题。
+之前在个人的理解中，load和initialize函数有所不同，load是在加载二进制程序的时候，将这些二进制程序中的类中包含的load方法进行一一调用，调用过程中不会有调用父类的情况。而initialize则不同，是在类第一次使">
+<meta property="og:image" content="https://github.com/SatanWoo/BeeHive/blob/master/load_twice_2.png?raw=true">
+<meta property="og:image" content="https://github.com/SatanWoo/BeeHive/blob/master/load_twice_1.png?raw=true">
+<meta property="og:updated_time" content="2017-11-01T17:00:51.000Z">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="注意系统库的坑之load函数调用多次">
+<meta name="twitter:description" content="水文一篇
+
+今天在群友逆向企业微信的时候，发现了一个比较有意思的现象了，发现对于NSObject添加的load的方法执行了两次，导致原本意图的Swizzle出现了问题。
+之前在个人的理解中，load和initialize函数有所不同，load是在加载二进制程序的时候，将这些二进制程序中的类中包含的load方法进行一一调用，调用过程中不会有调用父类的情况。而initialize则不同，是在类第一次使">
+  
+    <link rel="alternative" href="/atom.xml" title="Hexo" type="application/atom+xml">
+  
+  
+    <link rel="icon" href="/favicon.png">
+  
+  <link rel="stylesheet" href="/css/style.css" type="text/css">
+  
+
+</head>
+<body>
+  <div id="container">
+    <div id="wrap">
+      <header id="header">
+  <div id="banner"></div>
+  <div id="header-outer" class="outer">
+    <div id="header-title" class="inner">
+      <h1 id="logo-wrap">
+        <a href="/" id="logo">Hexo</a>
+      </h1>
+      
+    </div>
+    <div id="header-inner" class="inner">
+      <nav id="main-nav">
+        <a id="main-nav-toggle" class="nav-icon"></a>
+        
+          <a class="main-nav-link" href="/">Home</a>
+        
+          <a class="main-nav-link" href="/archives">Archives</a>
+        
+          <a class="main-nav-link" href="/sitemap.xml">map</a>
+        
+      </nav>
+      <nav id="sub-nav">
+        
+          <a id="nav-rss-link" class="nav-icon" href="/atom.xml" title="RSS Feed"></a>
+        
+        <a id="nav-search-btn" class="nav-icon" title="Search"></a>
+      </nav>
+      <div id="search-form-wrap">
+        <form action="//google.com/search" method="get" accept-charset="UTF-8" class="search-form"><input type="search" name="q" results="0" class="search-form-input" placeholder="Search"><button type="submit" class="search-form-submit">&#xF002;</button><input type="hidden" name="sitesearch" value="http://satanwoo.github.io"></form>
+      </div>
+    </div>
+  </div>
+</header>
+      <div class="outer">
+        <section id="main"><article id="post-load-twice" class="article article-type-post" itemscope itemprop="blogPost">
+  <div class="article-meta">
+    <a href="/2017/11/02/load-twice/" class="article-date">
+  <time datetime="2017-11-01T16:55:05.000Z" itemprop="datePublished">2017-11-02</time>
+</a>
+    
+  </div>
+  <div class="article-inner">
+    
+    
+      <header class="article-header">
+        
+  
+    <h1 class="article-title" itemprop="name">
+      注意系统库的坑之load函数调用多次
+    </h1>
+  
+
+      </header>
+    
+    <div class="article-entry" itemprop="articleBody">
+      
+        <blockquote>
+<p>水文一篇</p>
+</blockquote>
+<p>今天在群友逆向企业微信的时候，发现了一个比较有意思的现象了，发现对于<code>NSObject</code>添加的<code>load</code>的方法执行了两次，导致原本意图的<code>Swizzle</code>出现了问题。</p>
+<p>之前在个人的理解中，<code>load</code>和<code>initialize</code>函数有所不同，<code>load</code>是在加载二进制程序的时候，将这些二进制程序中的类中包含的<code>load</code>方法进行一一调用，调用过程中不会有调用父类的情况。而<code>initialize</code>则不同，是在类第一次使用的过程中进行调用，同时也会有过程中调用父类的情况。</p>
+<p><strong>所以，今天一开始这个情况有点懵逼啊，来看看究竟是为啥。</strong></p>
+<h2 id="准备工作（略）">准备工作（略）</h2><ol>
+<li>PP助手上下载一个企业微信</li>
+<li>重签名 -&gt; Build</li>
+<li><p>写一个诸如下面这么简单的<code>NSObject Category</code>，并实现<code>+(void)Load</code>方法</p>
+<pre><code><span class="class"><span class="keyword">@implementation</span> <span class="title">NSObject</span> (<span class="title">injectLocation</span>)</span>
++ (<span class="keyword">void</span>)load
+{
+    <span class="built_in">NSLog</span>(<span class="string">@"我好弱"</span>);
+}
+<span class="keyword">@end</span>
+</code></pre></li>
+</ol>
+<h2 id="排查过程">排查过程</h2><p>按照我们对<code>load</code>函数的理解，程序加载开始的时候，会通过<code>libobjc</code>的<code>call_load_methods</code>遍历逐一执行所有的<code>load</code>方法，如下图印证：</p>
+<p><img src="https://github.com/SatanWoo/BeeHive/blob/master/load_twice_2.png?raw=true" alt=""></p>
+<p>一开始当我在使用iOS 10.3.3的设备进行测试的时候，这就是唯一一次调用，没有二次重入的状况。</p>
+<p>于是我按照群友的提示换了iOS 11的设备，果不其然，iOS 11的企业微信在登录过程中，会再次调用我这个分类的<code>load</code>方法，让我们一起来看看调用栈：</p>
+<p><img src="https://github.com/SatanWoo/BeeHive/blob/master/load_twice_1.png?raw=true" alt=""></p>
+<p>卧槽，又从<code>WebThread</code>这个类里面进行了调用了<code>load</code>，匪夷所思啊。</p>
+<p>lldb调试下，结果如下：</p>
+<pre><code>frame <span class="preprocessor">#<span class="number">0</span>: <span class="number">0x0000000107a2558c</span> libZXLQYWechatDylib.dylib`+[NSObject(self=SKUIMetricsAppLaunchEvent, _cmd=<span class="string">"load"</span>) load] at TestCategory.m:<span class="number">15</span></span>
+frame <span class="preprocessor">#<span class="number">1</span>: <span class="number">0x0000000196767f9c</span> StoreKitUI`+[SKUIMetricsAppLaunchEvent load] + <span class="number">44</span></span>
+frame <span class="preprocessor">#<span class="number">2</span>: <span class="number">0x00000001807fa91c</span> libobjc.A.dylib`call_load_methods + <span class="number">184</span></span>
+frame <span class="preprocessor">#<span class="number">3</span>: <span class="number">0x00000001807fba84</span> libobjc.A.dylib`load_images + <span class="number">76</span></span>
+frame <span class="preprocessor">#<span class="number">4</span>: <span class="number">0x00000001074e6170</span> dyld`dyld::notifySingle(dyld_image_states, ImageLoader const*, ImageLoader::InitializerTimingList*) + <span class="number">488</span></span>
+frame <span class="preprocessor">#<span class="number">5</span>: <span class="number">0x00000001074f6ce8</span> dyld`ImageLoader::recursiveInitialization(ImageLoader::LinkContext const&amp;, unsigned int, char const*, ImageLoader::InitializerTimingList&amp;, ImageLoader::UninitedUpwards&amp;) + <span class="number">348</span></span>
+frame <span class="preprocessor">#<span class="number">6</span>: <span class="number">0x00000001074f6c90</span> dyld`ImageLoader::recursiveInitialization(ImageLoader::LinkContext const&amp;, unsigned int, char const*, ImageLoader::InitializerTimingList&amp;, ImageLoader::UninitedUpwards&amp;) + <span class="number">260</span></span>
+frame <span class="preprocessor">#<span class="number">7</span>: <span class="number">0x00000001074f6c90</span> dyld`ImageLoader::recursiveInitialization(ImageLoader::LinkContext const&amp;, unsigned int, char const*, ImageLoader::InitializerTimingList&amp;, ImageLoader::UninitedUpwards&amp;) + <span class="number">260</span></span>
+frame <span class="preprocessor">#<span class="number">8</span>: <span class="number">0x00000001074f6c90</span> dyld`ImageLoader::recursiveInitialization(ImageLoader::LinkContext const&amp;, unsigned int, char const*, ImageLoader::InitializerTimingList&amp;, ImageLoader::UninitedUpwards&amp;) + <span class="number">260</span></span>
+frame <span class="preprocessor">#<span class="number">9</span>: <span class="number">0x00000001074f5d40</span> dyld`ImageLoader::processInitializers(ImageLoader::LinkContext const&amp;, unsigned int, ImageLoader::InitializerTimingList&amp;, ImageLoader::UninitedUpwards&amp;) + <span class="number">136</span></span>
+frame <span class="preprocessor">#<span class="number">10</span>: <span class="number">0x00000001074f5dfc</span> dyld`ImageLoader::runInitializers(ImageLoader::LinkContext const&amp;, ImageLoader::InitializerTimingList&amp;) + <span class="number">84</span></span>
+frame <span class="preprocessor">#<span class="number">11</span>: <span class="number">0x00000001074e979c</span> dyld`dyld::runInitializers(ImageLoader*) + <span class="number">88</span></span>
+frame <span class="preprocessor">#<span class="number">12</span>: <span class="number">0x00000001074f0324</span> dyld`dlopen + <span class="number">976</span></span>
+frame <span class="preprocessor">#<span class="number">13</span>: <span class="number">0x0000000180ccf4d4</span> libdyld.dylib`dlopen + <span class="number">116</span></span>
+frame <span class="preprocessor">#<span class="number">14</span>: <span class="number">0x0000000189caec58</span> WebCore`initWebFilterEvaluator() + <span class="number">36</span></span>
+</code></pre><p>从上述链路看起来：<code>WebCore</code>通过<code>dlopen</code>加载了<code>/System/Library/PrivateFrameworks/StoreKitUI.framework/StoreKitUI</code>这个动态库，然后动态库加载完成后，执行了和主二进制一样的<code>call_load_methods</code>过程。</p>
+<p>逐一执行<code>load</code>的过程中，会调用到这个类<code>SKUIMetricsAppLaunchEvent</code>，然后这个类执行的汇编我们看看：</p>
+<pre><code>StoreKitUI`+[SKUIMetricsAppLaunchEvent load]:
+-&gt;  <span class="number">0x196767f70</span> &lt;+<span class="number">0</span>&gt;:  sub    sp, sp, <span class="preprocessor">#<span class="number">0x20</span>             ; =<span class="number">0x20</span> </span>
+    <span class="number">0x196767f74</span> &lt;+<span class="number">4</span>&gt;:  stp    x29, x30, [sp, <span class="preprocessor">#<span class="number">0x10</span>]</span>
+    <span class="number">0x196767f78</span> &lt;+<span class="number">8</span>&gt;:  add    x29, sp, <span class="preprocessor">#<span class="number">0x10</span>            ; =<span class="number">0x10</span> </span>
+    <span class="number">0x196767f7c</span> &lt;+<span class="number">12</span>&gt;: str    x0, [sp]
+    <span class="number">0x196767f80</span> &lt;+<span class="number">16</span>&gt;: adrp   x8, <span class="number">108130</span>
+    <span class="number">0x196767f84</span> &lt;+<span class="number">20</span>&gt;: ldr    x8, [x8, <span class="preprocessor">#<span class="number">0xff8</span>]</span>
+    <span class="number">0x196767f88</span> &lt;+<span class="number">24</span>&gt;: str    x8, [sp, <span class="preprocessor">#<span class="number">0x8</span>]</span>
+    <span class="number">0x196767f8c</span> &lt;+<span class="number">28</span>&gt;: adrp   x8, <span class="number">108114</span>
+    <span class="number">0x196767f90</span> &lt;+<span class="number">32</span>&gt;: ldr    x1, [x8, <span class="preprocessor">#<span class="number">0xf70</span>]</span>
+    <span class="number">0x196767f94</span> &lt;+<span class="number">36</span>&gt;: mov    x0, sp
+    <span class="number">0x196767f98</span> &lt;+<span class="number">40</span>&gt;: bl     <span class="number">0x1902ccaac</span>
+    <span class="number">0x196767f9c</span> &lt;+<span class="number">44</span>&gt;: adrp   x8, <span class="number">111804</span>
+    <span class="number">0x196767fa0</span> &lt;+<span class="number">48</span>&gt;: ldr    x8, [x8, <span class="preprocessor">#<span class="number">0x6e0</span>]</span>
+    <span class="number">0x196767fa4</span> &lt;+<span class="number">52</span>&gt;: cmn    x8, <span class="preprocessor">#<span class="number">0x1</span>                  ; =<span class="number">0x1</span> </span>
+    <span class="number">0x196767fa8</span> &lt;+<span class="number">56</span>&gt;: b.ne   <span class="number">0x196767fb8</span>               ; &lt;+<span class="number">72</span>&gt;
+    <span class="number">0x196767fac</span> &lt;+<span class="number">60</span>&gt;: ldp    x29, x30, [sp, <span class="preprocessor">#<span class="number">0x10</span>]</span>
+    <span class="number">0x196767fb0</span> &lt;+<span class="number">64</span>&gt;: add    sp, sp, <span class="preprocessor">#<span class="number">0x20</span>             ; =<span class="number">0x20</span> </span>
+    <span class="number">0x196767fb4</span> &lt;+<span class="number">68</span>&gt;: ret    
+    <span class="number">0x196767fb8</span> &lt;+<span class="number">72</span>&gt;: adrp   x0, <span class="number">111804</span>
+    <span class="number">0x196767fbc</span> &lt;+<span class="number">76</span>&gt;: add    x0, x0, <span class="preprocessor">#<span class="number">0x6e0</span>            ; =<span class="number">0x6e0</span> </span>
+    <span class="number">0x196767fc0</span> &lt;+<span class="number">80</span>&gt;: adrp   x1, <span class="number">93832</span>
+    <span class="number">0x196767fc4</span> &lt;+<span class="number">84</span>&gt;: add    x1, x1, <span class="preprocessor">#<span class="number">0xf60</span>            ; =<span class="number">0xf60</span> </span>
+    <span class="number">0x196767fc8</span> &lt;+<span class="number">88</span>&gt;: bl     <span class="number">0x19684f598</span>               ; symbol stub <span class="keyword">for</span>: __copy_helper_block_<span class="number">.236</span>
+    <span class="number">0x196767fcc</span> &lt;+<span class="number">92</span>&gt;: b      <span class="number">0x196767fac</span>               ; &lt;+<span class="number">60</span>&gt;
+</code></pre><p>看起来没有关键字<code>stub for objc_msgSend</code>之类的关键字，那我们就重点关注几个跳转指令对应的地址。</p>
+<p>排除掉 <code>b      0x196767fac</code>和<code>b.ne   0x196767fb8</code>，因为这两地址就属于本函数。</p>
+<p>通过lldb一查询看看剩下的<code>0x1902ccaac</code>是干啥的，卧槽，没结果。那干脆断这个地址试试，然后继续执行，得到如下结果：</p>
+<pre><code><span class="number">0x1902ccaac</span>: b      <span class="number">0x1886362ac</span>
+<span class="number">0x1902ccab0</span>: b      <span class="number">0x188637ae8</span>
+<span class="number">0x1902ccab4</span>: b      <span class="number">0x1886362e8</span>
+<span class="number">0x1902ccab8</span>: b      <span class="number">0x1886365a4</span>
+<span class="number">0x1902ccabc</span>: b      <span class="number">0x18863ada8</span>
+<span class="number">0x1902ccac0</span>: b      <span class="number">0x1886365b4</span>
+<span class="number">0x1902ccac4</span>: b      <span class="number">0x18863889c</span>
+<span class="number">0x1902ccac8</span>: b      <span class="number">0x188636b2c</span>
+</code></pre><p>好吧，看起来这是运行时创建的桥(trampoline)。继续断<code>0x1886362ac</code>，然后执行：</p>
+<pre><code><span class="number">0x1886362</span>ac: b      <span class="number">0x18080c62</span>0               <span class="comment">; objc_msgSendSuper2</span>
+<span class="number">0x1886362</span>b0: b      <span class="number">0x180814250</span>               <span class="comment">; objc_release</span>
+<span class="number">0x1886362</span>b4: b      <span class="number">0x180814190</span>               <span class="comment">; objc_retain</span>
+<span class="number">0x1886362</span>b8: b      <span class="number">0x1808165f0</span>               <span class="comment">; objc_retainAutorelease</span>
+<span class="number">0x1886362</span>bc: b      <span class="number">0x180816558</span>               <span class="comment">; objc_retainAutoreleaseReturnValue</span>
+<span class="number">0x1886362</span>c0: b      <span class="number">0x180816588</span>               <span class="comment">; objc_retainAutoreleasedReturnValue</span>
+<span class="number">0x1886362</span>c4: b      <span class="number">0x180802</span>fa8               <span class="comment">; class_addMethod</span>
+<span class="number">0x1886362</span>c8: b      <span class="number">0x18080157</span>c               <span class="comment">; class_getInstanceMethod</span>
+</code></pre><p>哈哈，看到我们想要的代码了：</p>
+<p><strong>0x1886362ac: b      0x18080c620               ; objc_msgSendSuper2</strong></p>
+<p>从这段汇编不难看出，在<code>+[SKUIMetricsAppLaunchEvent load]</code>方法里面，会调用<code>[super load]</code>这样的代码。</p>
+<h3 id="为啥iOS_10上没有问题">为啥iOS 10上没有问题</h3><p>在iOS 10上其实也有同样的问题，但是由于<code>WebCore</code>不会主动把对应的<strong>StoreKitUI</strong>加载进来，所以也就没出触发这样的问题，但是如果我们主动通过<code>dlopen</code>加载这个系统库，也一样有问题：</p>
+<pre><code>__attribute__((<span class="constructor"><span class="keyword">constructor</span>)) void load_private()
+</span>{
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(<span class="number">5.0</span> * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        <span class="built_in">void</span> *libHandleIMD = dlopen(<span class="string">"/System/Library/PrivateFrameworks/StoreKitUI.framework/StoreKitUI"</span>, RTLD_LAZY);
+        NSLog(@<span class="string">"libHandleIMD is %p"</span>, libHandleIMD);
+        <span class="keyword">if</span> (!libHandleIMD) {
+            printf(<span class="string">"error is %s\n"</span>, dlerror());
+        }
+    });
+}
+</code></pre><h3 id="提醒">提醒</h3><p>对于在系统类上添加的<code>load</code>方法，建议还是做是否是重入的判断或者保护，不然很可能出现与预期不相符的结果。</p>
+
+      
+    </div>
+    <footer class="article-footer">
+      <a data-url="http://satanwoo.github.io/2017/11/02/load-twice/" data-id="cj9hagpj0000hvli1qt1ytle7" class="article-share-link">Share</a>
+      
+        <a href="http://satanwoo.github.io/2017/11/02/load-twice/#disqus_thread" class="article-comment-link">Comments</a>
+      
+      
+  <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
+
+    </footer>
+  </div>
+  
+    
+<nav id="article-nav">
+  
+  
+    <a href="/2017/10/18/abort/" id="article-nav-older" class="article-nav-link-wrap">
+      <strong class="article-nav-caption">Older</strong>
+      <div class="article-nav-title">iOS内存abort(Jetsam) 原理探究</div>
+    </a>
+  
+</nav>
+
+  
+</article>
+
+<div id="disqus_thread"></div>
+<script>
+
+/**
+*  RECOMMENDED CONFIGURATION VARIABLES: EDIT AND UNCOMMENT THE SECTION BELOW TO INSERT DYNAMIC VALUES FROM YOUR PLATFORM OR CMS.
+*  LEARN WHY DEFINING THESE VARIABLES IS IMPORTANT: https://disqus.com/admin/universalcode/#configuration-variables*/
+/*
+var disqus_config = function () {
+this.page.url = PAGE_URL;  // Replace PAGE_URL with your page's canonical URL variable
+this.page.identifier = PAGE_IDENTIFIER; // Replace PAGE_IDENTIFIER with your page's unique identifier variable
+};
+*/
+(function() { // DON'T EDIT BELOW THIS LINE
+var d = document, s = d.createElement('script');
+s.src = 'https://satanwoo-2.disqus.com/embed.js';
+s.setAttribute('data-timestamp', +new Date());
+(d.head || d.body).appendChild(s);
+})();
+</script>
+<noscript>Please enable JavaScript to view the <a href="https://disqus.com/?ref_noscript">comments powered by Disqus.</a></noscript>
+                                
+  <section id="comments">
+    <div id="disqus_thread">
+      <noscript>Please enable JavaScript to view the <a href="//disqus.com/?ref_noscript">comments powered by Disqus.</a></noscript>
+    </div>
+  </section>
+</section>
+        
+          <aside id="sidebar">
+  
+    
+  
+    
+  <div class="widget-wrap">
+    <h3 class="widget-title">Tags</h3>
+    <div class="widget">
+      <ul class="tag-list"><li class="tag-list-item"><a class="tag-list-link" href="/tags/Android/">Android</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/C/">C</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Growth/">Growth</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/JavaScript/">JavaScript</a><span class="tag-list-count">3</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Math/">Math</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Performance/">Performance</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/R/">R</a><span class="tag-list-count">2</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Reverse-Engineering/">Reverse Engineering</a><span class="tag-list-count">6</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Swift/">Swift</a><span class="tag-list-count">6</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/XNU/">XNU</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/iOS/">iOS</a><span class="tag-list-count">31</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/shell/">shell</a><span class="tag-list-count">1</span></li></ul>
+    </div>
+  </div>
+
+  
+    
+  <div class="widget-wrap">
+    <h3 class="widget-title">Tag Cloud</h3>
+    <div class="widget tagcloud">
+      <a href="/tags/Android/" style="font-size: 10px;">Android</a> <a href="/tags/C/" style="font-size: 10px;">C</a> <a href="/tags/Growth/" style="font-size: 10px;">Growth</a> <a href="/tags/JavaScript/" style="font-size: 15px;">JavaScript</a> <a href="/tags/Math/" style="font-size: 10px;">Math</a> <a href="/tags/Performance/" style="font-size: 10px;">Performance</a> <a href="/tags/R/" style="font-size: 12.5px;">R</a> <a href="/tags/Reverse-Engineering/" style="font-size: 17.5px;">Reverse Engineering</a> <a href="/tags/Swift/" style="font-size: 17.5px;">Swift</a> <a href="/tags/XNU/" style="font-size: 10px;">XNU</a> <a href="/tags/iOS/" style="font-size: 20px;">iOS</a> <a href="/tags/shell/" style="font-size: 10px;">shell</a>
+    </div>
+  </div>
+
+  
+    
+  <div class="widget-wrap">
+    <h3 class="widget-title">Archives</h3>
+    <div class="widget">
+      <ul class="archive-list"><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/11/">November 2017</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/10/">October 2017</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/09/">September 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/08/">August 2017</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/07/">July 2017</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/06/">June 2017</a><span class="archive-list-count">3</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/04/">April 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/01/">January 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/10/">October 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/09/">September 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/07/">July 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/05/">May 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/04/">April 2016</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/03/">March 2016</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/02/">February 2016</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/12/">December 2015</a><span class="archive-list-count">6</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/11/">November 2015</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/10/">October 2015</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/09/">September 2015</a><span class="archive-list-count">4</span></li></ul>
+    </div>
+  </div>
+
+  
+    
+  <div class="widget-wrap">
+    <h3 class="widget-title">Recents</h3>
+    <div class="widget">
+      <ul>
+        
+          <li>
+            <a href="/2017/11/02/load-twice/">注意系统库的坑之load函数调用多次</a>
+          </li>
+        
+          <li>
+            <a href="/2017/10/18/abort/">iOS内存abort(Jetsam) 原理探究</a>
+          </li>
+        
+          <li>
+            <a href="/2017/09/24/mainthreadchecker1/">基于桥的全量方法Hook方案 - 探究苹果主线程检查实现</a>
+          </li>
+        
+          <li>
+            <a href="/2017/09/11/KVO-CRASH/">KVO在不同的二进制中多个符号并存的Crash问题</a>
+          </li>
+        
+          <li>
+            <a href="/2017/08/06/UITableViewController/">UIKit解剖（-）逆向UITableViewController分析Bug</a>
+          </li>
+        
+      </ul>
+    </div>
+  </div>
+
+  
+</aside>
+        
+      </div>
+      <footer id="footer">
+  
+  <div class="outer">
+    <div id="footer-info" class="inner">
+      &copy; 2017 John Doe<br>
+      Powered by <a href="http://hexo.io/" target="_blank">Hexo</a>
+    </div>
+  </div>
+</footer>
+    </div>
+    <nav id="mobile-nav">
+  
+    <a href="/" class="mobile-nav-link">Home</a>
+  
+    <a href="/archives" class="mobile-nav-link">Archives</a>
+  
+    <a href="/sitemap.xml" class="mobile-nav-link">map</a>
+  
+</nav>
+    
+<script>
+  var disqus_shortname = 'satanwoo-2';
+  
+  var disqus_url = 'http://satanwoo.github.io/2017/11/02/load-twice/';
+  
+  (function(){
+    var dsq = document.createElement('script');
+    dsq.type = 'text/javascript';
+    dsq.async = true;
+    dsq.src = '//' + disqus_shortname + '.disqus.com/embed.js';
+    (document.getElementsByTagName('head')[0] || document.getElementsByTagName('body')[0]).appendChild(dsq);
+  })();
+</script>
+
+
+
+  <link rel="stylesheet" href="/fancybox/jquery.fancybox.css" type="text/css">
+  <script src="/fancybox/jquery.fancybox.pack.js" type="text/javascript"></script>
+
+
+<script src="/js/script.js" type="text/javascript"></script>
+
+  </div>
+</body>
+</html>
