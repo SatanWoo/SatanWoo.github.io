@@ -4,7 +4,7 @@
   
   <link href="/atom.xml" rel="self"/>
   <link href="http://satanwoo.github.io/"/>
-  <updated>2017-11-01T17:00:51.000Z</updated>
+  <updated>2017-11-26T16:11:36.000Z</updated>
   <id>http://satanwoo.github.io/</id>
   
   <author>
@@ -15,11 +15,179 @@
   <generator uri="http://hexo.io/">Hexo</generator>
   
   <entry>
+    <title><![CDATA[一种基于KVO的页面加载，渲染耗时监控方法]]></title>
+    <link href="http://satanwoo.github.io/2017/11/27/KVO-Swizzle/"/>
+    <id>http://satanwoo.github.io/2017/11/27/KVO-Swizzle/</id>
+    <published>2017-11-26T16:08:28.000Z</published>
+    <updated>2017-11-26T16:11:36.000Z</updated>
+    <content type="html"><![CDATA[<blockquote>
+<p>打广告：有兴趣加入阿里巴巴手淘基础架构平台移动高可用团队的请微博联系我@盗版五子棋</p>
+<p>和同事zb一起维护了一个ARM64的专栏<a href="https://zhuanlan.zhihu.com/c_142064221" target="_blank" rel="external">iOS调试进阶</a>，有兴趣的可以读读</p>
+</blockquote>
+<p>在介绍本文之前，请先允许我提出一个问题，如果你要无痕监控任意一个页面（UIViewController及其子类）的加载或者渲染时间，你会怎么做。</p>
+<p>很多人都会想到说用AOP啊，利用<code>Method Swizzling</code>来进行方法替换从而获得方法调用耗时。<br>比如我们有一个<code>ViewController</code>，如果其实现了一个<code>viewDidLoad</code>方法进行睡眠<strong>5</strong>秒，如下所示：</p>
+<pre><code><span class="class"><span class="keyword">@implementation</span> <span class="title">ViewController</span></span>
+
+- (<span class="keyword">void</span>)viewDidLoad
+{
+    [<span class="keyword">super</span> viewDidLoad];
+    sleep(<span class="number">5</span>);
+}
+
+<span class="keyword">@end</span>
+</code></pre><p>相信很多人的第一直觉会是如下AOP代码（我们省略Method Swizzling相关的代码）：</p>
+<pre><code><span class="class"><span class="keyword">@implementation</span> <span class="title">UIViewController</span> (<span class="title">TestCase</span>)</span>
+
++ (<span class="keyword">void</span>)load
+{
+    <span class="keyword">static</span> <span class="built_in">dispatch_once_t</span> onceToken;
+    <span class="built_in">dispatch_once</span>(&amp;onceToken, ^{
+        wzq_swizzleMethod([<span class="built_in">UIViewController</span> class], <span class="keyword">@selector</span>(viewDidLoad), <span class="keyword">@selector</span>(wzq_viewDidLoad));
+    });
+}
+
+- (<span class="keyword">void</span>)wzq_viewDidLoad
+{
+    <span class="built_in">NSDate</span> *date = [<span class="built_in">NSDate</span> date];
+    [<span class="keyword">self</span> wzq_viewDidLoad];
+
+    <span class="built_in">NSTimeInterval</span> duration = [[<span class="built_in">NSDate</span> date] timeIntervalSinceDate:date];
+    <span class="built_in">NSLog</span>(<span class="string">@"Page %@ cost %g in viewDidLoad"</span>, [<span class="keyword">self</span> class], duration); 
+}
+
+<span class="keyword">@end</span>
+</code></pre><p>但是，如果你自己尝试了你会发现，你测算的时间压根不是<span style="color:red"><strong>5</strong></span>秒。</p>
+<p>为什么呢？其原因在于我们<code>Method Swizzling</code>的时候，因为采用了对基类<code>UIViewController</code>进行替换，获取到的<code>viewDidLoad</code>对应的IMP是属于基类<code>UIViewController</code>的，而并不是<code>ViewController</code>自身覆写的，所以我们监控的其实从子类<code>ViewController</code>调用<code>[super viewDidLoad]</code>的时候调用基类IMP的耗时。</p>
+<p>好，看到这，有人就想了对应的方法，把<code>-[ViewController viewDidLoad]</code>的IMP替换掉就行了。方法很多种，比如创建一个<code>ViewController</code>的<strong>Category</strong>进行替换。<strong>但是这种方法你好像没办法任意对某个页面进行替换。</strong></p>
+<blockquote>
+<p>有人说你可以runtime遍历所有类判断是不是<code>UIViewController</code>的子类，然后动态替换。理论是可行的，效率嘛，是比较低的。</p>
+</blockquote>
+<h3 id="方案">方案</h3><p>根据上述我们所知的缺陷，我们需要有一个兼顾动态性和性能的方案，能够直接获取到子类的IMP，这样才能达到我们对于页面加载渲染时间（<code>viewDidLoad</code>, <code>viewDidAppear</code>和<code>viewWillAppear</code>）监控的需求。</p>
+<p>基于这个需求，我很快想到了<strong>基于KVO</strong>的方案（如果你对KVO不了解，可以参考<a href="http://satanwoo.github.io/2017/09/11/KVO-CRASH/">我的文章：KVO在不同的二进制中多个符号并存的Crash问题</a>）。我们知道，在对于任意对象进行KVO监控的时候，iOS底层实际上帮你动态创建了一个隐蔽的类，同时帮了做了大量的<code>setter，getter</code>函数的override，并调用原来类对应函数实现，从而让你神不知鬼不觉的以为你还在用原来的类进行操作。</p>
+<p>那我们该怎么做呢？</p>
+<ol>
+<li>对我们需要监听的类的实例进行KVO，随便监听一个不存在的KeyPath。我们压根不需要KVO的任何回调，我们只是需要它能帮我们<strong>创建子类</strong>而已。</li>
+<li>对KVO创建出来的子类添加我们需要Swizzle的方法对应的SEL及其IMP。因为本质上KVO只是对setter和getter方法进行了<strong>override</strong>，<b style="color:red">如果我们不提供我们自己的实现，还是会调用到原来的类的IMP。</b></li>
+<li>在实例销毁的时候，将KVO监听移除，不然会导致<b style="color:red">KVO still registering when deallocated这样的Crash。</b></li>
+</ol>
+<p>总体来说，我们需要做的就是三件事。</p>
+<h4 id="1-_对实例进行KVO">1. 对实例进行KVO</h4><p>KVO方法只能在对象实例上进行操作，我们首先要获取到的就是<code>UIViewController</code>及其子类的实例。</p>
+<p>遍历头文件，发现UIViewController的初始化方法比较少，归纳为如下三种：</p>
+<pre><code>init
+<span class="string">initWithCoder:</span>
+<span class="string">initWithNibName:</span><span class="string">bundle:</span>
+</code></pre><p>我们先Swizzle这几个方法：</p>
+<pre><code> wzq_swizzleMethod<span class="list">([UIViewController class], @selector<span class="list">(<span class="keyword">initWithNibName</span><span class="keyword">:bundle</span>:)</span>, @selector<span class="list">(<span class="keyword">wzq_initWithNibName</span><span class="keyword">:bundle</span>:)</span>)</span><span class="comment">;</span>
+wzq_swizzleMethod<span class="list">([UIViewController class], @selector<span class="list">(<span class="keyword">initWithCoder</span>:)</span>, @selector<span class="list">(<span class="keyword">wzq_initWithCoder</span>:)</span>)</span><span class="comment">;</span>
+wzq_swizzleMethod<span class="list">([UIViewController class], @selector<span class="list">(<span class="keyword">init</span>)</span>, @selector<span class="list">(<span class="keyword">wzq_init</span>)</span>)</span><span class="comment">;</span>
+</code></pre><p>这几个方法调用的时候，实例对象对应的内存已经分配出来了，无非就是构造函数还没赋值，但是我们也能进行KVO了。KVO的代码如下所示：</p>
+<pre><code>NSString *identifier = [NSString <span class="string">stringWithFormat:</span>@<span class="string">"wzq_%@"</span>, [[NSProcessInfo processInfo] globallyUniqueString]];
+[vc <span class="string">addObserver:</span>[NSObject <span class="keyword">new</span>] <span class="string">forKeyPath:</span>identifier <span class="string">options:</span>NSKeyValueObservingOptionNew <span class="string">context:</span>nil];
+</code></pre><h4 id="2-_添加我们想要的方法">2. 添加我们想要的方法</h4><p>我们刚刚已经对页面实例进行了KVO操作，此时对于原先类别为<code>ViewController</code>的<code>vc</code>对象来说，内部其实已经变成<b style="color:red">NSKVONotifying_ViewController类型了。</b>。如果我们想对其所在的类型添加方法的话，不能直接用<code>[vc class]</code>，因为这个方法已经被内部override成了<code>ViewController</code>。我们需要使用<code>object_getClass</code>这个类进行真正的类型获取，如下所示：</p>
+<pre><code> <span class="comment">// NSKVONotifying_ViewController</span>
+Class kvoCls = <span class="keyword">object</span><span class="number">_</span>getClass(vc);
+<span class="comment">// ViewController</span>
+Class originCls = <span class="keyword">class</span><span class="number">_</span>getSuperclass(kvoCls);
+
+<span class="comment">// 获取原来实现的encoding</span>
+const char *originViewDidLoadEncoding = method<span class="number">_</span>getTypeEncoding(<span class="keyword">class</span><span class="number">_</span>getInstanceMethod(originCls, <span class="annotation">@selector</span>(viewDidLoad)));
+const char *originViewDidAppearEncoding = method<span class="number">_</span>getTypeEncoding(<span class="keyword">class</span><span class="number">_</span>getInstanceMethod(originCls, <span class="annotation">@selector</span>(viewDidAppear:)));
+const char *originViewWillAppearEncoding = method<span class="number">_</span>getTypeEncoding(<span class="keyword">class</span><span class="number">_</span>getInstanceMethod(originCls, <span class="annotation">@selector</span>(viewWillAppear:)));
+
+<span class="comment">// 重点，添加方法。</span>
+<span class="keyword">class</span><span class="number">_</span>addMethod(kvoCls, <span class="annotation">@selector</span>(viewDidLoad), (IMP)wzq<span class="number">_</span>viewDidLoad, originViewDidLoadEncoding);
+<span class="keyword">class</span><span class="number">_</span>addMethod(kvoCls, <span class="annotation">@selector</span>(viewDidAppear:), (IMP)wzq<span class="number">_</span>viewDidAppear, originViewDidAppearEncoding);
+<span class="keyword">class</span><span class="number">_</span>addMethod(kvoCls, <span class="annotation">@selector</span>(viewWillAppear:), (IMP)wzq<span class="number">_</span>viewWillAppear, originViewWillAppearEncoding);
+</code></pre><p>上述代码非常通俗易懂，不再赘述，替换完的方法如下，我们以<code>wzq_viewDidLoad</code>举例：</p>
+<pre><code><span class="keyword">static</span> <span class="keyword">void</span> wzq_viewDidLoad(<span class="built_in">UIViewController</span> *kvo_self, SEL _sel)
+{
+    Class kvo_cls = object_getClass(kvo_self);
+    Class origin_cls = class_getSuperclass(kvo_cls);
+
+    <span class="comment">// 注意点</span>
+    IMP origin_imp = method_getImplementation(class_getInstanceMethod(origin_cls, _sel));
+    assert(origin_imp != <span class="literal">NULL</span>);
+
+    <span class="keyword">void</span>(*func)(<span class="built_in">UIViewController</span> *, SEL) =  (<span class="keyword">void</span>(*)(<span class="built_in">UIViewController</span> *, SEL))origin_imp;
+
+    <span class="built_in">NSDate</span> *date = [<span class="built_in">NSDate</span> date];
+
+    func(kvo_self, _sel);
+
+    <span class="built_in">NSTimeInterval</span> duration = [[<span class="built_in">NSDate</span> date] timeIntervalSinceDate:date];
+    <span class="built_in">NSLog</span>(<span class="string">@"Class %@ cost %g in viewDidLoad"</span>, [kvo_self class], duration);
+}
+</code></pre><p>重点关注下上述代码中的<b style="color:red">注意点</b>，之前我们在KVO生成的类中对应添加了原本没有的实现，因此<code>-[ViewController viewDidLoad]</code>会走到我们的<code>wzq_viewDidLoad</code>方法中，但是我们怎么才能调用到原来的<code>viewDidLoad</code>的呢？我们之前并没有保存对应的IMP呀。</p>
+<p><b style="color:red">这里还是利用了KVO的特殊性：内部生成的NSKVONotifying_ViewController实际上是继承自ViewController的</b></p>
+<p>因此，<code>Class origin_cls = class_getSuperclass(kvo_cls);</code>实际上获取到了<code>ViewController</code>类，我们从中取出对应的IMP，进行直接调用即可。</p>
+<h4 id="3-_移除KVO">3. 移除KVO</h4><p>我们利用Associate Object去移除就好了。一个对象释放的时候会自动去清除其所在的<code>assoicate object</code>。</p>
+<p>基于这个原理，我们可以实现如下代码：</p>
+<p>我们构建一个桩，把所有无用的KVO监听都设置给这个桩，如下所示：</p>
+<pre><code><span class="attr_selector">[vc addObserver:[WZQKVOObserverStub stub]</span> <span class="tag">forKeyPath</span><span class="pseudo">:identifier</span> <span class="tag">options</span><span class="pseudo">:NSKeyValueObservingOptionNew</span> <span class="tag">context</span><span class="pseudo">:nil</span>];
+</code></pre><p>然后我们构建一个移除器，这个移除器弱引用保存了vc的实例和对应的keypath，如下：</p>
+<pre><code>WZQKVORemover *remover = [WZQKVORemover new]<span class="comment">;</span>
+remover.obj = vc<span class="comment">;</span>
+remover.keyPath = identifier.copy<span class="comment">;</span>
+</code></pre><p>然后我们把这个移除器利用<code>associate object</code>设置给对应的vc。</p>
+<pre><code>objc_setAssociatedObject<span class="list">(<span class="keyword">vc</span>, <span class="keyword">&amp;wzq_associateRemoveKey</span>, remover, OBJC_ASSOCIATION_RETAIN)</span><span class="comment">;</span>
+</code></pre><p>而在对应的移除器的<code>dealloc</code>方法里，我们把kvo监听给移除就可以了。</p>
+<pre><code><span class="tag">-</span> (void)<span class="tag">dealloc</span>
+{
+<span class="id">#ifdef</span> <span class="tag">DEBUG</span>
+    <span class="tag">NSLog</span>(@<span class="string">"WZQKVORemover called"</span>);
+<span class="id">#endif</span>
+    <span class="tag">if</span> (_obj) {
+        <span class="attr_selector">[_obj removeObserver:[WZQKVOObserverStub stub]</span> <span class="tag">forKeyPath</span><span class="pseudo">:_keyPath</span>];
+    }
+}
+</code></pre><h3 id="额外">额外</h3><p>利用<code>associate object</code>移除KVO的正确性是有保障的，具体见runtime中<code>associate object</code>的源码：</p>
+<pre><code><span class="type">void</span> objc_removeAssociatedObjects(id <span class="keyword">object</span>) 
+{
+    <span class="keyword">if</span> (<span class="keyword">object</span> &amp;&amp; <span class="keyword">object</span>-&gt;hasAssociatedObjects()) {
+        _object_remove_assocations(<span class="keyword">object</span>);
+    }
+}
+
+<span class="type">void</span> _object_remove_assocations(id <span class="keyword">object</span>) {
+    vector&lt; <span class="type">ObjcAssociation</span>,<span class="type">ObjcAllocator</span>&lt;<span class="type">ObjcAssociation</span>&gt; &gt; elements;
+    {
+        <span class="type">AssociationsManager</span> manager;
+        <span class="type">AssociationsHashMap</span> &amp;associations(manager.associations());
+        <span class="keyword">if</span> (associations.size() == <span class="number">0</span>) <span class="keyword">return</span>;
+        disguised_ptr_t disguised_object = <span class="type">DISGUISE</span>(<span class="keyword">object</span>);
+        <span class="type">AssociationsHashMap</span>::<span class="keyword">iterator</span> i = associations.find(disguised_object);
+        <span class="keyword">if</span> (i != associations.<span class="keyword">end</span>()) {
+            // copy all <span class="keyword">of</span> the associations that need to be removed.
+            <span class="type">ObjectAssociationMap</span> *refs = i-&gt;second;
+            <span class="keyword">for</span> (<span class="type">ObjectAssociationMap</span>::<span class="keyword">iterator</span> j = refs-&gt;begin(), <span class="keyword">end</span> = refs-&gt;<span class="keyword">end</span>(); j != <span class="keyword">end</span>; ++j) {
+                elements.push_back(j-&gt;second);
+            }
+            // remove the secondary table.
+            delete refs;
+            associations.erase(i);
+        }
+    }
+    // the calls to releaseValue() happen outside <span class="keyword">of</span> the lock.
+    for_each(elements.begin(), elements.<span class="keyword">end</span>(), <span class="type">ReleaseValue</span>());
+}
+</code></pre><h3 id="代码">代码</h3><p>本文的工程代码托管在<a href="">Github</a>上，包含了测试用例（默认带干扰测试），还没来得及搞成cocoapods，等我有时间了搞一下。但是你直接拖拽源码使用是一点问题都没有。</p>
+]]></content>
+    <summary type="html">
+    <![CDATA[<blockquote>
+<p>打广告：有兴趣加入阿里巴巴手淘基础架构平台移动高可用团队的请微博联系我@盗版五子棋</p>
+<p>和同事zb一起维护了一个ARM64的专栏<a href="https://zhuanlan.zhihu.com/c_142064221" target]]>
+    </summary>
+    
+      <category term="iOS" scheme="http://satanwoo.github.io/tags/iOS/"/>
+    
+  </entry>
+  
+  <entry>
     <title><![CDATA[注意系统库的坑之load函数调用多次]]></title>
     <link href="http://satanwoo.github.io/2017/11/02/load-twice/"/>
     <id>http://satanwoo.github.io/2017/11/02/load-twice/</id>
     <published>2017-11-01T16:55:05.000Z</published>
-    <updated>2017-11-01T17:00:51.000Z</updated>
+    <updated>2017-11-05T16:39:44.000Z</updated>
     <content type="html"><![CDATA[<blockquote>
 <p>水文一篇</p>
 </blockquote>
@@ -3761,178 +3929,6 @@ Elapsed application CPU <span class="keyword">time</span> (seconds): <span class
     </summary>
     
       <category term="iOS" scheme="http://satanwoo.github.io/tags/iOS/"/>
-    
-  </entry>
-  
-  <entry>
-    <title><![CDATA[Swift 中的静态Dispatch VS 动态Dispatch]]></title>
-    <link href="http://satanwoo.github.io/2016/03/22/dispatch-in-swift/"/>
-    <id>http://satanwoo.github.io/2016/03/22/dispatch-in-swift/</id>
-    <published>2016-03-22T09:14:34.000Z</published>
-    <updated>2016-03-28T14:24:49.000Z</updated>
-    <content type="html"><![CDATA[<h3 id="C++_VS_Swift">C++ VS Swift</h3><p>虽然我很早就了解了Swift（2014年的WWDC），但是在粗略看了一下Swift的语法后，我认为这不过是许多语言语法的大杂烩，感觉和C++没有啥区别。但是实际上，在我使用Swift的这几个月中，我发现了许多问题值得注意的地方，比如</p>
-<ul>
-<li>函数的返回值可以作为推断函数签名的依据。</li>
-<li>Swift中的函数静态Dispatch VS 动态函数Dispatch</li>
-</ul>
-<p>而第二点，也是本文要阐述的重点。</p>
-<p>在展开本文的内容前，如果你曾经有C++的开发背景，不妨回忆下C++中RTTI机制，这也是多态发生的先决条件。简单来说，就是C++的多态函数是基于运行时的，我们可以看看下面这个例子：</p>
-<pre><code><span class="keyword">class</span> A
-{
-    <span class="function"><span class="keyword">void</span> <span class="title">print</span><span class="params">()</span></span>{<span class="built_in">cout</span> &lt;&lt; <span class="string">"I'm A"</span>;}
-}
-
-<span class="keyword">class</span> B: <span class="keyword">public</span> A
-{
-    <span class="function"><span class="keyword">void</span> <span class="title">print</span><span class="params">()</span></span>{<span class="built_in">cout</span> &lt;&lt; <span class="string">"I'm B"</span>;}
-}
-
-A *b = <span class="keyword">new</span> B();
-b-&gt;print();
-</code></pre><p>相信大家一眼就能知道这个答案，会输出<code>I&#39;m B</code>。那么，Swift中也存在<code>class</code>，那么对于Swift中的函数调用是否和C++一致呢？</p>
-<h3 id="Swift_Class">Swift Class</h3><p>首先我们先来验证下最基本的<code>class</code>中的行为。我们采用和C++中相同例子，定义如下：</p>
-<pre><code><span class="class"><span class="keyword">class</span> <span class="title">A</span>
-</span>{
-    <span class="func"><span class="keyword">func</span> <span class="title">printInfo</span><span class="params">()</span></span>
-    {
-        <span class="built_in">print</span>(<span class="string">"I'm A"</span>)
-    }
-}
-
-<span class="class"><span class="keyword">class</span> <span class="title">B</span>:<span class="title">A</span>
-</span>{
-    <span class="keyword">override</span> <span class="func"><span class="keyword">func</span> <span class="title">printInfo</span><span class="params">()</span></span>
-    {
-        <span class="built_in">print</span>(<span class="string">"I'm B"</span>)
-    }
-}
-</code></pre><p>根据Swift的<code>Type Inference</code> 我们分别验证了如下几种调用方式：</p>
-<pre><code>let b1:B = <span class="function"><span class="title">B</span><span class="params">()</span></span>
-b1.<span class="function"><span class="title">printInfo</span><span class="params">()</span></span> <span class="comment">// I'm B</span>
-
-let b2:A = <span class="function"><span class="title">B</span><span class="params">()</span></span>
-b2.<span class="function"><span class="title">printInfo</span><span class="params">()</span></span> <span class="comment">// I'm B</span>
-
-let a1:A = <span class="function"><span class="title">A</span><span class="params">()</span></span>
-a1.<span class="function"><span class="title">printInfo</span><span class="params">()</span></span> <span class="comment">// I'm A</span>
-
-let a2 = <span class="function"><span class="title">A</span><span class="params">()</span></span>
-a2.<span class="function"><span class="title">printInfo</span><span class="params">()</span></span> <span class="comment">// I'm A</span>
-
-let b3 = <span class="function"><span class="title">B</span><span class="params">()</span></span>
-b3.<span class="function"><span class="title">printInfo</span><span class="params">()</span></span> <span class="comment">// I'm B</span>
-</code></pre><p>如果你自己的思考结果和这个一模一样，至少你理解了运行期和编译期的概念，恭喜你，你的C++是过关了。以<code>class B</code>举例，无论是<strong>b1, b2, b3中的哪一个，尽管其中有部分声明的类型是A，但是在实际运行时还是会走类似virtual function那套确认实际类型为B</strong>。但是，事情在Swift中真是这么简单吗？让我们接着往下看。 </p>
-<h3 id="Protocol_Extension">Protocol Extension</h3><p>去年，<strong>Swift 2.0</strong>发布，随之而来，一个概念悄然兴起：面向协议的编程。而这种编程范式不可或缺的必要条件就是<strong>Protocol Extension</strong>。在<code>Swift &lt; 2.0</code> 时代，<code>Protocol</code>的作用更类似于一种表征特征的约束。而有了<code>Protocol Extension</code>以后，<code>Protocol</code>更类似于一种插件装配的概念（写过Ruby的人相信会有体会），可以在无须编写代码的情况下，更自定义的元素添加行为能力。</p>
-<p>哎？你上面说了这么一大段废话，和我们的文章主题有啥关系？</p>
-<p>好，首先我们先看如下定义：</p>
-<pre><code><span class="class"><span class="keyword">protocol</span> <span class="title">Testable</span>
-</span>{
-    <span class="func"><span class="keyword">func</span> <span class="title">dynamicInfo</span><span class="params">()</span></span>
-}
-
-<span class="class"><span class="keyword">extension</span> <span class="title">Testable</span>
-</span>{
-    <span class="func"><span class="keyword">func</span> <span class="title">dynamicInfo</span><span class="params">()</span></span>
-    {
-        <span class="built_in">print</span>(<span class="string">"I'm Testable"</span>)
-    }
-}
-
-<span class="class"><span class="keyword">class</span> <span class="title">A</span>:<span class="title">Testable</span>
-</span>{
-    <span class="func"><span class="keyword">func</span> <span class="title">dynamicInfo</span><span class="params">()</span></span>
-    {
-        <span class="built_in">print</span>(<span class="string">"I'm A"</span>)
-    }
-}
-
-<span class="class"><span class="keyword">class</span> <span class="title">B</span>:<span class="title">Testable</span>
-</span>{
-    <span class="func"><span class="keyword">func</span> <span class="title">dynamicInfo</span><span class="params">()</span></span> {
-        <span class="built_in">print</span>(<span class="string">"I'm B"</span>)
-    }
-}
-</code></pre><p>然后，我们进行如下调用：</p>
-<pre><code>let a1 = <span class="function"><span class="title">A</span><span class="params">()</span></span>
-a1.<span class="function"><span class="title">dynamicInfo</span><span class="params">()</span></span> <span class="comment">// I'm A</span>
-
-let b1 = <span class="function"><span class="title">B</span><span class="params">()</span></span>     
-b1.<span class="function"><span class="title">dynamicInfo</span><span class="params">()</span></span> <span class="comment">// I'm B</span>
-
-let a2:Testable = <span class="function"><span class="title">A</span><span class="params">()</span></span>
-a2.<span class="function"><span class="title">dynamicInfo</span><span class="params">()</span></span> <span class="comment">// I'm A</span>
-
-let b2:Testable = <span class="function"><span class="title">B</span><span class="params">()</span></span>
-b2.<span class="function"><span class="title">dynamicInfo</span><span class="params">()</span></span> <span class="comment">// I'm B</span>
-</code></pre><p>到这里，事情还是还是按照C++那套逻辑在走，如果你把<code>class B</code>中的<code>dynamicInfo</code>删除，那么对应B类型的<code>dynamicInfo</code>函数调用就会输出<strong>I’m Testable</strong>。</p>
-<p>好，现在问题来了，如果我们将<code>Testable Protocol Extension</code>添加一下东西，同时保持<code>protocol Testable</code>不变，如下所示：</p>
-<pre><code><span class="class"><span class="keyword">protocol</span> <span class="title">Testable</span>
-</span>{
-    <span class="func"><span class="keyword">func</span> <span class="title">dynamicInfo</span><span class="params">()</span></span>
-}
-
-<span class="class"><span class="keyword">extension</span> <span class="title">Testable</span>
-</span>{
-    <span class="func"><span class="keyword">func</span> <span class="title">dynamicInfo</span><span class="params">()</span></span>
-    {
-        <span class="built_in">print</span>(<span class="string">"I'm Testable"</span>)
-    }
-
-    <span class="comment">// ### 新添加的 ###</span>
-    <span class="func"><span class="keyword">func</span> <span class="title">staticInfo</span><span class="params">()</span></span>
-    {
-        <span class="built_in">print</span>(<span class="string">"I'm Testable Static"</span>)
-    }
-}
-</code></pre><p>如果这个时候，我们进行如下代码的测试：</p>
-<pre><code><span class="class"><span class="keyword">class</span> <span class="title">A</span>:<span class="title">Testable</span>
-</span>{
-    <span class="func"><span class="keyword">func</span> <span class="title">dynamicInfo</span><span class="params">()</span></span>
-    {
-        <span class="built_in">print</span>(<span class="string">"I'm A"</span>)
-    }
-
-    <span class="func"><span class="keyword">func</span> <span class="title">staticInfo</span><span class="params">()</span></span>
-    {
-        <span class="built_in">print</span>(<span class="string">"I'm A Static"</span>)
-    }
-}
-
-<span class="keyword">let</span> a1 = <span class="type">A</span>()     
-a1.staticInfo() <span class="comment">// I'm A Static</span>
-
-<span class="keyword">let</span> a2:<span class="type">A</span> = <span class="type">A</span>()
-a2.staticInfo() <span class="comment">// I'm A Static</span>
-
-<span class="keyword">let</span> a3:<span class="type">Testable</span> = <span class="type">A</span>()
-a3.staticInfo() <span class="comment">// I'm Testable Static</span>
-</code></pre><p>看到没？最后一行的输出是不是出乎了大家的意料，竟然输出了<strong>I’m Testable Static</strong>。 </p>
-<p>这是咋回事？回顾下之前我们改变的地方，发现我们在<strong>Protocol Extension中添加了一个<code>func staticInfo()</code>，但是却没在对应的<code>Testable Protocol</code>进行声明</strong>。但是这还不够，我们必须将调用<code>staticInfo</code>的地方的类型显式的声明成<strong>let a3:Testable</strong>。</p>
-<p><div style="color:red">也就是说，Swift方法的静态Dispatch必须严格满足如下条件：</div>  </p>
-<ul>
-<li>方法在Extension中提供了实现，但是在对应的protocol中没有声明。</li>
-<li>调用方法的时候必须显示的声明成protocol的类型。</li>
-</ul>
-<p>如果不好理解，我画了张图帮助大家加深印象：</p>
-<p><img src="http://7lrzqz.com1.z0.glb.clouddn.com/Slice%201.png" alt=""></p>
-<p><strong>还有一点需要注意的是，Swift中的静态Dispatch不以类的层级和override而转移</strong>，也就是说，如下这种定义：</p>
-<pre><code><span class="class"><span class="keyword">class</span> <span class="title">B</span>:<span class="title">A</span>
-</span>{
-    <span class="keyword">override</span> <span class="func"><span class="keyword">func</span> <span class="title">staticInfo</span><span class="params">()</span></span>
-    {
-        <span class="built_in">print</span>(<span class="string">"I'm B Static"</span>)
-    }
-}
-</code></pre><p>当我们使用  </p>
-<pre><code>let a4:Testable = <span class="function"><span class="title">B</span><span class="params">()</span></span>
-a4.<span class="function"><span class="title">staticInfo</span><span class="params">()</span></span>
-</code></pre><p>一样会输出<code>I&#39;m Testable Static</code></p>
-]]></content>
-    <summary type="html">
-    <![CDATA[<h3 id="C++_VS_Swift">C++ VS Swift</h3><p>虽然我很早就了解了Swift（2014年的WWDC），但是在粗略看了一下Swift的语法后，我认为这不过是许多语言语法的大杂烩，感觉和C++没有啥区别。但是实际上，在我使用Swift的这几个月中，]]>
-    </summary>
-    
-      <category term="Swift" scheme="http://satanwoo.github.io/tags/Swift/"/>
     
   </entry>
   

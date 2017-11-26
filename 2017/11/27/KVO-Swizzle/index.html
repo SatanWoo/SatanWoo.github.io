@@ -1,0 +1,414 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  
+  <title>一种基于KVO的页面加载，渲染耗时监控方法 | Hexo</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+  <meta name="description" content="打广告：有兴趣加入阿里巴巴手淘基础架构平台移动高可用团队的请微博联系我@盗版五子棋
+和同事zb一起维护了一个ARM64的专栏iOS调试进阶，有兴趣的可以读读
+
+在介绍本文之前，请先允许我提出一个问题，如果你要无痕监控任意一个页面（UIViewController及其子类）的加载或者渲染时间，你会怎么做。
+很多人都会想到说用AOP啊，利用Method Swizzling来进行方法替换从而获得方法调用">
+<meta property="og:type" content="article">
+<meta property="og:title" content="一种基于KVO的页面加载，渲染耗时监控方法">
+<meta property="og:url" content="http://satanwoo.github.io/2017/11/27/KVO-Swizzle/index.html">
+<meta property="og:site_name" content="Hexo">
+<meta property="og:description" content="打广告：有兴趣加入阿里巴巴手淘基础架构平台移动高可用团队的请微博联系我@盗版五子棋
+和同事zb一起维护了一个ARM64的专栏iOS调试进阶，有兴趣的可以读读
+
+在介绍本文之前，请先允许我提出一个问题，如果你要无痕监控任意一个页面（UIViewController及其子类）的加载或者渲染时间，你会怎么做。
+很多人都会想到说用AOP啊，利用Method Swizzling来进行方法替换从而获得方法调用">
+<meta property="og:updated_time" content="2017-11-26T16:11:36.000Z">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="一种基于KVO的页面加载，渲染耗时监控方法">
+<meta name="twitter:description" content="打广告：有兴趣加入阿里巴巴手淘基础架构平台移动高可用团队的请微博联系我@盗版五子棋
+和同事zb一起维护了一个ARM64的专栏iOS调试进阶，有兴趣的可以读读
+
+在介绍本文之前，请先允许我提出一个问题，如果你要无痕监控任意一个页面（UIViewController及其子类）的加载或者渲染时间，你会怎么做。
+很多人都会想到说用AOP啊，利用Method Swizzling来进行方法替换从而获得方法调用">
+  
+    <link rel="alternative" href="/atom.xml" title="Hexo" type="application/atom+xml">
+  
+  
+    <link rel="icon" href="/favicon.png">
+  
+  <link rel="stylesheet" href="/css/style.css" type="text/css">
+  
+
+</head>
+<body>
+  <div id="container">
+    <div id="wrap">
+      <header id="header">
+  <div id="banner"></div>
+  <div id="header-outer" class="outer">
+    <div id="header-title" class="inner">
+      <h1 id="logo-wrap">
+        <a href="/" id="logo">Hexo</a>
+      </h1>
+      
+    </div>
+    <div id="header-inner" class="inner">
+      <nav id="main-nav">
+        <a id="main-nav-toggle" class="nav-icon"></a>
+        
+          <a class="main-nav-link" href="/">Home</a>
+        
+          <a class="main-nav-link" href="/archives">Archives</a>
+        
+          <a class="main-nav-link" href="/sitemap.xml">map</a>
+        
+      </nav>
+      <nav id="sub-nav">
+        
+          <a id="nav-rss-link" class="nav-icon" href="/atom.xml" title="RSS Feed"></a>
+        
+        <a id="nav-search-btn" class="nav-icon" title="Search"></a>
+      </nav>
+      <div id="search-form-wrap">
+        <form action="//google.com/search" method="get" accept-charset="UTF-8" class="search-form"><input type="search" name="q" results="0" class="search-form-input" placeholder="Search"><button type="submit" class="search-form-submit">&#xF002;</button><input type="hidden" name="sitesearch" value="http://satanwoo.github.io"></form>
+      </div>
+    </div>
+  </div>
+</header>
+      <div class="outer">
+        <section id="main"><article id="post-KVO-Swizzle" class="article article-type-post" itemscope itemprop="blogPost">
+  <div class="article-meta">
+    <a href="/2017/11/27/KVO-Swizzle/" class="article-date">
+  <time datetime="2017-11-26T16:08:28.000Z" itemprop="datePublished">2017-11-27</time>
+</a>
+    
+  </div>
+  <div class="article-inner">
+    
+    
+      <header class="article-header">
+        
+  
+    <h1 class="article-title" itemprop="name">
+      一种基于KVO的页面加载，渲染耗时监控方法
+    </h1>
+  
+
+      </header>
+    
+    <div class="article-entry" itemprop="articleBody">
+      
+        <blockquote>
+<p>打广告：有兴趣加入阿里巴巴手淘基础架构平台移动高可用团队的请微博联系我@盗版五子棋</p>
+<p>和同事zb一起维护了一个ARM64的专栏<a href="https://zhuanlan.zhihu.com/c_142064221" target="_blank" rel="external">iOS调试进阶</a>，有兴趣的可以读读</p>
+</blockquote>
+<p>在介绍本文之前，请先允许我提出一个问题，如果你要无痕监控任意一个页面（UIViewController及其子类）的加载或者渲染时间，你会怎么做。</p>
+<p>很多人都会想到说用AOP啊，利用<code>Method Swizzling</code>来进行方法替换从而获得方法调用耗时。<br>比如我们有一个<code>ViewController</code>，如果其实现了一个<code>viewDidLoad</code>方法进行睡眠<strong>5</strong>秒，如下所示：</p>
+<pre><code><span class="class"><span class="keyword">@implementation</span> <span class="title">ViewController</span></span>
+
+- (<span class="keyword">void</span>)viewDidLoad
+{
+    [<span class="keyword">super</span> viewDidLoad];
+    sleep(<span class="number">5</span>);
+}
+
+<span class="keyword">@end</span>
+</code></pre><p>相信很多人的第一直觉会是如下AOP代码（我们省略Method Swizzling相关的代码）：</p>
+<pre><code><span class="class"><span class="keyword">@implementation</span> <span class="title">UIViewController</span> (<span class="title">TestCase</span>)</span>
+
++ (<span class="keyword">void</span>)load
+{
+    <span class="keyword">static</span> <span class="built_in">dispatch_once_t</span> onceToken;
+    <span class="built_in">dispatch_once</span>(&amp;onceToken, ^{
+        wzq_swizzleMethod([<span class="built_in">UIViewController</span> class], <span class="keyword">@selector</span>(viewDidLoad), <span class="keyword">@selector</span>(wzq_viewDidLoad));
+    });
+}
+
+- (<span class="keyword">void</span>)wzq_viewDidLoad
+{
+    <span class="built_in">NSDate</span> *date = [<span class="built_in">NSDate</span> date];
+    [<span class="keyword">self</span> wzq_viewDidLoad];
+
+    <span class="built_in">NSTimeInterval</span> duration = [[<span class="built_in">NSDate</span> date] timeIntervalSinceDate:date];
+    <span class="built_in">NSLog</span>(<span class="string">@"Page %@ cost %g in viewDidLoad"</span>, [<span class="keyword">self</span> class], duration); 
+}
+
+<span class="keyword">@end</span>
+</code></pre><p>但是，如果你自己尝试了你会发现，你测算的时间压根不是<span style="color:red"><strong>5</strong></span>秒。</p>
+<p>为什么呢？其原因在于我们<code>Method Swizzling</code>的时候，因为采用了对基类<code>UIViewController</code>进行替换，获取到的<code>viewDidLoad</code>对应的IMP是属于基类<code>UIViewController</code>的，而并不是<code>ViewController</code>自身覆写的，所以我们监控的其实从子类<code>ViewController</code>调用<code>[super viewDidLoad]</code>的时候调用基类IMP的耗时。</p>
+<p>好，看到这，有人就想了对应的方法，把<code>-[ViewController viewDidLoad]</code>的IMP替换掉就行了。方法很多种，比如创建一个<code>ViewController</code>的<strong>Category</strong>进行替换。<strong>但是这种方法你好像没办法任意对某个页面进行替换。</strong></p>
+<blockquote>
+<p>有人说你可以runtime遍历所有类判断是不是<code>UIViewController</code>的子类，然后动态替换。理论是可行的，效率嘛，是比较低的。</p>
+</blockquote>
+<h3 id="方案">方案</h3><p>根据上述我们所知的缺陷，我们需要有一个兼顾动态性和性能的方案，能够直接获取到子类的IMP，这样才能达到我们对于页面加载渲染时间（<code>viewDidLoad</code>, <code>viewDidAppear</code>和<code>viewWillAppear</code>）监控的需求。</p>
+<p>基于这个需求，我很快想到了<strong>基于KVO</strong>的方案（如果你对KVO不了解，可以参考<a href="http://satanwoo.github.io/2017/09/11/KVO-CRASH/">我的文章：KVO在不同的二进制中多个符号并存的Crash问题</a>）。我们知道，在对于任意对象进行KVO监控的时候，iOS底层实际上帮你动态创建了一个隐蔽的类，同时帮了做了大量的<code>setter，getter</code>函数的override，并调用原来类对应函数实现，从而让你神不知鬼不觉的以为你还在用原来的类进行操作。</p>
+<p>那我们该怎么做呢？</p>
+<ol>
+<li>对我们需要监听的类的实例进行KVO，随便监听一个不存在的KeyPath。我们压根不需要KVO的任何回调，我们只是需要它能帮我们<strong>创建子类</strong>而已。</li>
+<li>对KVO创建出来的子类添加我们需要Swizzle的方法对应的SEL及其IMP。因为本质上KVO只是对setter和getter方法进行了<strong>override</strong>，<b style="color:red">如果我们不提供我们自己的实现，还是会调用到原来的类的IMP。</b></li>
+<li>在实例销毁的时候，将KVO监听移除，不然会导致<b style="color:red">KVO still registering when deallocated这样的Crash。</b></li>
+</ol>
+<p>总体来说，我们需要做的就是三件事。</p>
+<h4 id="1-_对实例进行KVO">1. 对实例进行KVO</h4><p>KVO方法只能在对象实例上进行操作，我们首先要获取到的就是<code>UIViewController</code>及其子类的实例。</p>
+<p>遍历头文件，发现UIViewController的初始化方法比较少，归纳为如下三种：</p>
+<pre><code>init
+<span class="string">initWithCoder:</span>
+<span class="string">initWithNibName:</span><span class="string">bundle:</span>
+</code></pre><p>我们先Swizzle这几个方法：</p>
+<pre><code> wzq_swizzleMethod<span class="list">([UIViewController class], @selector<span class="list">(<span class="keyword">initWithNibName</span><span class="keyword">:bundle</span>:)</span>, @selector<span class="list">(<span class="keyword">wzq_initWithNibName</span><span class="keyword">:bundle</span>:)</span>)</span><span class="comment">;</span>
+wzq_swizzleMethod<span class="list">([UIViewController class], @selector<span class="list">(<span class="keyword">initWithCoder</span>:)</span>, @selector<span class="list">(<span class="keyword">wzq_initWithCoder</span>:)</span>)</span><span class="comment">;</span>
+wzq_swizzleMethod<span class="list">([UIViewController class], @selector<span class="list">(<span class="keyword">init</span>)</span>, @selector<span class="list">(<span class="keyword">wzq_init</span>)</span>)</span><span class="comment">;</span>
+</code></pre><p>这几个方法调用的时候，实例对象对应的内存已经分配出来了，无非就是构造函数还没赋值，但是我们也能进行KVO了。KVO的代码如下所示：</p>
+<pre><code>NSString *identifier = [NSString <span class="string">stringWithFormat:</span>@<span class="string">"wzq_%@"</span>, [[NSProcessInfo processInfo] globallyUniqueString]];
+[vc <span class="string">addObserver:</span>[NSObject <span class="keyword">new</span>] <span class="string">forKeyPath:</span>identifier <span class="string">options:</span>NSKeyValueObservingOptionNew <span class="string">context:</span>nil];
+</code></pre><h4 id="2-_添加我们想要的方法">2. 添加我们想要的方法</h4><p>我们刚刚已经对页面实例进行了KVO操作，此时对于原先类别为<code>ViewController</code>的<code>vc</code>对象来说，内部其实已经变成<b style="color:red">NSKVONotifying_ViewController类型了。</b>。如果我们想对其所在的类型添加方法的话，不能直接用<code>[vc class]</code>，因为这个方法已经被内部override成了<code>ViewController</code>。我们需要使用<code>object_getClass</code>这个类进行真正的类型获取，如下所示：</p>
+<pre><code> <span class="comment">// NSKVONotifying_ViewController</span>
+Class kvoCls = <span class="keyword">object</span><span class="number">_</span>getClass(vc);
+<span class="comment">// ViewController</span>
+Class originCls = <span class="keyword">class</span><span class="number">_</span>getSuperclass(kvoCls);
+
+<span class="comment">// 获取原来实现的encoding</span>
+const char *originViewDidLoadEncoding = method<span class="number">_</span>getTypeEncoding(<span class="keyword">class</span><span class="number">_</span>getInstanceMethod(originCls, <span class="annotation">@selector</span>(viewDidLoad)));
+const char *originViewDidAppearEncoding = method<span class="number">_</span>getTypeEncoding(<span class="keyword">class</span><span class="number">_</span>getInstanceMethod(originCls, <span class="annotation">@selector</span>(viewDidAppear:)));
+const char *originViewWillAppearEncoding = method<span class="number">_</span>getTypeEncoding(<span class="keyword">class</span><span class="number">_</span>getInstanceMethod(originCls, <span class="annotation">@selector</span>(viewWillAppear:)));
+
+<span class="comment">// 重点，添加方法。</span>
+<span class="keyword">class</span><span class="number">_</span>addMethod(kvoCls, <span class="annotation">@selector</span>(viewDidLoad), (IMP)wzq<span class="number">_</span>viewDidLoad, originViewDidLoadEncoding);
+<span class="keyword">class</span><span class="number">_</span>addMethod(kvoCls, <span class="annotation">@selector</span>(viewDidAppear:), (IMP)wzq<span class="number">_</span>viewDidAppear, originViewDidAppearEncoding);
+<span class="keyword">class</span><span class="number">_</span>addMethod(kvoCls, <span class="annotation">@selector</span>(viewWillAppear:), (IMP)wzq<span class="number">_</span>viewWillAppear, originViewWillAppearEncoding);
+</code></pre><p>上述代码非常通俗易懂，不再赘述，替换完的方法如下，我们以<code>wzq_viewDidLoad</code>举例：</p>
+<pre><code><span class="keyword">static</span> <span class="keyword">void</span> wzq_viewDidLoad(<span class="built_in">UIViewController</span> *kvo_self, SEL _sel)
+{
+    Class kvo_cls = object_getClass(kvo_self);
+    Class origin_cls = class_getSuperclass(kvo_cls);
+
+    <span class="comment">// 注意点</span>
+    IMP origin_imp = method_getImplementation(class_getInstanceMethod(origin_cls, _sel));
+    assert(origin_imp != <span class="literal">NULL</span>);
+
+    <span class="keyword">void</span>(*func)(<span class="built_in">UIViewController</span> *, SEL) =  (<span class="keyword">void</span>(*)(<span class="built_in">UIViewController</span> *, SEL))origin_imp;
+
+    <span class="built_in">NSDate</span> *date = [<span class="built_in">NSDate</span> date];
+
+    func(kvo_self, _sel);
+
+    <span class="built_in">NSTimeInterval</span> duration = [[<span class="built_in">NSDate</span> date] timeIntervalSinceDate:date];
+    <span class="built_in">NSLog</span>(<span class="string">@"Class %@ cost %g in viewDidLoad"</span>, [kvo_self class], duration);
+}
+</code></pre><p>重点关注下上述代码中的<b style="color:red">注意点</b>，之前我们在KVO生成的类中对应添加了原本没有的实现，因此<code>-[ViewController viewDidLoad]</code>会走到我们的<code>wzq_viewDidLoad</code>方法中，但是我们怎么才能调用到原来的<code>viewDidLoad</code>的呢？我们之前并没有保存对应的IMP呀。</p>
+<p><b style="color:red">这里还是利用了KVO的特殊性：内部生成的NSKVONotifying_ViewController实际上是继承自ViewController的</b></p>
+<p>因此，<code>Class origin_cls = class_getSuperclass(kvo_cls);</code>实际上获取到了<code>ViewController</code>类，我们从中取出对应的IMP，进行直接调用即可。</p>
+<h4 id="3-_移除KVO">3. 移除KVO</h4><p>我们利用Associate Object去移除就好了。一个对象释放的时候会自动去清除其所在的<code>assoicate object</code>。</p>
+<p>基于这个原理，我们可以实现如下代码：</p>
+<p>我们构建一个桩，把所有无用的KVO监听都设置给这个桩，如下所示：</p>
+<pre><code><span class="attr_selector">[vc addObserver:[WZQKVOObserverStub stub]</span> <span class="tag">forKeyPath</span><span class="pseudo">:identifier</span> <span class="tag">options</span><span class="pseudo">:NSKeyValueObservingOptionNew</span> <span class="tag">context</span><span class="pseudo">:nil</span>];
+</code></pre><p>然后我们构建一个移除器，这个移除器弱引用保存了vc的实例和对应的keypath，如下：</p>
+<pre><code>WZQKVORemover *remover = [WZQKVORemover new]<span class="comment">;</span>
+remover.obj = vc<span class="comment">;</span>
+remover.keyPath = identifier.copy<span class="comment">;</span>
+</code></pre><p>然后我们把这个移除器利用<code>associate object</code>设置给对应的vc。</p>
+<pre><code>objc_setAssociatedObject<span class="list">(<span class="keyword">vc</span>, <span class="keyword">&amp;wzq_associateRemoveKey</span>, remover, OBJC_ASSOCIATION_RETAIN)</span><span class="comment">;</span>
+</code></pre><p>而在对应的移除器的<code>dealloc</code>方法里，我们把kvo监听给移除就可以了。</p>
+<pre><code><span class="tag">-</span> (void)<span class="tag">dealloc</span>
+{
+<span class="id">#ifdef</span> <span class="tag">DEBUG</span>
+    <span class="tag">NSLog</span>(@<span class="string">"WZQKVORemover called"</span>);
+<span class="id">#endif</span>
+    <span class="tag">if</span> (_obj) {
+        <span class="attr_selector">[_obj removeObserver:[WZQKVOObserverStub stub]</span> <span class="tag">forKeyPath</span><span class="pseudo">:_keyPath</span>];
+    }
+}
+</code></pre><h3 id="额外">额外</h3><p>利用<code>associate object</code>移除KVO的正确性是有保障的，具体见runtime中<code>associate object</code>的源码：</p>
+<pre><code><span class="type">void</span> objc_removeAssociatedObjects(id <span class="keyword">object</span>) 
+{
+    <span class="keyword">if</span> (<span class="keyword">object</span> &amp;&amp; <span class="keyword">object</span>-&gt;hasAssociatedObjects()) {
+        _object_remove_assocations(<span class="keyword">object</span>);
+    }
+}
+
+<span class="type">void</span> _object_remove_assocations(id <span class="keyword">object</span>) {
+    vector&lt; <span class="type">ObjcAssociation</span>,<span class="type">ObjcAllocator</span>&lt;<span class="type">ObjcAssociation</span>&gt; &gt; elements;
+    {
+        <span class="type">AssociationsManager</span> manager;
+        <span class="type">AssociationsHashMap</span> &amp;associations(manager.associations());
+        <span class="keyword">if</span> (associations.size() == <span class="number">0</span>) <span class="keyword">return</span>;
+        disguised_ptr_t disguised_object = <span class="type">DISGUISE</span>(<span class="keyword">object</span>);
+        <span class="type">AssociationsHashMap</span>::<span class="keyword">iterator</span> i = associations.find(disguised_object);
+        <span class="keyword">if</span> (i != associations.<span class="keyword">end</span>()) {
+            // copy all <span class="keyword">of</span> the associations that need to be removed.
+            <span class="type">ObjectAssociationMap</span> *refs = i-&gt;second;
+            <span class="keyword">for</span> (<span class="type">ObjectAssociationMap</span>::<span class="keyword">iterator</span> j = refs-&gt;begin(), <span class="keyword">end</span> = refs-&gt;<span class="keyword">end</span>(); j != <span class="keyword">end</span>; ++j) {
+                elements.push_back(j-&gt;second);
+            }
+            // remove the secondary table.
+            delete refs;
+            associations.erase(i);
+        }
+    }
+    // the calls to releaseValue() happen outside <span class="keyword">of</span> the lock.
+    for_each(elements.begin(), elements.<span class="keyword">end</span>(), <span class="type">ReleaseValue</span>());
+}
+</code></pre><h3 id="代码">代码</h3><p>本文的工程代码托管在<a href="">Github</a>上，包含了测试用例（默认带干扰测试），还没来得及搞成cocoapods，等我有时间了搞一下。但是你直接拖拽源码使用是一点问题都没有。</p>
+
+      
+    </div>
+    <footer class="article-footer">
+      <a data-url="http://satanwoo.github.io/2017/11/27/KVO-Swizzle/" data-id="cjagypmvi002bbqi1i54a471y" class="article-share-link">Share</a>
+      
+        <a href="http://satanwoo.github.io/2017/11/27/KVO-Swizzle/#disqus_thread" class="article-comment-link">Comments</a>
+      
+      
+  <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
+
+    </footer>
+  </div>
+  
+    
+<nav id="article-nav">
+  
+  
+    <a href="/2017/11/02/load-twice/" id="article-nav-older" class="article-nav-link-wrap">
+      <strong class="article-nav-caption">Older</strong>
+      <div class="article-nav-title">注意系统库的坑之load函数调用多次</div>
+    </a>
+  
+</nav>
+
+  
+</article>
+
+<div id="disqus_thread"></div>
+<script>
+
+/**
+*  RECOMMENDED CONFIGURATION VARIABLES: EDIT AND UNCOMMENT THE SECTION BELOW TO INSERT DYNAMIC VALUES FROM YOUR PLATFORM OR CMS.
+*  LEARN WHY DEFINING THESE VARIABLES IS IMPORTANT: https://disqus.com/admin/universalcode/#configuration-variables*/
+/*
+var disqus_config = function () {
+this.page.url = PAGE_URL;  // Replace PAGE_URL with your page's canonical URL variable
+this.page.identifier = PAGE_IDENTIFIER; // Replace PAGE_IDENTIFIER with your page's unique identifier variable
+};
+*/
+(function() { // DON'T EDIT BELOW THIS LINE
+var d = document, s = d.createElement('script');
+s.src = 'https://satanwoo-2.disqus.com/embed.js';
+s.setAttribute('data-timestamp', +new Date());
+(d.head || d.body).appendChild(s);
+})();
+</script>
+<noscript>Please enable JavaScript to view the <a href="https://disqus.com/?ref_noscript">comments powered by Disqus.</a></noscript>
+                                
+  <section id="comments">
+    <div id="disqus_thread">
+      <noscript>Please enable JavaScript to view the <a href="//disqus.com/?ref_noscript">comments powered by Disqus.</a></noscript>
+    </div>
+  </section>
+</section>
+        
+          <aside id="sidebar">
+  
+    
+  
+    
+  <div class="widget-wrap">
+    <h3 class="widget-title">Tags</h3>
+    <div class="widget">
+      <ul class="tag-list"><li class="tag-list-item"><a class="tag-list-link" href="/tags/Android/">Android</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/C/">C</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Growth/">Growth</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/JavaScript/">JavaScript</a><span class="tag-list-count">3</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Math/">Math</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Performance/">Performance</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/R/">R</a><span class="tag-list-count">2</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Reverse-Engineering/">Reverse Engineering</a><span class="tag-list-count">6</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Swift/">Swift</a><span class="tag-list-count">6</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/XNU/">XNU</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/iOS/">iOS</a><span class="tag-list-count">32</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/shell/">shell</a><span class="tag-list-count">1</span></li></ul>
+    </div>
+  </div>
+
+  
+    
+  <div class="widget-wrap">
+    <h3 class="widget-title">Tag Cloud</h3>
+    <div class="widget tagcloud">
+      <a href="/tags/Android/" style="font-size: 10px;">Android</a> <a href="/tags/C/" style="font-size: 10px;">C</a> <a href="/tags/Growth/" style="font-size: 10px;">Growth</a> <a href="/tags/JavaScript/" style="font-size: 15px;">JavaScript</a> <a href="/tags/Math/" style="font-size: 10px;">Math</a> <a href="/tags/Performance/" style="font-size: 10px;">Performance</a> <a href="/tags/R/" style="font-size: 12.5px;">R</a> <a href="/tags/Reverse-Engineering/" style="font-size: 17.5px;">Reverse Engineering</a> <a href="/tags/Swift/" style="font-size: 17.5px;">Swift</a> <a href="/tags/XNU/" style="font-size: 10px;">XNU</a> <a href="/tags/iOS/" style="font-size: 20px;">iOS</a> <a href="/tags/shell/" style="font-size: 10px;">shell</a>
+    </div>
+  </div>
+
+  
+    
+  <div class="widget-wrap">
+    <h3 class="widget-title">Archives</h3>
+    <div class="widget">
+      <ul class="archive-list"><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/11/">November 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/10/">October 2017</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/09/">September 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/08/">August 2017</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/07/">July 2017</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/06/">June 2017</a><span class="archive-list-count">3</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/04/">April 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/01/">January 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/10/">October 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/09/">September 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/07/">July 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/05/">May 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/04/">April 2016</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/03/">March 2016</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/02/">February 2016</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/12/">December 2015</a><span class="archive-list-count">6</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/11/">November 2015</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/10/">October 2015</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/09/">September 2015</a><span class="archive-list-count">4</span></li></ul>
+    </div>
+  </div>
+
+  
+    
+  <div class="widget-wrap">
+    <h3 class="widget-title">Recents</h3>
+    <div class="widget">
+      <ul>
+        
+          <li>
+            <a href="/2017/11/27/KVO-Swizzle/">一种基于KVO的页面加载，渲染耗时监控方法</a>
+          </li>
+        
+          <li>
+            <a href="/2017/11/02/load-twice/">注意系统库的坑之load函数调用多次</a>
+          </li>
+        
+          <li>
+            <a href="/2017/10/18/abort/">iOS内存abort(Jetsam) 原理探究</a>
+          </li>
+        
+          <li>
+            <a href="/2017/09/24/mainthreadchecker1/">基于桥的全量方法Hook方案 - 探究苹果主线程检查实现</a>
+          </li>
+        
+          <li>
+            <a href="/2017/09/11/KVO-CRASH/">KVO在不同的二进制中多个符号并存的Crash问题</a>
+          </li>
+        
+      </ul>
+    </div>
+  </div>
+
+  
+</aside>
+        
+      </div>
+      <footer id="footer">
+  
+  <div class="outer">
+    <div id="footer-info" class="inner">
+      &copy; 2017 John Doe<br>
+      Powered by <a href="http://hexo.io/" target="_blank">Hexo</a>
+    </div>
+  </div>
+</footer>
+    </div>
+    <nav id="mobile-nav">
+  
+    <a href="/" class="mobile-nav-link">Home</a>
+  
+    <a href="/archives" class="mobile-nav-link">Archives</a>
+  
+    <a href="/sitemap.xml" class="mobile-nav-link">map</a>
+  
+</nav>
+    
+<script>
+  var disqus_shortname = 'satanwoo-2';
+  
+  var disqus_url = 'http://satanwoo.github.io/2017/11/27/KVO-Swizzle/';
+  
+  (function(){
+    var dsq = document.createElement('script');
+    dsq.type = 'text/javascript';
+    dsq.async = true;
+    dsq.src = '//' + disqus_shortname + '.disqus.com/embed.js';
+    (document.getElementsByTagName('head')[0] || document.getElementsByTagName('body')[0]).appendChild(dsq);
+  })();
+</script>
+
+
+
+  <link rel="stylesheet" href="/fancybox/jquery.fancybox.css" type="text/css">
+  <script src="/fancybox/jquery.fancybox.pack.js" type="text/javascript"></script>
+
+
+<script src="/js/script.js" type="text/javascript"></script>
+
+  </div>
+</body>
+</html>
