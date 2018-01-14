@@ -62,6 +62,354 @@
       <div class="outer">
         <section id="main">
   
+    <article id="post-Refactor-Mega-ViewController" class="article article-type-post" itemscope itemprop="blogPost">
+  <div class="article-meta">
+    <a href="/2015/12/30/Refactor-Mega-ViewController/" class="article-date">
+  <time datetime="2015-12-29T16:37:56.000Z" itemprop="datePublished">2015-12-30</time>
+</a>
+    
+  </div>
+  <div class="article-inner">
+    
+    
+      <header class="article-header">
+        
+  
+    <h1 itemprop="name">
+      <a class="article-title" href="/2015/12/30/Refactor-Mega-ViewController/">重构你的ViewController</a>
+    </h1>
+  
+
+      </header>
+    
+    <div class="article-entry" itemprop="articleBody">
+      
+        <p>这篇文章来自阅读<a href="https://realm.io/news/andy-matuschak-refactor-mega-controller/" target="_blank" rel="external">Let’s Play: Refactor the Mega Controller!</a></p>
+<p>在该文中，作者阐述了如何使用Swift重构一个臭名昭著的Massive View Controller。从中，我们可以一窥Swift诸多优秀的特性以及如何利用这些特性将ViewController的职责进行解耦。</p>
+<p>但是作者由于时间有限，并没有讲述完全，因此本文是我阅读<a href="https://github.com/andymatuschak/refactor-the-mega-controller" target="_blank" rel="external">源码</a>后的理解。</p>
+<p><strong>建议大家在阅读本文之前，能够先去看看链接中的视频。</strong></p>
+<h3 id="Let’s_get_started">Let’s get started</h3><p>首先我们下载源码，可以看到如下文件：</p>
+<pre><code>-<span class="ruby"> <span class="constant">NavigationController</span>.swift
+</span>-<span class="ruby"> <span class="constant">ViewController</span>.swift
+</span>-<span class="ruby"> <span class="constant">AddViewController</span>.swift</span>
+</code></pre><p>其中，<code>ViewController.swift</code>是项目的核心，代码行数超过<strong>246</strong>行。在这里我要强调一下，并不是代码行数多不好，而是要看你这个职责是不是相关。如果246行都是在实现一个数据结构或者算法，当然可行。但是如果246行里面包含了逻辑业务、网络请求、数据持久化，那必然是可以分离一部分职责出去。</p>
+<p>在本文的<code>ViewController.swift</code>，这个类在初始状态下包含了<code>UITableViewDataSource</code>, <code>UITableViewDelegate</code>, <code>UIViewControllerTransitioningDelegate</code>, <code>UIViewControllerAnimatedTransitioning</code>, <code>NSFetchedResultsController</code>以及一系类跟UI显示相关的代码。</p>
+<h4 id="1-_干掉UINavigationBar相关的内容">1. 干掉UINavigationBar相关的内容</h4><p>作者在app中构建了可变化的NavigationBar，因此bar的样式是根据不同状态进行改变的。原来的逻辑整体写在了<code>ViewController.swift</code>中，如下所示：</p>
+<pre><code> func updateNavigationBar() {
+        <span class="keyword">switch</span> fetchedResultsController!<span class="variable">.fetchedObjects</span>!<span class="variable">.count</span> {
+        <span class="keyword">case</span> <span class="number">0.</span>.<span class="number">.3</span>:
+            navigationController!<span class="variable">.navigationBar</span><span class="variable">.barTintColor</span> = <span class="literal">nil</span>
+            navigationController!<span class="variable">.navigationBar</span><span class="variable">.titleTextAttributes</span> = <span class="literal">nil</span>
+            navigationController!<span class="variable">.navigationBar</span><span class="variable">.tintColor</span> = <span class="literal">nil</span>
+        <span class="keyword">case</span> <span class="number">4.</span>.<span class="number">.9</span>:
+            navigationController!<span class="variable">.navigationBar</span><span class="variable">.barTintColor</span> = <span class="built_in">UIColor</span>(red: <span class="number">235</span>/<span class="number">255</span>, green: <span class="number">156</span>/<span class="number">255</span>, blue: <span class="number">77</span>/<span class="number">255</span>, alpha: <span class="number">1.0</span>)
+            navigationController!<span class="variable">.navigationBar</span><span class="variable">.titleTextAttributes</span> = [<span class="built_in">NSForegroundColorAttributeName</span>: <span class="built_in">UIColor</span><span class="variable">.whiteColor</span>()]
+            navigationController!<span class="variable">.navigationBar</span><span class="variable">.tintColor</span> = <span class="built_in">UIColor</span><span class="variable">.whiteColor</span>()
+        <span class="keyword">default</span>:
+            navigationController!<span class="variable">.navigationBar</span><span class="variable">.barTintColor</span> = <span class="built_in">UIColor</span>(red: <span class="number">248</span>/<span class="number">255</span>, green: <span class="number">73</span>/<span class="number">255</span>, blue: <span class="number">68</span>/<span class="number">255</span>, alpha: <span class="number">1.0</span>)
+            navigationController!<span class="variable">.navigationBar</span><span class="variable">.titleTextAttributes</span> = [<span class="built_in">NSForegroundColorAttributeName</span>: <span class="built_in">UIColor</span><span class="variable">.whiteColor</span>()]
+            navigationController!<span class="variable">.navigationBar</span><span class="variable">.tintColor</span> = <span class="built_in">UIColor</span><span class="variable">.whiteColor</span>()
+        }
+    }
+
+override func preferredStatusBarStyle() -&gt; <span class="built_in">UIStatusBarStyle</span> {
+    <span class="keyword">switch</span> fetchedResultsController?<span class="variable">.fetchedObjects</span>!<span class="variable">.count</span> {
+    <span class="keyword">case</span> <span class="variable">.Some</span>(<span class="number">0.</span>.<span class="number">.3</span>), <span class="variable">.None</span>:
+        <span class="keyword">return</span> <span class="variable">.Default</span>
+    <span class="keyword">case</span> <span class="variable">.Some</span>(_):
+        <span class="keyword">return</span> <span class="variable">.LightContent</span>
+    }
+}
+</code></pre><p>同时，还在几个事件回调的地方，如Core Data的<code>controllerDidChange</code>，调用了<code>setNeedsStatusBarAppearanceUpdate()</code>。</p>
+<p>这个想法粗略想想并没什么问题，因为我们需要根据一系列的事件变化来改变我们的界面样式，这是很明显的业务逻辑。而我们都很清楚，ViewController就是用来写业务逻辑的地方。</p>
+<p>先抛开ViewController是否是应该写业务逻辑的地方这一个有待商榷的论点之外，我们先看看，我们可以如何重构现有代码。</p>
+<p><strong>首先</strong>，<code>updateNavigationBar</code>中多个case中的代码有了重复，因此我们可以将其重构成一个函数，接受三个关于样式的参数，如下：</p>
+<pre><code>func applyTheme(<span class="string">barTintColor:</span>newBarTintColor, <span class="string">tintColor:</span>newTintColor, <span class="string">titleTextAttributes:</span>newTextAttributes) {
+    barTintColor = <span class="string">barTintColor:</span>newBarTintColor
+    tintColor = <span class="string">tintColor:</span>newTintColor
+    titleTextAttributes = <span class="string">titleTextAttributes:</span>newTextAttributes
+}
+</code></pre><p>重构完函数以后，我们发现在多个样式中用到了switch case进行业务逻辑参数转换样式参数的过程。<strong>这说明什么，我们可以将转换逻辑和switch case一起通过Enum进行重构（这里说的东西都是基于你懂Enum）</strong></p>
+<pre><code><span class="keyword">enum</span> NavigationTheme {
+    <span class="keyword">case</span> Normal
+    <span class="keyword">case</span> Warning
+    <span class="keyword">case</span> Doomed
+
+    var statusBarStyle: <span class="built_in">UIStatusBarStyle</span> {
+        <span class="keyword">switch</span> <span class="keyword">self</span> {
+        <span class="keyword">case</span> <span class="variable">.Normal</span>: <span class="keyword">return</span> <span class="variable">.Default</span>
+        <span class="keyword">case</span> <span class="variable">.Warning</span>, <span class="variable">.Doomed</span>: <span class="keyword">return</span> <span class="variable">.LightContent</span>
+        }
+    }
+
+    var barTintColor: <span class="built_in">UIColor</span>? {
+        <span class="keyword">switch</span> <span class="keyword">self</span> {
+        <span class="keyword">case</span> <span class="variable">.Normal</span>:
+            <span class="keyword">return</span> <span class="literal">nil</span>
+        <span class="keyword">case</span> <span class="variable">.Warning</span>:
+            <span class="keyword">return</span> <span class="built_in">UIColor</span>(red: <span class="number">235</span>/<span class="number">255</span>, green: <span class="number">156</span>/<span class="number">255</span>, blue: <span class="number">77</span>/<span class="number">255</span>, alpha: <span class="number">1.0</span>)
+        <span class="keyword">case</span> <span class="variable">.Doomed</span>:
+            <span class="keyword">return</span> <span class="built_in">UIColor</span>(red: <span class="number">248</span>/<span class="number">255</span>, green: <span class="number">73</span>/<span class="number">255</span>, blue: <span class="number">68</span>/<span class="number">255</span>, alpha: <span class="number">1.0</span>)
+        }
+    }
+
+    var titleTextAttributes: [String: <span class="built_in">NSObject</span>]? {
+        <span class="keyword">switch</span> <span class="keyword">self</span> {
+        <span class="keyword">case</span> <span class="variable">.Normal</span>:
+            <span class="keyword">return</span> <span class="literal">nil</span>
+        <span class="keyword">case</span> <span class="variable">.Warning</span>, <span class="variable">.Doomed</span>:
+            <span class="keyword">return</span> [<span class="built_in">NSForegroundColorAttributeName</span>: <span class="built_in">UIColor</span><span class="variable">.whiteColor</span>()]
+        }
+    }
+
+    var tintColor: <span class="built_in">UIColor</span>? {
+        <span class="keyword">switch</span> <span class="keyword">self</span> {
+        <span class="keyword">case</span> <span class="variable">.Normal</span>:
+            <span class="keyword">return</span> <span class="literal">nil</span>
+        <span class="keyword">case</span> <span class="variable">.Warning</span>, <span class="variable">.Doomed</span>:
+            <span class="keyword">return</span> <span class="built_in">UIColor</span><span class="variable">.whiteColor</span>()
+        }
+    }
+}
+
+extension NavigationTheme {
+    init(numberOfImminentTasks: Int) {
+        <span class="keyword">switch</span> numberOfImminentTasks {
+        <span class="keyword">case</span> -Int<span class="variable">.max</span> ... <span class="number">3</span>:
+            <span class="keyword">self</span> = <span class="variable">.Normal</span>
+        <span class="keyword">case</span> <span class="number">4.</span>.<span class="number">.9</span>:
+            <span class="keyword">self</span> = <span class="variable">.Warning</span>
+        <span class="keyword">default</span>:
+            <span class="keyword">self</span> = <span class="variable">.Doomed</span>
+        }
+    }
+}    
+</code></pre><p>由于Enum在swift中是一等公民，因此可以可以在其中构建大量的<strong>Computed Properties</strong>，这些计算变量依赖于当前enum的状态。不仅如此，我们还将之前分散的三种样式，组合成了一个<strong>紧凑的结构体</strong>，大大简化了变量传输。</p>
+<p>重构结束后，我们在<code>Viewcontroller.swift</code>中设置一个计算变量<code>navigationTheme</code>，其的构造函数是之前的<code>fetchedResultsController?.fetchedObjects?.count</code>。</p>
+<p>最后是在相应的事件后触发更新UINavigationBar即可，在本文的视线中，是采用了closure的形式完成：</p>
+<pre><code>navigationThemeDidChangeHandler = { [<span class="keyword">weak</span> <span class="keyword">self</span>] theme <span class="keyword">in</span>
+            <span class="keyword">if</span> <span class="keyword">let</span> navigationController = <span class="keyword">self</span>?.navigationController {
+                navigationController.navigationBar.applyTheme(theme)
+                navigationController.statusBarStyle = theme.statusBarStyle
+            }
+        }
+</code></pre><h3 id="2-_干掉时间相关的转换逻辑">2. 干掉时间相关的转换逻辑</h3><p>相信很多人做app的时候遇到过，服务器返回的是一系列标准时间参数，而你需要将其转换成界面需要的生日、星座、年龄等等，这又是一大堆的业务逻辑。为了解决这种逻辑代码和ViewController的耦合，很多人提出了<code>ViewModel</code>，将部分弱业务逻辑代码剥离出来，单独写在一个地方。</p>
+<p><strong>但是，我需要强调一点，这种形式的剥离，并不能叫ViewModal，而是一个简单的adapter而已。</strong></p>
+<p>在本文中，列表Cell里面需要根据日期距离当前时间的差距显示成昨天、今天、明天等等。因此，其构建了一个单独的的DateFormatter，根据传入的两个Date进行转换，代码如下：</p>
+<pre><code><span class="class"><span class="keyword">struct</span> <span class="title">RelativeTimeDateFormatter</span> </span>{
+    <span class="keyword">let</span> calendar: <span class="type">NSCalendar</span>
+
+    <span class="keyword">init</span>(calendar: <span class="type">NSCalendar</span> = <span class="type">NSCalendar</span>.autoupdatingCurrentCalendar()) {
+        <span class="keyword">self</span>.calendar = calendar
+    }
+
+    <span class="func"><span class="keyword">func</span> <span class="title">stringForDate</span><span class="params">(date: NSDate, relativeToDate baseDate: NSDate)</span></span> -&gt; <span class="type">String</span> {
+        <span class="keyword">var</span> beginningOfDate: <span class="type">NSDate</span>? = <span class="literal">nil</span>
+        <span class="keyword">var</span> beginningOfBaseDate: <span class="type">NSDate</span>? = <span class="literal">nil</span>
+
+        calendar.rangeOfUnit(.<span class="type">Day</span>, startDate: &amp;beginningOfDate, interval: <span class="literal">nil</span>, forDate: date)
+        calendar.rangeOfUnit(.<span class="type">Day</span>, startDate: &amp;beginningOfBaseDate, interval: <span class="literal">nil</span>, forDate: baseDate)
+        <span class="keyword">let</span> numberOfCalendarDaysBetweenDates = calendar.components(<span class="type">NSCalendarUnit</span>.<span class="type">Day</span>, fromDate: beginningOfBaseDate!, toDate: beginningOfDate!, options: <span class="type">NSCalendarOptions</span>()).day
+
+        <span class="keyword">switch</span> numberOfCalendarDaysBetweenDates {
+        <span class="keyword">case</span> -<span class="type">Int</span>.<span class="built_in">max</span> ... -<span class="number">2</span>:
+            <span class="keyword">return</span> <span class="string">"<span class="subst">\(<span class="built_in">abs</span>(numberOfCalendarDaysBetweenDates)</span>) days ago"</span>
+        <span class="keyword">case</span> -<span class="number">1</span>:
+            <span class="keyword">return</span> <span class="string">"Yesterday"</span>
+        <span class="keyword">case</span> <span class="number">0</span>:
+            <span class="keyword">return</span> <span class="string">"Today"</span>
+        <span class="keyword">case</span> <span class="number">1</span>:
+            <span class="keyword">return</span> <span class="string">"Tomorrow"</span>
+        <span class="keyword">default</span>:
+            <span class="keyword">return</span> <span class="string">"In <span class="subst">\(numberOfCalendarDaysBetweenDates)</span> days"</span>
+        }
+    }
+}
+</code></pre><p><strong>这里需要注意的是，NSCalendar的初始化非常耗时，过去在Objective-C时代常常使用dispatch_once构建单例传输，在这里通过结构体中的成员变量维护了一份，作用是同样的。</strong></p>
+<h3 id="3-_干掉NSPredicate">3. 干掉NSPredicate</h3><p>对于NSPredicate，有些人可能还不熟悉，他就是类似于SQLite中的查询语句，只不过其应用范围是CoreData。咦，查询语句还能重构？</p>
+<p>其实在本文中，对于NSPredicate的使用只有原先这一句  <code>fetchRequest.predicate = NSPredicate(format: &quot;dueDate &lt;= %@&quot;, argumentArray: [NSCalendar.currentCalendar().dateByAddingUnit(.Day, value: 10, toDate: NSDate(), options: NSCalendarOptions())!])</code></p>
+<p>这段代码从重复性上来说是不需要重构的。但是，我们可以看到，在这里的构造参数里面，我们还是进行了一定的业务逻辑转换。所以，和DateFormatter一样，我们也可以将这部分所谓为的”弱业务逻辑”代码进行剥离：</p>
+<pre><code>extension NSPredicate {
+    convenience init(forTasksWithinNumberOfDays <span class="string">numberOfDays:</span> Int, ofDate <span class="string">date:</span> NSDate, <span class="string">calendar:</span> NSCalendar = NSCalendar.currentCalendar()) {
+        self.init(<span class="string">format:</span> <span class="string">"dueDate &lt;= %@"</span>, <span class="string">argumentArray:</span> [calendar.dateByAddingUnit(.Day, <span class="string">value:</span> numberOfDays, <span class="string">toDate:</span> date, <span class="string">options:</span> NSCalendarOptions())!])
+    }
+}
+</code></pre><p><strong>除了业务逻辑剥离之外，其实我们也可以看到，在这个NSPredicate的新构造参数，可以接受一个<code>calendar</code>，这对于测试用例编写的依赖注入是非常有好处的。</strong></p>
+<h3 id="4-_Core_Data_Stack">4. Core Data Stack</h3><p>用过Core Data的人都知道，Core Data的使用非常麻烦，需要配置大量的选项，照着苹果源码写的经历相信大家都有过，那恶心的200-300行配置代码，真是么么哒了。</p>
+<p><strong>但是，这几百行代码又是无法省略的</strong>，那该怎么办呢？</p>
+<p>一个比较好的解决方案就<code>Core Data Stack</code>    。意为将CoreData的初始化以及多个NSManagerObjectContext封装进<code>CoreDataStack</code> 维护。 </p>
+<p>在本文中，因为只是使用了一个主线程的NSManagerObjectContext，所以可能读者在阅读源码的时候可能觉得这个重构只是将CoreData配置从View剥离了。但是实际上，使用CoreDataStack可以做到更多，建议大家阅读Github上相关项目。</p>
+<h3 id="5-_干掉NSFetchedResultsControllerDelegate">5. 干掉NSFetchedResultsControllerDelegate</h3><p>NSFetchedResultsController大家可以简单理解为获取CoreData数据的一个中介层。根据传输进入的谓语NSPredicate进行查询，查询结束后通过相应的Delegate事件回调。</p>
+<p>在作者的代码中，作者通过构建<code>manager</code>的方式剥离了NSFetchedResultsController的职责，将NSFetchedResultsController的初始化、回调封装进了<code>UpcomingTaskDataManager.swift</code>中。</p>
+<p><strong>不过值得注意的一点是，尽管作者封装的NSFetchedResultsControllerDelegate的回调，但是为了让调用者可以自定义处理事件，实际上作者还是需要暴露一些的Delegate，当然，新的回调相对来说进行了一定的简化，同时在数据回调时经过了业务转化。</strong></p>
+<pre><code><span class="class"><span class="keyword">protocol</span> <span class="title">UpcomingTaskDataManagerDelegate</span> </span>{
+    <span class="func"><span class="keyword">func</span> <span class="title">dataManagerWillChangeContent</span><span class="params">(dataManager: UpcomingTaskDataManager)</span></span>
+    <span class="func"><span class="keyword">func</span> <span class="title">dataManagerDidChangeContent</span><span class="params">(dataManager: UpcomingTaskDataManager)</span></span>
+    <span class="func"><span class="keyword">func</span> <span class="title">dataManager</span><span class="params">(dataManager: UpcomingTaskDataManager, didInsertRowAtIndexPath indexPath: NSIndexPath)</span></span>
+    <span class="func"><span class="keyword">func</span> <span class="title">dataManager</span><span class="params">(dataManager: UpcomingTaskDataManager, didDeleteRowAtIndexPath indexPath: NSIndexPath)</span></span>
+}
+</code></pre><h3 id="6-_CoreDataModel_&lt;=&gt;_Model">6. CoreDataModel &lt;=&gt; Model</h3><p>这一步是将从Core Data中获取的NSManagedObject Model 转换成业务中使用的Model。为什么要这么做呢？原因有三个：  </p>
+<ul>
+<li>CoreData中的属性一更改，就会触发NSFetchedResultsController，这会很影响性能。</li>
+<li>CoreData中的属性存在很多bug</li>
+<li>NSManagedObject不是一个struct类型，很有可能<strong>误伤</strong></li>
+</ul>
+<pre>
+import CoreData  
+import Foundation
+
+struct Task: Equatable {
+    var id: String
+    var title: String
+    var dueDate: NSDate
+}
+
+func ==(lhs: Task, rhs: Task) -> Bool {
+    return lhs.id == rhs.id && lhs.title == rhs.title && lhs.dueDate == rhs.dueDate
+}
+
+extension Task {
+    init(managedTask: NSManagedObject) {
+        self.id = managedTask.valueForKey("id") as! String
+        self.title = managedTask.valueForKey("title") as! String
+        self.dueDate = managedTask.valueForKey("dueDate") as! NSDate
+    }
+}
+</pre>
+
+<p>作者用以上的Task类型替换了CoreData中的ManagedObject，可以有效的避免以上问题。</p>
+<h3 id="7-封装数据结构">7.封装数据结构</h3><p>在这一步里，我将作者自定义<code>TaskTableViewCell</code>和构建<code>AddCompletionSegue</code>合并到了一块说。</p>
+<p>这两步的重构，看似简单，但是其实也蕴含了一个思想：<strong>类型越确定，编程越容易，运行越安全</strong></p>
+<p>在原文的实现，一开始作者都是通过采用基础的数据结构UITableViewCell和UISegue。这样带来的坏处就是类型不明确导致的职责不明确。对于基础的数据结构，我们常常还要进行类型判断和转换，容易犯错。</p>
+<h3 id="8-干掉UITableViewDelegate和UITableViewDataSource">8.干掉UITableViewDelegate和UITableViewDataSource</h3><p>这一步想必大家都很熟悉了，微博上整天热传了<em>用ViewModel重构你的ViewController</em>经常提及的就是干掉UITableViewDelegate和UITableViewDataSource。</p>
+<p>那说了那么多，我们来看看究竟如何干掉它。</p>
+<p>毫无以为，我们首先要构建一个类型，来实现UITableViewDelegate和DataSource，如下所示：</p>
+<pre><code><span class="comment">// 1. </span>
+<span class="class"><span class="keyword">class</span> <span class="title">UpcomingTaskDataManagerTableViewAdapter</span>&lt;<span class="title">CellType</span>: <span class="title">UITableViewCell</span>&gt;: <span class="title">NSObject</span>, <span class="title">UITableViewDataSource</span>, <span class="title">UpcomingTaskDataManagerDelegate</span> </span>{
+    private <span class="keyword">let</span> tableView: <span class="type">UITableView</span>
+    private <span class="keyword">let</span> upcomingTaskDataManager: <span class="type">UpcomingTaskDataManager</span>
+    private <span class="keyword">let</span> cellReuseIdentifier: <span class="type">String</span>
+    private <span class="keyword">let</span> cellConfigurationHandler: (<span class="type">CellType</span>, <span class="type">Task</span>) -&gt; ()
+    private <span class="keyword">let</span> didChangeHandler: () -&gt; <span class="type">Void</span>
+
+<span class="comment">// .2</span>
+    <span class="keyword">init</span>(tableView: <span class="type">UITableView</span>, upcomingTaskDataManager: <span class="type">UpcomingTaskDataManager</span>, cellReuseIdentifier: <span class="type">String</span>, cellConfigurationHandler: (<span class="type">CellType</span>, <span class="type">Task</span>) -&gt; (), didChangeHandler: () -&gt; <span class="type">Void</span>) {
+        <span class="keyword">self</span>.tableView = tableView
+        <span class="keyword">self</span>.upcomingTaskDataManager = upcomingTaskDataManager
+        <span class="keyword">self</span>.cellReuseIdentifier = cellReuseIdentifier
+        <span class="keyword">self</span>.cellConfigurationHandler = cellConfigurationHandler
+        <span class="keyword">self</span>.didChangeHandler = didChangeHandler
+
+        <span class="keyword">super</span>.<span class="keyword">init</span>()
+    }
+
+<span class="comment">// 3.</span>
+    <span class="func"><span class="keyword">func</span> <span class="title">tableView</span><span class="params">(tableView: UITableView, commitEditingStyle editingStyle: UITableViewCellEditingStyle, forRowAtIndexPath indexPath: NSIndexPath)</span></span> {
+        upcomingTaskDataManager.deleteTask(upcomingTaskDataManager.taskSections[indexPath.section].items[indexPath.row])
+    }
+
+    <span class="func"><span class="keyword">func</span> <span class="title">numberOfSectionsInTableView</span><span class="params">(tableView: UITableView)</span></span> -&gt; <span class="type">Int</span> {
+        <span class="keyword">return</span> upcomingTaskDataManager.taskSections.<span class="built_in">count</span>
+    }
+
+    <span class="func"><span class="keyword">func</span> <span class="title">tableView</span><span class="params">(tableView: UITableView, titleForHeaderInSection section: Int)</span></span> -&gt; <span class="type">String</span>? {
+        <span class="keyword">return</span> upcomingTaskDataManager.taskSections[section].title
+    }
+
+    <span class="func"><span class="keyword">func</span> <span class="title">tableView</span><span class="params">(tableView: UITableView, numberOfRowsInSection section: Int)</span></span> -&gt; <span class="type">Int</span> {
+        <span class="keyword">return</span> upcomingTaskDataManager.taskSections[section].items.<span class="built_in">count</span>
+    }
+
+    <span class="func"><span class="keyword">func</span> <span class="title">tableView</span><span class="params">(tableView: UITableView, cellForRowAtIndexPath indexPath: NSIndexPath)</span></span> -&gt; <span class="type">UITableViewCell</span> {
+        <span class="keyword">let</span> task = upcomingTaskDataManager.taskSections[indexPath.section].items[indexPath.row]
+        <span class="keyword">let</span> cell = tableView.dequeueReusableCellWithIdentifier(cellReuseIdentifier, forIndexPath: indexPath) <span class="keyword">as</span>! <span class="type">CellType</span>
+        cellConfigurationHandler(cell, task)
+        <span class="keyword">return</span> cell
+    }
+</code></pre><ol>
+<li>这个<code>UpcomingTaskDataManagerTableViewAdapter</code>通过传入一个CellType支持泛型。  </li>
+<li>通过接受几个closure来进行自定义的配置，包括cell的样式配置以及tableview数据更新后的回调。  </li>
+<li>实现的UITableViewDataSource</li>
+</ol>
+<p>同样，由于职责的重新分配，我们要将跟<code>TaskManager</code>（包括NSFetchedResultsController）相关的划入到这个adapter中。</p>
+<h3 id="大结局">大结局</h3><p>最后重构后的ViewController，只有<strong>37</strong>代码，效果如下：</p>
+<pre><code><span class="class"><span class="keyword">class</span> <span class="title">ViewController</span>: <span class="title">UITableViewController</span> </span>{
+    <span class="keyword">var</span> navigationThemeDidChangeHandler: ((<span class="type">NavigationTheme</span>) -&gt; <span class="type">Void</span>)?
+    <span class="keyword">var</span> navigationTheme: <span class="type">NavigationTheme</span> {
+        <span class="keyword">return</span> <span class="type">NavigationTheme</span>(numberOfImminentTasks: upcomingTaskDataManager.totalNumberOfTasks)
+    }
+
+    private <span class="keyword">let</span> upcomingTaskDataManager = <span class="type">UpcomingTaskDataManager</span>()
+    private <span class="keyword">var</span> upcomingTaskDataManagerTableViewAdapter: <span class="type">UpcomingTaskDataManagerTableViewAdapter</span>&lt;<span class="type">TaskTableViewCell</span>&gt;!
+
+    <span class="keyword">override</span> <span class="func"><span class="keyword">func</span> <span class="title">viewDidLoad</span><span class="params">()</span></span> {
+        <span class="keyword">super</span>.viewDidLoad()
+
+        upcomingTaskDataManagerTableViewAdapter = <span class="type">UpcomingTaskDataManagerTableViewAdapter</span>(
+            tableView: tableView,
+            upcomingTaskDataManager: upcomingTaskDataManager,
+            cellReuseIdentifier: <span class="string">"Cell"</span>,
+            cellConfigurationHandler: { cell, task <span class="keyword">in</span>
+                cell.viewData = <span class="type">TaskTableViewCell</span>.<span class="type">ViewData</span>(task: task, relativeToDate: <span class="type">NSDate</span>())
+            },
+            didChangeHandler: { [<span class="keyword">weak</span> <span class="keyword">self</span>] <span class="keyword">in</span> <span class="keyword">self</span>?.updateNavigationBar() }
+        )
+        upcomingTaskDataManager.delegate = upcomingTaskDataManagerTableViewAdapter
+        tableView.dataSource = upcomingTaskDataManagerTableViewAdapter
+
+        updateNavigationBar()
+    }
+
+    <span class="keyword">override</span> <span class="func"><span class="keyword">func</span> <span class="title">tableView</span><span class="params">(tableView: UITableView, canEditRowAtIndexPath indexPath: NSIndexPath)</span></span> -&gt; <span class="type">Bool</span> {
+        <span class="keyword">return</span> <span class="literal">true</span>
+    }
+
+    <span class="func"><span class="keyword">func</span> <span class="title">updateNavigationBar</span><span class="params">()</span></span> {
+        navigationThemeDidChangeHandler?(navigationTheme)
+    }
+
+    <span class="preprocessor">@IBAction</span> <span class="func"><span class="keyword">func</span> <span class="title">unwindFromAddController</span><span class="params">(segue: AddCompletionSegue)</span></span> {
+        upcomingTaskDataManager.createTaskWithTitle(segue.taskTitle, dueDate: segue.taskDueDate)
+    }
+}
+</code></pre>
+      
+    </div>
+    <footer class="article-footer">
+      <a data-url="http://satanwoo.github.io/2015/12/30/Refactor-Mega-ViewController/" data-id="cjceu91vu001um6i19h1owzwf" class="article-share-link">Share</a>
+      
+        <a href="http://satanwoo.github.io/2015/12/30/Refactor-Mega-ViewController/#disqus_thread" class="article-comment-link">Comments</a>
+      
+      
+  <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
+
+    </footer>
+  </div>
+  
+</article>
+
+<div id="disqus_thread"></div>
+<script>
+
+/**
+*  RECOMMENDED CONFIGURATION VARIABLES: EDIT AND UNCOMMENT THE SECTION BELOW TO INSERT DYNAMIC VALUES FROM YOUR PLATFORM OR CMS.
+*  LEARN WHY DEFINING THESE VARIABLES IS IMPORTANT: https://disqus.com/admin/universalcode/#configuration-variables*/
+/*
+var disqus_config = function () {
+this.page.url = PAGE_URL;  // Replace PAGE_URL with your page's canonical URL variable
+this.page.identifier = PAGE_IDENTIFIER; // Replace PAGE_IDENTIFIER with your page's unique identifier variable
+};
+*/
+(function() { // DON'T EDIT BELOW THIS LINE
+var d = document, s = d.createElement('script');
+s.src = 'https://satanwoo-2.disqus.com/embed.js';
+s.setAttribute('data-timestamp', +new Date());
+(d.head || d.body).appendChild(s);
+})();
+</script>
+<noscript>Please enable JavaScript to view the <a href="https://disqus.com/?ref_noscript">comments powered by Disqus.</a></noscript>
+                                
+  
     <article id="post-Learn-R-2" class="article article-type-post" itemscope itemprop="blogPost">
   <div class="article-meta">
     <a href="/2015/12/20/Learn-R-2/" class="article-date">
@@ -201,7 +549,7 @@
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/12/20/Learn-R-2/" data-id="cjagypmv70021bqi1w2v2kl9m" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/12/20/Learn-R-2/" data-id="cjceu91wf0024m6i1e0hyj90l" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2015/12/20/Learn-R-2/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -277,7 +625,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/12/15/Regression-Model-1/" data-id="cjagypmuq001obqi1czbobj2u" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/12/15/Regression-Model-1/" data-id="cjceu91vm001rm6i1vkineibj" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2015/12/15/Regression-Model-1/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -442,7 +790,7 @@ $foo
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/12/13/Learn-R-1/" data-id="cjagypmva0024bqi1uaixeyo8" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/12/13/Learn-R-1/" data-id="cjceu91wo0027m6i171psp0o8" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2015/12/13/Learn-R-1/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -570,7 +918,7 @@ frame <span class="preprocessor">#<span class="number">20</span>: libdyld.dylib`
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/12/11/LLDB-1/" data-id="cjagypmvg0029bqi18c3e118p" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/12/11/LLDB-1/" data-id="cjceu91wv002cm6i1y2ubpuj2" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2015/12/11/LLDB-1/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -891,7 +1239,7 @@ TBBoundingBox TBBoundingBoxMake(<span class="built_in">double</span> x0, <span c
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/12/11/TBAnnotationClustering/" data-id="cjagypmu30019bqi1l8nt5mtb" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/12/11/TBAnnotationClustering/" data-id="cjceu91uq001cm6i1ntqjvhoq" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2015/12/11/TBAnnotationClustering/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -1138,7 +1486,7 @@ BOOL success = class_addMethod(<span class="keyword">class</span>, originalSelec
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/11/26/FDFullScreenPopGesture-Source-Code/" data-id="cjagypmvs002mbqi1pumhsgmg" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/11/26/FDFullScreenPopGesture-Source-Code/" data-id="cjceu91xc002pm6i1epg9p7c0" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2015/11/26/FDFullScreenPopGesture-Source-Code/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -1270,7 +1618,7 @@ replicationLayer.instanceDelay = <span class="number">0.3</span>
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/11/17/Fun-of-CAReplicationLayer/" data-id="cjagypmvq002kbqi1nzgieejx" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/11/17/Fun-of-CAReplicationLayer/" data-id="cjceu91xa002nm6i1w48xz61k" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2015/11/17/Fun-of-CAReplicationLayer/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -1498,7 +1846,7 @@ modalVC<span class="class">.modalPresentationStyle</span> = <span class="class">
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/11/12/Swift-UITransition-iOS8/" data-id="cjagypmu5001bbqi1n0sb8kjx" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/11/12/Swift-UITransition-iOS8/" data-id="cjceu91uv001em6i12ysmw5jj" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2015/11/12/Swift-UITransition-iOS8/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -1680,7 +2028,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/11/05/Understand-Viper/" data-id="cjagypmtw0014bqi1j4zuddac" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/11/05/Understand-Viper/" data-id="cjceu91uh0017m6i15undp3kn" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2015/11/05/Understand-Viper/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -1931,7 +2279,7 @@ objectPath.<span class="keyword">get</span>(obj, <span class="string">'a.\u1200'
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/11/05/Object-Path-Source-Code/" data-id="cjagypmv0001vbqi1sja9mvmj" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/11/05/Object-Path-Source-Code/" data-id="cjceu91w5001ym6i1u2zrhkvh" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2015/11/05/Object-Path-Source-Code/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -2016,7 +2364,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/10/29/Learn-Android-Day-by-Day/" data-id="cjagypmve0026bqi1shalze4g" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/10/29/Learn-Android-Day-by-Day/" data-id="cjceu91ws0029m6i12z729qpx" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2015/10/29/Learn-Android-Day-by-Day/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -2250,7 +2598,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/10/29/Swift-Count-Down-Label/" data-id="cjagypmu8001dbqi1dpn7lsez" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/10/29/Swift-Count-Down-Label/" data-id="cjceu91uy001gm6i1ihzgc7zm" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2015/10/29/Swift-Count-Down-Label/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -2403,7 +2751,7 @@ func computeAngle(p1:<span class="type">CGPoint</span> , p2:<span class="type">C
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/10/27/Swift-Circle-Slider/" data-id="cjagypmub001fbqi1roz1wv7g" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/10/27/Swift-Circle-Slider/" data-id="cjceu91v0001im6i18zq1giz6" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2015/10/27/Swift-Circle-Slider/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -2647,7 +2995,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/10/14/GLCalendarView/" data-id="cjagypmvo002ibqi1bij2xhj0" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/10/14/GLCalendarView/" data-id="cjceu91x8002lm6i1ci5pgtts" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2015/10/14/GLCalendarView/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -2890,7 +3238,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/09/30/Debounce-and-Throttle-in-iOS/" data-id="cjagypmw1002vbqi1z3e8g1hf" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/09/30/Debounce-and-Throttle-in-iOS/" data-id="cjceu91xv002ym6i1kjio6nzx" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2015/09/30/Debounce-and-Throttle-in-iOS/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -3213,7 +3561,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/09/23/flux-js-part-one/" data-id="cjagypmt4000lbqi1m1ad4n00" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/09/23/flux-js-part-one/" data-id="cjceu91to000pm6i1xxr02huv" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2015/09/23/flux-js-part-one/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -3907,7 +4255,7 @@ CountryModel<span class="keyword">*</span> country = [[CountryModel alloc] initW
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/09/17/code-of-JSONModel/" data-id="cjagypmtj000tbqi1z2pbrt3i" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/09/17/code-of-JSONModel/" data-id="cjceu91u0000xm6i1alztdfqe" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2015/09/17/code-of-JSONModel/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -3977,7 +4325,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/09/11/A-New-Start/" data-id="cjagypmr20000bqi12fs47z0a" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/09/11/A-New-Start/" data-id="cjceu91r10000m6i129owh8bg" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2015/09/11/A-New-Start/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -4026,7 +4374,7 @@ s.setAttribute('data-timestamp', +new Date());
   <div class="widget-wrap">
     <h3 class="widget-title">Tags</h3>
     <div class="widget">
-      <ul class="tag-list"><li class="tag-list-item"><a class="tag-list-link" href="/tags/Android/">Android</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/C/">C</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Growth/">Growth</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/JavaScript/">JavaScript</a><span class="tag-list-count">3</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Math/">Math</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Performance/">Performance</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/R/">R</a><span class="tag-list-count">2</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Reverse-Engineering/">Reverse Engineering</a><span class="tag-list-count">6</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Swift/">Swift</a><span class="tag-list-count">6</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/XNU/">XNU</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/iOS/">iOS</a><span class="tag-list-count">32</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/shell/">shell</a><span class="tag-list-count">1</span></li></ul>
+      <ul class="tag-list"><li class="tag-list-item"><a class="tag-list-link" href="/tags/Android/">Android</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/C/">C</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Growth/">Growth</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/JavaScript/">JavaScript</a><span class="tag-list-count">3</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Math/">Math</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Performance/">Performance</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/R/">R</a><span class="tag-list-count">2</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Reverse-Engineering/">Reverse Engineering</a><span class="tag-list-count">6</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Swift/">Swift</a><span class="tag-list-count">6</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/XNU/">XNU</a><span class="tag-list-count">2</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/iOS/">iOS</a><span class="tag-list-count">33</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/shell/">shell</a><span class="tag-list-count">1</span></li></ul>
     </div>
   </div>
 
@@ -4035,7 +4383,7 @@ s.setAttribute('data-timestamp', +new Date());
   <div class="widget-wrap">
     <h3 class="widget-title">Tag Cloud</h3>
     <div class="widget tagcloud">
-      <a href="/tags/Android/" style="font-size: 10px;">Android</a> <a href="/tags/C/" style="font-size: 10px;">C</a> <a href="/tags/Growth/" style="font-size: 10px;">Growth</a> <a href="/tags/JavaScript/" style="font-size: 15px;">JavaScript</a> <a href="/tags/Math/" style="font-size: 10px;">Math</a> <a href="/tags/Performance/" style="font-size: 10px;">Performance</a> <a href="/tags/R/" style="font-size: 12.5px;">R</a> <a href="/tags/Reverse-Engineering/" style="font-size: 17.5px;">Reverse Engineering</a> <a href="/tags/Swift/" style="font-size: 17.5px;">Swift</a> <a href="/tags/XNU/" style="font-size: 10px;">XNU</a> <a href="/tags/iOS/" style="font-size: 20px;">iOS</a> <a href="/tags/shell/" style="font-size: 10px;">shell</a>
+      <a href="/tags/Android/" style="font-size: 10px;">Android</a> <a href="/tags/C/" style="font-size: 10px;">C</a> <a href="/tags/Growth/" style="font-size: 10px;">Growth</a> <a href="/tags/JavaScript/" style="font-size: 15px;">JavaScript</a> <a href="/tags/Math/" style="font-size: 10px;">Math</a> <a href="/tags/Performance/" style="font-size: 10px;">Performance</a> <a href="/tags/R/" style="font-size: 12.5px;">R</a> <a href="/tags/Reverse-Engineering/" style="font-size: 17.5px;">Reverse Engineering</a> <a href="/tags/Swift/" style="font-size: 17.5px;">Swift</a> <a href="/tags/XNU/" style="font-size: 12.5px;">XNU</a> <a href="/tags/iOS/" style="font-size: 20px;">iOS</a> <a href="/tags/shell/" style="font-size: 10px;">shell</a>
     </div>
   </div>
 
@@ -4044,7 +4392,7 @@ s.setAttribute('data-timestamp', +new Date());
   <div class="widget-wrap">
     <h3 class="widget-title">Archives</h3>
     <div class="widget">
-      <ul class="archive-list"><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/11/">November 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/10/">October 2017</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/09/">September 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/08/">August 2017</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/07/">July 2017</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/06/">June 2017</a><span class="archive-list-count">3</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/04/">April 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/01/">January 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/10/">October 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/09/">September 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/07/">July 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/05/">May 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/04/">April 2016</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/03/">March 2016</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/02/">February 2016</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/12/">December 2015</a><span class="archive-list-count">6</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/11/">November 2015</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/10/">October 2015</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/09/">September 2015</a><span class="archive-list-count">4</span></li></ul>
+      <ul class="archive-list"><li class="archive-list-item"><a class="archive-list-link" href="/archives/2018/01/">January 2018</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/11/">November 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/10/">October 2017</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/09/">September 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/08/">August 2017</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/07/">July 2017</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/06/">June 2017</a><span class="archive-list-count">3</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/04/">April 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/01/">January 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/10/">October 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/09/">September 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/07/">July 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/05/">May 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/04/">April 2016</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/03/">March 2016</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/02/">February 2016</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/12/">December 2015</a><span class="archive-list-count">6</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/11/">November 2015</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/10/">October 2015</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/09/">September 2015</a><span class="archive-list-count">4</span></li></ul>
     </div>
   </div>
 
@@ -4054,6 +4402,10 @@ s.setAttribute('data-timestamp', +new Date());
     <h3 class="widget-title">Recents</h3>
     <div class="widget">
       <ul>
+        
+          <li>
+            <a href="/2018/01/14/iOS-virtual/">XNU之四：iOS虚拟内存限制（一）</a>
+          </li>
         
           <li>
             <a href="/2017/11/27/KVO-Swizzle/">一种基于KVO的页面加载，渲染耗时监控方法</a>
@@ -4071,10 +4423,6 @@ s.setAttribute('data-timestamp', +new Date());
             <a href="/2017/09/24/mainthreadchecker1/">基于桥的全量方法Hook方案 - 探究苹果主线程检查实现</a>
           </li>
         
-          <li>
-            <a href="/2017/09/11/KVO-CRASH/">KVO在不同的二进制中多个符号并存的Crash问题</a>
-          </li>
-        
       </ul>
     </div>
   </div>
@@ -4087,7 +4435,7 @@ s.setAttribute('data-timestamp', +new Date());
   
   <div class="outer">
     <div id="footer-info" class="inner">
-      &copy; 2017 John Doe<br>
+      &copy; 2018 John Doe<br>
       Powered by <a href="http://hexo.io/" target="_blank">Hexo</a>
     </div>
   </div>

@@ -4,7 +4,7 @@
   
   <link href="/atom.xml" rel="self"/>
   <link href="http://satanwoo.github.io/"/>
-  <updated>2017-11-26T16:11:36.000Z</updated>
+  <updated>2018-01-14T13:51:47.000Z</updated>
   <id>http://satanwoo.github.io/</id>
   
   <author>
@@ -13,6 +13,590 @@
   </author>
   
   <generator uri="http://hexo.io/">Hexo</generator>
+  
+  <entry>
+    <title><![CDATA[XNU之四：iOS虚拟内存限制（一）]]></title>
+    <link href="http://satanwoo.github.io/2018/01/14/iOS-virtual/"/>
+    <id>http://satanwoo.github.io/2018/01/14/iOS-virtual/</id>
+    <published>2018-01-14T13:37:12.000Z</published>
+    <updated>2018-01-14T13:51:47.000Z</updated>
+    <content type="html"><![CDATA[<p>XNU之二和之三两篇由于涉及的量过大，就不发了，当然本文我也删除了一定的内容，哈哈哈。</p>
+<p><b style="color:red">欢迎加入我们<strong>手淘／天猫的架构组</strong>来内网阅读</b></p>
+<p>提起iOS的内存管理，大多数人第一反应想到的都是引用计数、<code>ARC</code>、<code>AutoreleasePool</code>之类的词眼。但是事实上，这只是iOS内存管理的冰山一角，今天就让我们来探究水面之下的内存管理。</p>
+<h3 id="虚拟内存的限制">虚拟内存的限制</h3><p>我之所以想研究这个议题，主要还是之前有个UC同事问了我一个问题：</p>
+<blockquote>
+<p>“现在绝大多数都是ARM64的设备，即64位寻址空间，而且iOS上的通过malloc申请的内存只是虚拟内存，还不是真正物理内存，为什么分配了两三G就会失败了。”</p>
+</blockquote>
+<p>按照他的想法，我在我的iPhone上测试了如下代码：</p>
+<pre><code><span class="keyword">void</span> *buffer = <span class="built_in">malloc</span>(<span class="number">2000</span> * <span class="number">1024</span> * <span class="number">1024</span>);
+</code></pre><p>果不其然，报出了如下错误：</p>
+<pre><code>malloc: <span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span> mach_vm_map(size=2097152000) failed (error code=3)
+<span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span> error: can't allocate region
+</code></pre><p>次奥，我xxxxx分配一个<strong>2G<b style="color:red">虚拟</b>内存</strong>就懵逼？</p>
+<p>还是赶紧翻翻看源码，由于我分配的是一个超大的内存，所以按照<code>nano_zone</code>和<code>scalable_zone</code>的设计理念，</p>
+<ul>
+<li>小于256byte的走<code>nano_zone</code>进行分配。</li>
+<li>剩下的我记不得了</li>
+</ul>
+<p>赶紧翻翻<code>scalable_zone</code>看看源码，如下所示：</p>
+<pre><code>void *    szone_malloc_should_clear<span class="list">(<span class="keyword">szone_t</span> <span class="variable">*szone, size_t size, boolean_t cleared_requested)
+{
+    void *</span>ptr<span class="comment">;</span>
+    msize_t msize<span class="comment">;</span>
+
+    if <span class="list">(<span class="keyword">size</span> &lt;= SMALL_THRESHOLD)</span> {
+        // tiny size: &lt;1024 bytes <span class="list">(<span class="number">64</span>-bit)</span>, &lt;512 bytes <span class="list">(<span class="number">32</span>-bit)</span>
+        // think tiny
+        msize = TINY_MSIZE_FOR_BYTES<span class="list">(<span class="keyword">size</span> + TINY_QUANTUM - <span class="number">1</span>)</span><span class="comment">;</span>
+        if <span class="list">(!msize)</span> {
+            msize = <span class="number">1</span><span class="comment">;</span>
+        }
+        ptr = tiny_malloc_should_clear<span class="list">(<span class="keyword">szone</span>, msize, cleared_requested)</span><span class="comment">;</span>
+    } else if <span class="list">(<span class="keyword">size</span> &lt;= szone-&gt;large_threshold)</span> {
+        // small size: &lt;15k <span class="list">(<span class="keyword">&lt;1GB</span> machines)</span>, &lt;127k <span class="list">(<span class="keyword">&gt;1GB</span> machines)</span>
+        // think small
+        msize = SMALL_MSIZE_FOR_BYTES<span class="list">(<span class="keyword">size</span> + SMALL_QUANTUM - <span class="number">1</span>)</span><span class="comment">;</span>
+        if <span class="list">(!msize)</span> {
+            msize = <span class="number">1</span><span class="comment">;</span>
+        }
+        ptr = small_malloc_should_clear<span class="list">(<span class="keyword">szone</span>, msize, cleared_requested)</span><span class="comment">;</span>
+    } else {
+        // large: all other allocations
+        size_t num_kernel_pages = round_page_quanta<span class="list">(<span class="keyword">size</span>)</span> &gt;&gt; vm_page_quanta_shift<span class="comment">;</span>
+        if <span class="list">(<span class="keyword">num_kernel_pages</span> == <span class="number">0</span>)</span> { /* Overflowed <span class="variable">*/
+            ptr = 0;
+        } else {
+            ptr = large_malloc(szone, num_kernel_pages, 0, cleared_requested);
+        }
+    }
+#if DEBUG_MALLOC
+    if (LOG(szone, ptr)) {
+        malloc_printf("szone_malloc returned %p\n", ptr);
+    }
+#endif
+    /*</span>
+     <span class="variable">* If requested, scribble on allocated memory.
+     *</span>/
+    if <span class="list">(<span class="list">(<span class="keyword">szone-&gt;debug_flags</span> &amp; MALLOC_DO_SCRIBBLE)</span> <span class="keyword">&amp;&amp;</span> ptr <span class="keyword">&amp;&amp;</span> !cleared_requested <span class="keyword">&amp;&amp;</span> size)</span> {
+        memset<span class="list">(<span class="keyword">ptr</span>, SCRIBBLE_BYTE, szone_size<span class="list">(<span class="keyword">szone</span>, ptr)</span>)</span><span class="comment">;</span>
+    }
+
+    return ptr<span class="comment">;</span>
+}</span>
+</code></pre><ul>
+<li>小于1k的走<code>tiny_malloc</code></li>
+<li>小于15k或者127k的走<code>small_malloc</code>（视具体不同的设备内存上限不同）</li>
+<li>剩下的走<code>large_malloc</code>。</li>
+</ul>
+<p>OK，由于我们分配的非常大，我们可以确定我们的逻辑是落入<code>large_malloc</code>中。需要特别注意的是：<code>large_malloc</code>分配内存的基本单位是一页大小，而对于其他的几种分配方式，则不是必须按照页大小进行分配。</p>
+<p>由于<code>large_malloc</code>这个函数本身并没有特殊需要注意的地方，我们直接关注其真正分配内存的地方，即<code>allocate_pages</code>，如下所示：</p>
+<pre><code>vm_addr = vm_page_quanta_size;
+kr = mach_vm_map(mach_task_self(), &amp;vm_addr, allocation_size, allocation_mask, alloc_flags, MEMORY_OBJECT_NULL, <span class="number">0</span>, FALSE,
+            VM_PROT_DEFAULT, VM_PROT_ALL, VM_INHERIT_DEFAULT);
+<span class="keyword">if</span> (kr) {
+    szone_error(szone, <span class="number">0</span>, <span class="string">"can't allocate region"</span>, <span class="literal">NULL</span>, <span class="string">"*** mach_vm_map(size=%lu) failed (error code=%d)\n"</span>, size, kr);
+    <span class="keyword">return</span> <span class="literal">NULL</span>;
+}
+addr = (<span class="keyword">uintptr_t</span>)vm_addr;
+</code></pre><p>从上我们不难看出，如果分配失败，就是提示报错。而<code>mach_vm_map</code>则是整个内存的分配核心。</p>
+<p>可能你一开始看到这个<code>mach_vm_map</code>会比较懵逼，可以先看下我下面这张图：</p>
+<p><img src="https://github.com/SatanWoo/BeeHive/blob/master/virtual.png?raw=true" alt="屏幕快照 2018-01-03 上午10.55.41.png"> </p>
+<p>OK，是不是有冒出很多名词。没关系，你其实只要记住两点：<code>vm_map</code>代表就是一个进程运行时候涉及的虚拟内存，<code>pmap</code>代表的就是和具体硬件架构相关的物理内存。（这里我们暂时先不考虑<strong>submap</strong>这种情况）。</p>
+<p>好，<code>vm_map</code>本身是进程（或者从Mach内核的角度看是task的地址分布图）。这个地址分布图维护着一个<strong><b style="color:red">双向列表</b></strong>，列表的每一项都是<code>vm_entry_t</code>，代表着虚拟地址上连续的一个范围。而<code>pmap</code>这个结构体代表了个硬件相关的内存转换：即利用<code>pmap</code>这个结构体来描述抽象的物理地址访问和使用。</p>
+<h3 id="进程（任务）的创建">进程（任务）的创建</h3><p>在继续深入我们的话题之前，我们还需要具备一个额外的知识，就是iOS上的进程创建和加载执行Mach-O过程。</p>
+<p>类UNIX系统本质上是没法无缘无故创建出一个全新的进程的，基本上必须要通过<code>fork</code>的形式来创建。(这块不太熟悉，有错请指正)。</p>
+<p>在XNU的实现里，不论用户态调用<code>posix</code>相关API还是别的API，落入到内核里面都走的是<code>fork_create_child</code>函数来创建属于Mach内核的任务（task）。其实现如下：</p>
+<pre><code>thread_t
+fork_create_child(task_t parent_task, coalition_t *parent_coalitions, proc_t child_proc, <span class="type">int</span> inherit_memory, <span class="type">int</span> is64bit, <span class="type">int</span> in_exec)
+{
+    thread_t    child_thread = <span class="type">NULL</span>;
+    task_t        child_task;
+    kern_return_t    <span class="literal">result</span>;
+
+    /* <span class="type">Create</span> a new task <span class="keyword">for</span> the child process */
+    <span class="literal">result</span> = task_create_internal(parent_task,
+                    parent_coalitions,
+                    inherit_memory,
+                    is64bit,
+                    <span class="type">TF_LRETURNWAIT</span> | <span class="type">TF_LRETURNWAITER</span>,         /* <span class="type">All</span> created threads will wait <span class="keyword">in</span> task_wait_to_return */
+                    in_exec ? <span class="type">TPF_EXEC_COPY</span> : <span class="type">TPF_NONE</span>,   /* <span class="type">Mark</span> the task exec copy <span class="keyword">if</span> <span class="keyword">in</span> execve */
+                    &amp;child_task);
+
+    <span class="keyword">if</span> (<span class="literal">result</span> != <span class="type">KERN_SUCCESS</span>) {
+        printf(<span class="string">"%s: task_create_internal failed.  Code: %d\n"</span>,
+            __func__, <span class="literal">result</span>);
+        goto bad;
+    }
+
+    <span class="keyword">if</span> (!in_exec) {
+        /*
+         * <span class="type">Set</span> the child process task to the new task <span class="keyword">if</span> <span class="keyword">not</span> <span class="keyword">in</span> exec,
+         * will <span class="type">set</span> the task <span class="keyword">for</span> exec <span class="keyword">case</span> <span class="keyword">in</span> proc_exec_switch_task after image activation.
+         */
+
+         // 注意点：
+        child_proc-&gt;task = child_task;
+    }
+</code></pre><ul>
+<li>这个函数本身实现并没什么出彩的，我们唯一要注意的就是<strong>Mach内核里面没有进程的概念，只有任务</strong>，进程是属于BSD之上的抽象。它们之间的联系就是通过指针建立，<code>child_proc-&gt;task = child_task。</code></li>
+</ul>
+<p><code>fork</code>出来的进程更像是一个空壳，我们需要利用这个进程壳去执行可执行文件变成我们通常意义上理解的<code>程序进程</code>。</p>
+<p>从XNU上来看，可执行的文件种类如下：</p>
+<pre><code>{ <span class="built_in">exec</span>_mach_imgact,        <span class="string">"Mach-o Binary"</span> },
+{ <span class="built_in">exec</span>_fat_imgact,        <span class="string">"Fat Binary"</span> },
+{ <span class="built_in">exec</span>_shell_imgact,    <span class="string">"Interpreter Script"</span> }
+</code></pre><p>这里咱们先只看最常用的<code>Mach-O</code>文件：</p>
+<pre><code>exec_mach_imgact(struct image_params *imgp)
+{
+    ... 省略无数
+
+    <span class="keyword">if</span> ((mach_header-&gt;magic == MH_CIGAM) ||
+        (mach_header-&gt;magic == MH_CIGAM_64)) {
+        error = EBADARCH;
+        <span class="keyword">goto</span> bad;
+    }
+
+    <span class="keyword">if</span> ((mach_header-&gt;magic != MH_MAGIC) &amp;&amp;
+        (mach_header-&gt;magic != MH_MAGIC_64)) {
+        error = -<span class="number">1</span>;
+        <span class="keyword">goto</span> bad;
+    }
+
+    <span class="keyword">if</span> (mach_header-&gt;filetype != MH_EXECUTE) {
+        error = -<span class="number">1</span>;
+        <span class="keyword">goto</span> bad;
+    }
+
+    <span class="keyword">if</span> (imgp-&gt;ip_origcputype != <span class="number">0</span>) {
+        <span class="comment">/* Fat header previously had an idea about this thin file */</span>
+        <span class="keyword">if</span> (imgp-&gt;ip_origcputype != mach_header-&gt;cputype ||
+            imgp-&gt;ip_origcpusubtype != mach_header-&gt;cpusubtype) {
+            error = EBADARCH;
+            <span class="keyword">goto</span> bad;
+        }
+    } <span class="keyword">else</span> {
+        imgp-&gt;ip_origcputype = mach_header-&gt;cputype;
+        imgp-&gt;ip_origcpusubtype = mach_header-&gt;cpusubtype;
+    }
+
+    task = current_task();
+    thread = current_thread();
+    uthread = get_bsdthread_info(thread);
+
+    <span class="keyword">if</span> ((mach_header-&gt;cputype &amp; CPU_ARCH_ABI64) == CPU_ARCH_ABI64)
+        imgp-&gt;ip_flags |= IMGPF_IS_64BIT;
+
+    <span class="comment">/* If posix_spawn binprefs exist, respect those prefs. */</span>
+    psa = (struct _posix_spawnattr *) imgp-&gt;ip_px_sa;
+    <span class="keyword">if</span> (psa != <span class="keyword">NULL</span> &amp;&amp; psa-&gt;psa_binprefs[<span class="number">0</span>] != <span class="number">0</span>) {
+        <span class="keyword">int</span> pr = <span class="number">0</span>;
+        <span class="keyword">for</span> (pr = <span class="number">0</span>; pr &lt; NBINPREFS; pr++) {
+            cpu_type_t pref = psa-&gt;psa_binprefs[pr];
+            <span class="keyword">if</span> (pref == <span class="number">0</span>) {
+                <span class="comment">/* No suitable arch in the pref list */</span>
+                error = EBADARCH;
+                <span class="keyword">goto</span> bad;
+            }
+
+            <span class="keyword">if</span> (pref == CPU_TYPE_ANY) {
+                <span class="comment">/* Jump to regular grading */</span>
+                <span class="keyword">goto</span> grade;
+            }
+
+            <span class="keyword">if</span> (pref == imgp-&gt;ip_origcputype) {
+                <span class="comment">/* We have a match! */</span>
+                <span class="keyword">goto</span> grade;
+            }
+        }
+        error = EBADARCH;
+        <span class="keyword">goto</span> bad;
+    }
+grade:
+    <span class="keyword">if</span> (!grade_binary(imgp-&gt;ip_origcputype, imgp-&gt;ip_origcpusubtype &amp; ~CPU_SUBTYPE_MASK)) {
+        error = EBADARCH;
+        <span class="keyword">goto</span> bad;
+    }
+
+    <span class="comment">/* Copy in arguments/environment from the old process */</span>
+    error = exec_extract_strings(imgp);
+    <span class="keyword">if</span> (error)
+        <span class="keyword">goto</span> bad;
+
+    AUDIT_ARG(argv, imgp-&gt;ip_startargv, imgp-&gt;ip_argc, 
+        imgp-&gt;ip_endargv - imgp-&gt;ip_startargv);
+    AUDIT_ARG(envv, imgp-&gt;ip_endargv, imgp-&gt;ip_envc,
+        imgp-&gt;ip_endenvv - imgp-&gt;ip_endargv);
+
+    <span class="comment">/* reset local idea of thread, uthread, task */</span>
+    thread = imgp-&gt;ip_new_thread;
+    uthread = get_bsdthread_info(thread);
+    task = new_task = get_threadtask(thread);
+
+    <span class="comment">// 注意点：</span>
+    lret = load_machfile(imgp, mach_header, thread, &amp;map, &amp;load_result);
+
+    ... 省略无数
+</code></pre><p>整个代码都没啥用，就是做些检查，分配个进程壳，然后通过<code>load_machfile</code>加载真正的二进制文件。</p>
+<pre><code>load_return_t
+load_machfile(
+    struct image_params    *imgp,
+    struct mach_header    *header,
+    thread_t         thread,
+    vm_map_t         *mapp,
+    load_result_t        *<span class="literal">result</span>
+)
+{
+    ... 省略一大堆
+
+    <span class="keyword">if</span> (macho_size &gt; file_size) {
+        <span class="keyword">return</span>(<span class="type">LOAD_BADMACHO</span>);
+    }
+
+    <span class="literal">result</span>-&gt;is64bit = ((imgp-&gt;ip_flags &amp; <span class="type">IMGPF_IS_64BIT</span>) == <span class="type">IMGPF_IS_64BIT</span>);
+
+    task_t ledger_task;
+    <span class="keyword">if</span> (imgp-&gt;ip_new_thread) {
+        ledger_task = get_threadtask(imgp-&gt;ip_new_thread);
+    } <span class="keyword">else</span> {
+        ledger_task = task;
+    }
+
+    // 注意点<span class="number">1</span>
+    pmap = pmap_create(get_task_ledger(ledger_task),
+               (vm_map_size_t) <span class="number">0</span>,
+               <span class="literal">result</span>-&gt;is64bit);
+
+    // 注意点<span class="number">2</span>
+    map = vm_map_create(pmap,
+            <span class="number">0</span>,
+            vm_compute_max_offset(<span class="literal">result</span>-&gt;is64bit),
+            <span class="type">TRUE</span>);
+
+<span class="comment">#if defined(__arm64__)</span>
+    // 注意点三
+    <span class="keyword">if</span> (<span class="literal">result</span>-&gt;is64bit) {
+        /* enforce <span class="number">16</span>KB alignment <span class="keyword">of</span> <span class="type">VM</span> map entries */
+        vm_map_set_page_shift(map, <span class="type">SIXTEENK_PAGE_SHIFT</span>);
+    } <span class="keyword">else</span> {
+        vm_map_set_page_shift(map, page_shift_user32);
+    }
+</code></pre><ul>
+<li>利用<code>pmap_create</code>创建硬件相关的物理内存抽象。</li>
+<li>利用<code>vmap_create</code>创建虚拟内存的地址图。</li>
+<li>ARM64下的页是16k一个虚拟页对应一个物理页。</li>
+</ul>
+<p>别的没啥关注，我们重点关注<code>vm_map_create</code><b style="color:red"><code>0</code>和<code>vm_compute_max_offset(result-&gt;is64bit)</code></b>。</p>
+<p><b style="color:red">因为这个代表了这个任务分配的虚拟地址上下限！</b>这个函数的实现如下：</p>
+<pre><code><span class="tag">vm_map_offset_t</span>
+<span class="tag">vm_compute_max_offset</span>(boolean_t is64)
+{
+<span class="id">#if</span> <span class="tag">defined</span>(__arm__) || <span class="tag">defined</span>(__arm64__)
+    <span class="tag">return</span> (<span class="function">pmap_max_offset</span>(is64, ARM_PMAP_MAX_OFFSET_DEVICE));
+<span class="id">#else</span>
+    <span class="tag">return</span> (is64 ? (vm_map_offset_t)<span class="attribute">MACH_VM_MAX_ADDRESS </span>: (vm_map_offset_t)VM_MAX_ADDRESS);
+<span class="id">#endif</span>
+}
+</code></pre><p>继续往下看：</p>
+<pre><code><span class="keyword">vm_map_offset_t</span> pmap_max_offset(
+    <span class="keyword">boolean_t</span>    is64 __unused,
+    <span class="keyword">unsigned</span> <span class="keyword">int</span>    option)
+{
+    <span class="keyword">vm_map_offset_t</span>    max_offset_ret = <span class="number">0</span>;
+
+<span class="preprocessor">#<span class="keyword">if</span> defined(__arm64__)</span>
+    assert (is64);
+    <span class="keyword">vm_map_offset_t</span> min_max_offset = SHARED_REGION_BASE_ARM64 + SHARED_REGION_SIZE_ARM64 + <span class="number">0x20000000</span>; <span class="comment">// end of shared region + 512MB for various purposes</span>
+    <span class="keyword">if</span> (option == ARM_PMAP_MAX_OFFSET_DEFAULT) {
+        max_offset_ret = arm64_pmap_max_offset_default;
+    } <span class="keyword">else</span> <span class="keyword">if</span> (option == ARM_PMAP_MAX_OFFSET_MIN) {
+        max_offset_ret = min_max_offset;
+    } <span class="keyword">else</span> <span class="keyword">if</span> (option == ARM_PMAP_MAX_OFFSET_MAX) {
+        max_offset_ret = MACH_VM_MAX_ADDRESS;
+    } <span class="keyword">else</span> <span class="keyword">if</span> (option == ARM_PMAP_MAX_OFFSET_DEVICE) {
+        <span class="keyword">if</span> (arm64_pmap_max_offset_default) {
+            max_offset_ret = arm64_pmap_max_offset_default;
+        } <span class="keyword">else</span> <span class="keyword">if</span> (max_mem &gt; <span class="number">0xC0000000</span>) {
+            max_offset_ret = <span class="number">0x0000000318000000</span>ULL;     <span class="comment">// Max offset is 12.375GB for devices with &gt; 3GB of memory</span>
+        } <span class="keyword">else</span> <span class="keyword">if</span> (max_mem &gt; <span class="number">0x40000000</span>) {
+            max_offset_ret = <span class="number">0x0000000218000000</span>ULL;     <span class="comment">// Max offset is 8.375GB for devices with &gt; 1GB and &lt;= 3GB of memory</span>
+        } <span class="keyword">else</span> {
+            max_offset_ret = min_max_offset;
+        }
+    } <span class="keyword">else</span> <span class="keyword">if</span> (option == ARM_PMAP_MAX_OFFSET_JUMBO) {
+        max_offset_ret = <span class="number">0x0000000518000000</span>ULL;     <span class="comment">// Max offset is 20.375GB for pmaps with special "jumbo" blessing</span>
+    } <span class="keyword">else</span> {
+        panic(<span class="string">"pmap_max_offset illegal option 0x%x\n"</span>, option);
+    }
+
+    assert(max_offset_ret &gt;= min_max_offset);
+    <span class="keyword">return</span> max_offset_ret;
+</code></pre><p>其实关键点就是这里的代码：</p>
+<pre><code><span class="keyword">if</span> (max_mem &gt; <span class="number">0xC0000000</span>) {
+    max_offset_ret = <span class="number">0x0000000318000000</span>ULL;     <span class="regexp">//</span> <span class="constant">Max</span> offset is <span class="number">12.375</span>GB <span class="keyword">for</span> devices <span class="keyword">with</span> &gt; <span class="number">3</span>GB <span class="keyword">of</span> memory
+} <span class="keyword">else</span> <span class="keyword">if</span> (max_mem &gt; <span class="number">0x40000000</span>) {
+    max_offset_ret = <span class="number">0x0000000218000000</span>ULL;     <span class="regexp">//</span> <span class="constant">Max</span> offset is <span class="number">8.375</span>GB <span class="keyword">for</span> devices <span class="keyword">with</span> &gt; <span class="number">1</span>GB and &lt;= <span class="number">3</span>GB <span class="keyword">of</span> memory
+} <span class="keyword">else</span> {
+    max_offset_ret = min_max_offset;
+}
+</code></pre><p><code>max_offset_ret</code>这个值就代表了我们任务对应的<code>vm_map_t</code>的最大地址范围，比如说这里是8.375GB。</p>
+<h3 id="虚拟内存分配的限制">虚拟内存分配的限制</h3><p>好，在说了那么多前置知识后，我们言归正传，来谈谈为什么虚拟内存有限制。</p>
+<p>之前我们提到了<code>large_malloc</code>会走入到最后的<code>vm_map_enter</code>，那么我们来看看<code>vm_map_enter</code>的实现：</p>
+<pre><code>vm_map_enter(
+    <span class="keyword">vm_map_t</span>        <span class="built_in">map</span>,
+    <span class="keyword">vm_map_offset_t</span>        *address,    <span class="comment">/* IN/OUT */</span>
+    <span class="keyword">vm_map_size_t</span>        size,
+    <span class="keyword">vm_map_offset_t</span>        mask,
+    <span class="keyword">int</span>            flags,
+    <span class="keyword">vm_map_kernel_flags_t</span>    vmk_flags,
+    <span class="keyword">vm_tag_t</span>        alias,
+    <span class="keyword">vm_object_t</span>        object,
+    <span class="keyword">vm_object_offset_t</span>    offset,
+    <span class="keyword">boolean_t</span>        needs_copy,
+    <span class="keyword">vm_prot_t</span>        cur_protection,
+    <span class="keyword">vm_prot_t</span>        max_protection,
+    <span class="keyword">vm_inherit_t</span>        inheritance)
+{
+
+<span class="preprocessor">#<span class="keyword">if</span> CONFIG_EMBEDDED</span>
+    <span class="comment">// 注意点1:检查页的权限</span>
+    <span class="keyword">if</span> (cur_protection &amp; VM_PROT_WRITE){
+        <span class="keyword">if</span> ((cur_protection &amp; VM_PROT_EXECUTE) &amp;&amp; !entry_for_jit){
+            <span class="built_in">printf</span>(<span class="string">"EMBEDDED: %s: curprot cannot be write+execute. "</span>
+                   <span class="string">"turning off execute\n"</span>,
+                   __FUNCTION__);
+            cur_protection &amp;= ~VM_PROT_EXECUTE;
+        }
+    }
+<span class="preprocessor">#<span class="keyword">endif</span> <span class="comment">/* CONFIG_EMBEDDED */</span></span>
+
+    <span class="keyword">if</span> (resilient_codesign || resilient_media) {
+        <span class="keyword">if</span> ((cur_protection &amp; (VM_PROT_WRITE | VM_PROT_EXECUTE)) ||
+            (max_protection &amp; (VM_PROT_WRITE | VM_PROT_EXECUTE))) {
+            <span class="keyword">return</span> KERN_PROTECTION_FAILURE;
+        }
+    }
+
+    <span class="comment">// 1. 获取任务的可用的地址最小值和最大值</span>
+    effective_min_offset = <span class="built_in">map</span>-&gt;min_offset;
+    effective_max_offset = <span class="built_in">map</span>-&gt;max_offset;
+
+    <span class="keyword">if</span> (<span class="built_in">map</span>-&gt;pmap == kernel_pmap) {
+        user_alias = VM_KERN_MEMORY_NONE;
+    } <span class="keyword">else</span> {
+        user_alias = alias;
+    }
+
+<span class="preprocessor">#<span class="keyword">define</span>    RETURN(value)    { result = value; goto BailOut; }</span>
+
+    assert(page_aligned(*address));
+    assert(page_aligned(size));
+
+    <span class="keyword">if</span> (!VM_MAP_PAGE_ALIGNED(size, VM_MAP_PAGE_MASK(<span class="built_in">map</span>))) {
+        clear_map_aligned = TRUE;
+    }
+
+StartAgain: ;
+
+    start = *address;
+
+    <span class="keyword">if</span> (anywhere) {
+        vm_map_lock(<span class="built_in">map</span>);
+        map_locked = TRUE;
+
+        <span class="keyword">if</span> (start &lt; effective_min_offset)
+            start = effective_min_offset;
+        <span class="keyword">if</span> (start &gt; effective_max_offset)
+            RETURN(KERN_NO_SPACE);
+
+
+        <span class="keyword">if</span>( FALSE ) {
+
+        } <span class="keyword">else</span> {
+
+            <span class="keyword">if</span> (<span class="built_in">map</span>-&gt;holelistenabled) {
+                hole_entry = (<span class="keyword">vm_map_entry_t</span>)<span class="built_in">map</span>-&gt;holes_list;
+
+                <span class="keyword">if</span> (hole_entry == <span class="literal">NULL</span>) {
+                    <span class="comment">/*
+                     * No more space in the map?
+                     */</span>
+                    result = KERN_NO_SPACE;
+                    <span class="keyword">goto</span> BailOut;
+                } <span class="keyword">else</span> {
+
+                    <span class="keyword">boolean_t</span> found_hole = FALSE;
+
+                    <span class="keyword">do</span> {
+                        <span class="keyword">if</span> (hole_entry-&gt;vme_start &gt;= start) {
+                            start = hole_entry-&gt;vme_start;
+                            found_hole = TRUE;
+                            <span class="keyword">break</span>;
+                        }
+
+                        <span class="keyword">if</span> (hole_entry-&gt;vme_end &gt; start) {
+                            found_hole = TRUE;
+                            <span class="keyword">break</span>;
+                        }
+                        hole_entry = hole_entry-&gt;vme_next;
+
+                    } <span class="keyword">while</span> (hole_entry != (<span class="keyword">vm_map_entry_t</span>) <span class="built_in">map</span>-&gt;holes_list);
+
+                    <span class="keyword">if</span> (found_hole == FALSE) {
+                        result = KERN_NO_SPACE;
+                        <span class="keyword">goto</span> BailOut;
+                    }
+
+                    entry = hole_entry;
+
+                    <span class="keyword">if</span> (start == <span class="number">0</span>)
+                        start += PAGE_SIZE_64;
+                }
+            }
+        }
+
+        <span class="keyword">while</span> (TRUE) {
+            <span class="keyword">vm_map_entry_t</span>    next;
+
+            end = ((start + mask) &amp; ~mask);
+            end = vm_map_round_page(end,
+                        VM_MAP_PAGE_MASK(<span class="built_in">map</span>));
+
+            <span class="keyword">if</span> (end &lt; start)
+                RETURN(KERN_NO_SPACE);
+
+            start = end;
+            end += size;
+
+            <span class="keyword">if</span> ((end &gt; effective_max_offset) || (end &lt; start)) {
+                RETURN(KERN_NO_SPACE);
+            }
+
+            next = entry-&gt;vme_next;
+
+            <span class="keyword">if</span> (<span class="built_in">map</span>-&gt;holelistenabled) {
+                <span class="keyword">if</span> (entry-&gt;vme_end &gt;= end)
+                    <span class="keyword">break</span>;
+            } <span class="keyword">else</span> {
+
+                <span class="keyword">if</span> (next == vm_map_to_entry(<span class="built_in">map</span>))
+                    <span class="keyword">break</span>;
+
+                <span class="keyword">if</span> (next-&gt;vme_start &gt;= end)
+                    <span class="keyword">break</span>;
+            }
+
+            entry = next;
+
+            <span class="keyword">if</span> (<span class="built_in">map</span>-&gt;holelistenabled) {
+                <span class="keyword">if</span> (entry == (<span class="keyword">vm_map_entry_t</span>) <span class="built_in">map</span>-&gt;holes_list) {
+                    result = KERN_NO_SPACE;
+                    <span class="keyword">goto</span> BailOut;
+                }
+                start = entry-&gt;vme_start;
+            } <span class="keyword">else</span> {
+                start = entry-&gt;vme_end;
+            }
+
+            start = vm_map_round_page(start,
+                          VM_MAP_PAGE_MASK(<span class="built_in">map</span>));
+        }
+
+        <span class="keyword">if</span> (<span class="built_in">map</span>-&gt;holelistenabled) {
+            <span class="keyword">if</span> (vm_map_lookup_entry(<span class="built_in">map</span>, entry-&gt;vme_start, &amp;entry)) {
+                panic(<span class="string">"Found an existing entry (%p) instead of potential hole at address: 0x%llx.\n"</span>, entry, (<span class="keyword">unsigned</span> <span class="keyword">long</span> <span class="keyword">long</span>)entry-&gt;vme_start);
+            }
+        }
+
+        *address = start;
+    } 
+</code></pre><ul>
+<li>注意点1：基本上就是检查页的权限啥的，iOS上不允许可写和可执行并存。</li>
+<li>剩下的就是作各种前置检查</li>
+</ul>
+<p>老实说，我一开始看苹果这最新的XNU代码，我压根没读懂。这一堆<code>hole</code>啥的在干啥，后来我就往之前XNU版本翻了翻，果然好懂了很多：</p>
+<pre><code>entry = <span class="built_in">map</span><span class="subst">-&gt;</span>first_free;
+
+<span class="keyword">if</span> (entry == vm_map_to_entry(<span class="built_in">map</span>)) {
+    entry = <span class="built_in">NULL</span>;
+} <span class="keyword">else</span> {
+       <span class="keyword">if</span> (entry<span class="subst">-&gt;</span>vme_next == vm_map_to_entry(<span class="built_in">map</span>)){
+            entry = <span class="built_in">NULL</span>;
+       } <span class="keyword">else</span> {
+            <span class="keyword">if</span> (start &lt; (entry<span class="subst">-&gt;</span>vme_next)<span class="subst">-&gt;</span>vme_start ) {
+                start = entry<span class="subst">-&gt;</span>vme_end;
+                start = vm_map_round_page(start,
+                              VM_MAP_PAGE_MASK(<span class="built_in">map</span>));
+            } <span class="keyword">else</span> {
+                entry = <span class="built_in">NULL</span>;
+            }
+       }
+}
+
+<span class="keyword">if</span> (entry == <span class="built_in">NULL</span>) {
+    vm_map_entry_t    tmp_entry;
+    <span class="keyword">if</span> (vm_map_lookup_entry(<span class="built_in">map</span>, start, <span class="subst">&amp;</span>tmp_entry)) {
+        assert(<span class="subst">!</span>entry_for_jit);
+        start = tmp_entry<span class="subst">-&gt;</span>vme_end;
+        start = vm_map_round_page(start,
+                      VM_MAP_PAGE_MASK(<span class="built_in">map</span>));
+    }
+    entry = tmp_entry;
+}
+</code></pre><ul>
+<li><p>整个这段代码的意思是，就是要我们要找个一个比我们这个<code>start</code>地址大的<code>vm_entry_t</code>。(这句话比较绕口)，<b style="color:red">我们最终的目的是为了在两个已经存在<code>vm_entry_t</code>之间尝试插入一个能包含从<code>start</code>到<code>start + size</code>的新的<code>vm_entry_t</code></b></p>
+</li>
+<li><p>如果没找到的话，就尝试利用<code>vm_map_lookup_entry</code>找一个<code>preceding</code>我们地址的的<code>vm_entry_t</code>。</p>
+</li>
+</ul>
+<p>好，现在我们找到了一个满足<code>start</code>其实地址条件的<code>vm_entry_t</code>了，剩下就是要满足分配大小<code>size</code>的需求了。</p>
+<pre><code><span class="label">while</span> (TRUE) {
+    register vm_map_entry_t    next<span class="comment">;</span>
+
+    <span class="preprocessor">end</span> = ((start + mask) &amp; ~mask)<span class="comment">;</span>
+    <span class="preprocessor">end</span> = vm_map_round_page(<span class="preprocessor">end</span>,
+                VM_MAP_PAGE_MASK(<span class="preprocessor">map</span>))<span class="comment">;</span>
+    <span class="preprocessor">if</span> (<span class="preprocessor">end</span> &lt; start)
+        RETURN(KERN_NO_SPACE)<span class="comment">;</span>
+
+    start = <span class="preprocessor">end</span><span class="comment">;</span>
+    <span class="preprocessor">end</span> += size<span class="comment">;</span>
+
+    <span class="preprocessor">if</span> ((<span class="preprocessor">end</span> &gt; effective_max_offset) <span class="title">||</span> (<span class="preprocessor">end</span> &lt; start)) {
+        RETURN(KERN_NO_SPACE)<span class="comment">;</span>
+    }
+
+    next = <span class="preprocessor">entry</span>-&gt;vme_next<span class="comment">;</span>
+
+    // 如果是空的头
+    <span class="preprocessor">if</span> (next == vm_map_to_entry(<span class="preprocessor">map</span>))
+        <span class="keyword">break;
+</span>
+    // 如果下一个的start 
+    <span class="preprocessor">if</span> (next-&gt;vme_start &gt;= <span class="preprocessor">end</span>)
+        <span class="keyword">break;
+</span>
+    <span class="preprocessor">entry</span> = next<span class="comment">;</span>
+    start = <span class="preprocessor">entry</span>-&gt;vme_end<span class="comment">;</span>
+    start = vm_map_round_page(start,
+                  VM_MAP_PAGE_MASK(<span class="preprocessor">map</span>))<span class="comment">;</span>
+}
+*<span class="keyword">address </span>= start<span class="comment">;</span>
+<span class="label">assert</span>(VM_MAP_PAGE_ALIGNED(*<span class="keyword">address,
+</span>               VM_MAP_PAGE_MASK(<span class="preprocessor">map</span>)))<span class="comment">;</span>
+</code></pre><p>这段代码相对来说就很简单了，我们判断<code>start + size</code>是不是可以正好插入在<code>vm_entry_t</code>代表的地址范围的空隙内，如果一直遍历到最后的任务地址上限都找不到，那就说明不存在我们需求的连续的虚拟内存空间用于作分配了。</p>
+<h3 id="其他">其他</h3><p>除了本文说明的虚拟内存分配的连续性限制以外，虚拟内存作为堆内存分配的一种，在布局范围上也有限制。此文不表，且听下回分解。</p>
+]]></content>
+    <summary type="html">
+    <![CDATA[<p>XNU之二和之三两篇由于涉及的量过大，就不发了，当然本文我也删除了一定的内容，哈哈哈。</p>
+<p><b style="color:red">欢迎加入我们<strong>手淘／天猫的架构组</strong>来内网阅读</b></p>
+<p>提起iOS的内存管理，大多数人第]]>
+    </summary>
+    
+      <category term="XNU" scheme="http://satanwoo.github.io/tags/XNU/"/>
+    
+      <category term="iOS" scheme="http://satanwoo.github.io/tags/iOS/"/>
+    
+  </entry>
   
   <entry>
     <title><![CDATA[一种基于KVO的页面加载，渲染耗时监控方法]]></title>
@@ -3716,219 +4300,6 @@ OSSpinUnlock(&amp;_lock)<span class="comment">;</span>
     </summary>
     
       <category term="JavaScript" scheme="http://satanwoo.github.io/tags/JavaScript/"/>
-    
-  </entry>
-  
-  <entry>
-    <title><![CDATA[滥用单例之dispatch_once死锁]]></title>
-    <link href="http://satanwoo.github.io/2016/04/11/dispatch-once/"/>
-    <id>http://satanwoo.github.io/2016/04/11/dispatch-once/</id>
-    <published>2016-04-10T16:41:09.000Z</published>
-    <updated>2016-08-01T15:11:45.000Z</updated>
-    <content type="html"><![CDATA[<h3 id="现象">现象</h3><p>上周排查了一个bug，现象很简单，就是个Crash问题。但是读了一下crash Log以后，却发现堆栈报的错误信息却是第一次见到（<strong>吹牛的说，我在国内的iOS也能算第十二人了</strong>），包含以下还未符号化信息：</p>
-<pre><code>Application Specific Information:
-com.xxx.yyy failed to scene-<span class="operator"><span class="keyword">create</span> <span class="keyword">in</span> <span class="keyword">time</span>
-
-Elapsed total CPU <span class="keyword">time</span> (seconds): hhh秒 (<span class="keyword">user</span> hhh, <span class="keyword">system</span> <span class="number">0.000</span>), <span class="keyword">k</span>% CPU
-Elapsed application CPU <span class="keyword">time</span> (seconds): <span class="number">0.</span>h秒, <span class="keyword">k</span>% CPU
-
-<span class="keyword">Thread</span> <span class="number">0</span> <span class="keyword">name</span>:  Dispatch queue: com.apple.<span class="keyword">main</span>-<span class="keyword">thread</span>
-<span class="keyword">Thread</span> <span class="number">0</span>:
-<span class="number">0</span>   libsystem_kernel.dylib            <span class="number">0x36cb2540</span> semaphore_wait_trap + <span class="number">8</span>
-<span class="number">1</span>   libsystem_platform.dylib          <span class="number">0x36d3d430</span> _os_semaphore_wait + <span class="number">8</span>
-<span class="number">2</span>   libdispatch.dylib                 <span class="number">0x36be04a6</span> dispatch_once_f + <span class="number">250</span>
-<span class="number">3</span>   xxxx                              偏移量 <span class="number">0x4000</span> + <span class="number">947290</span>
-...
-...</span>
-</code></pre><p>无符号化的crash 堆栈暂时不去管它，我们重点关注<strong>com.xxx.yyy failed to scene-create in time</strong>。如果理解无误的话，这句话提示我们：我们的应用程序在规定的时间没能加载成功，无法显示。看起来这个原因是启动加载过长直接被干掉。那么问题来了，原因具体是啥？</p>
-<h3 id="查看堆栈">查看堆栈</h3><p>首先我们需要符号化一下，这里涉及公司内部信息，所以我们自己构造个demo试试。<br>demo的代码很简单，如下：</p>
-<pre><code><span class="preprocessor">#import <span class="title">"ManageA.h"</span></span>
-
-<span class="class"><span class="keyword">@implementation</span> <span class="title">ManageA</span></span>
-
-+ (ManageA *)sharedInstance
-{
-    <span class="keyword">static</span> ManageA *manager = <span class="literal">nil</span>;
-    <span class="keyword">static</span> <span class="built_in">dispatch_once_t</span> token;
-
-    <span class="built_in">dispatch_once</span>(&amp;token, ^{
-        manager = [[ManageA alloc] init];
-    });
-
-    <span class="keyword">return</span> manager;
-}
-
-- (instancetype)init
-{
-    <span class="keyword">self</span> = [<span class="keyword">super</span> init];
-    <span class="keyword">if</span> (<span class="keyword">self</span>) {
-        [ManageB sharedInstance];
-    }
-    <span class="keyword">return</span> <span class="keyword">self</span>;
-}
-
-<span class="keyword">@end</span>
-
-<span class="class"><span class="keyword">@implementation</span> <span class="title">ManageB</span></span>
-
-+ (ManageB *)sharedInstance
-{
-    <span class="keyword">static</span> ManageB *manager = <span class="literal">nil</span>;
-    <span class="keyword">static</span> <span class="built_in">dispatch_once_t</span> token;
-
-    <span class="built_in">dispatch_once</span>(&amp;token, ^{
-        manager = [[ManageB alloc] init];
-    });
-
-    <span class="keyword">return</span> manager;
-}
-
-- (instancetype)init
-{
-    <span class="keyword">self</span> = [<span class="keyword">super</span> init];
-    <span class="keyword">if</span> (<span class="keyword">self</span>) {
-        [ManageA sharedInstance];
-    }
-    <span class="keyword">return</span> <span class="keyword">self</span>;
-}
-</code></pre><p>运行后的堆栈基本如下：</p>
-<pre><code><span class="preprocessor">#<span class="number">0</span>    <span class="number">0x000000011054acd2</span> in semaphore_wait_trap ()</span>
-<span class="preprocessor">#<span class="number">1</span>    <span class="number">0x00000001101b1b1a</span> in _dispatch_thread_semaphore_wait ()</span>
-<span class="preprocessor">#<span class="number">2</span>    <span class="number">0x00000001101b1d48</span> in dispatch_once_f ()</span>
-<span class="preprocessor">#<span class="number">3</span>    <span class="number">0x000000010d01c857</span> in _dispatch_once [inlined] at once.h:<span class="number">68</span></span>
-<span class="preprocessor">#<span class="number">4</span>    <span class="number">0x000000010d01c839</span> in +[ManageA sharedInstance] at ManageA.m:<span class="number">18</span></span>
-<span class="preprocessor">#<span class="number">5</span>    <span class="number">0x000000010d01cad8</span> in -[ManageB init] at ManageA.m:<span class="number">54</span></span>
-<span class="preprocessor">#<span class="number">6</span>    <span class="number">0x000000010d01ca42</span> in __25+[ManageB sharedInstance]_block_invoke at ManageA.m:<span class="number">44</span></span>
-<span class="preprocessor">#<span class="number">7</span>    <span class="number">0x00000001101c649b</span> in _dispatch_client_callout ()</span>
-<span class="preprocessor">#<span class="number">8</span>    <span class="number">0x00000001101b1e28</span> in dispatch_once_f ()</span>
-<span class="preprocessor">#<span class="number">9</span>    <span class="number">0x000000010d01c9e7</span> in _dispatch_once [inlined] at once.h:<span class="number">68</span></span>
-<span class="preprocessor">#<span class="number">10</span>    <span class="number">0x000000010d01c9c9</span> in +[ManageB sharedInstance] at ManageA.m:<span class="number">43</span></span>
-<span class="preprocessor">#<span class="number">11</span>    <span class="number">0x000000010d01c948</span> in -[ManageA init] at ManageA.m:<span class="number">29</span></span>
-<span class="preprocessor">#<span class="number">12</span>    <span class="number">0x000000010d01c8b2</span> in __25+[ManageA sharedInstance]_block_invoke at ManageA.m:<span class="number">19</span></span>
-<span class="preprocessor">#<span class="number">13</span>    <span class="number">0x00000001101c649b</span> in _dispatch_client_callout ()</span>
-<span class="preprocessor">#<span class="number">14</span>    <span class="number">0x00000001101b1e28</span> in dispatch_once_f ()</span>
-<span class="preprocessor">#<span class="number">15</span>    <span class="number">0x000000010d01c857</span> in _dispatch_once [inlined] at once.h:<span class="number">68</span></span>
-<span class="preprocessor">#<span class="number">16</span>    <span class="number">0x000000010d01c839</span> in +[ManageA sharedInstance] at /ManageA.m:<span class="number">18</span></span>
-<span class="preprocessor">#<span class="number">17</span>    <span class="number">0x000000010d01c5cc</span> in -[AppDelegate application:didFinishLaunchingWithOptions:]         at /AppDelegate.m:<span class="number">21</span></span>
-</code></pre><p>从中我们可以发现，的确在这段调用栈中，出现了多次敏感字样<code>sharedInstance</code>和<code>dispatch_once_f</code>字样。</p>
-<p>在查阅相关资料后，感觉是<code>dispatch_once_f</code>函数造成了信号量的永久等待，从而引发死锁。那么，为什么<code>dispatch_once</code>会死锁呢？以前说的<strong>最安全的单例构造方式</strong>还正确不正确呢？</p>
-<p>所以，我们一起来看看下面关于<code>dispatch_once</code>的源码分析。</p>
-<h3 id="dispatch_once源码分析">dispatch_once源码分析</h3><p>从<a href="git://git.macosforge.org/libdispatch.git" target="_blank" rel="external">libdispatch</a>获取最新版本代码，进入对应的文件<strong>once.c</strong>。去除注释后代码如下，共<strong>66</strong>行代码，但是真的是有很多奇妙的地方。</p>
-<pre><code><span class="preprocessor">#<span class="keyword">include</span> <span class="string">"internal.h"</span></span>
-
-<span class="preprocessor">#<span class="keyword">undef</span> dispatch_once</span>
-<span class="preprocessor">#<span class="keyword">undef</span> dispatch_once_f</span>
-
-<span class="keyword">struct</span> _dispatch_once_waiter_s {
-    <span class="keyword">volatile</span> <span class="keyword">struct</span> _dispatch_once_waiter_s *<span class="keyword">volatile</span> dow_next;
-    <span class="keyword">_dispatch_thread_semaphore_t</span> dow_sema;
-};
-
-<span class="preprocessor">#<span class="keyword">define</span> DISPATCH_ONCE_DONE ((struct _dispatch_once_waiter_s *)~<span class="number">0l</span>)</span>
-
-<span class="preprocessor">#<span class="keyword">ifdef</span> __BLOCKS__</span>
-<span class="comment">// 1. 我们的应用程序调用的入口</span>
-<span class="function"><span class="keyword">void</span>
-<span class="title">dispatch_once</span><span class="params">(dispatch_once_t *val, dispatch_block_t block)</span>
-</span>{
-    <span class="keyword">struct</span> Block_basic *bb = (<span class="keyword">void</span> *)block;
-
-    <span class="comment">// 2. 内部逻辑</span>
-    dispatch_once_f(val, block, (<span class="keyword">void</span> *)bb-&gt;Block_invoke);
-}
-<span class="preprocessor">#<span class="keyword">endif</span></span>
-
-<span class="function">DISPATCH_NOINLINE
-<span class="keyword">void</span>
-<span class="title">dispatch_once_f</span><span class="params">(dispatch_once_t *val, <span class="keyword">void</span> *ctxt, dispatch_function_t func)</span>
-</span>{
-    <span class="keyword">struct</span> _dispatch_once_waiter_s * <span class="keyword">volatile</span> *vval =
-            (<span class="keyword">struct</span> _dispatch_once_waiter_s**)val;
-
-    <span class="comment">// 3. 地址类似于简单的哨兵位</span>
-    <span class="keyword">struct</span> _dispatch_once_waiter_s dow = { <span class="literal">NULL</span>, <span class="number">0</span> };
-
-    <span class="comment">// 4. 在Dispatch_Once的block执行期进入的dispatch_once_t更改请求的链表</span>
-    <span class="keyword">struct</span> _dispatch_once_waiter_s *tail, *tmp;
-
-    <span class="comment">// 5.局部变量，用于在遍历链表过程中获取每一个在链表上的更改请求的信号量</span>
-    <span class="keyword">_dispatch_thread_semaphore_t</span> sema;
-
-    <span class="comment">// 6. Compare and Swap（用于首次更改请求）</span>
-    <span class="keyword">if</span> (dispatch_atomic_cmpxchg(vval, <span class="literal">NULL</span>, &amp;dow)) {
-        dispatch_atomic_acquire_barrier();
-
-        <span class="comment">// 7.调用dispatch_once的block</span>
-        _dispatch_client_callout(ctxt, func);
-
-        dispatch_atomic_maximally_synchronizing_barrier();
-        <span class="comment">//dispatch_atomic_release_barrier(); // assumed contained in above</span>
-
-        <span class="comment">// 8. 更改请求成为DISPATCH_ONCE_DONE(原子性的操作)</span>
-        tmp = dispatch_atomic_xchg(vval, DISPATCH_ONCE_DONE);
-        tail = &amp;dow;
-
-        <span class="comment">// 9. 发现还有更改请求，继续遍历</span>
-        <span class="keyword">while</span> (tail != tmp) {
-
-            <span class="comment">// 10. 如果这个时候tmp的next指针还没更新完毕，等一会</span>
-            <span class="keyword">while</span> (!tmp-&gt;dow_next) {
-                _dispatch_hardware_pause();
-            }
-
-            <span class="comment">// 11. 取出当前的信号量，告诉等待者，我这次更改请求完成了，轮到下一个了</span>
-            sema = tmp-&gt;dow_sema;
-            tmp = (<span class="keyword">struct</span> _dispatch_once_waiter_s*)tmp-&gt;dow_next;
-            _dispatch_thread_semaphore_signal(sema);
-        }
-    } <span class="keyword">else</span> {
-        <span class="comment">// 12. 非首次请求，进入这块逻辑块</span>
-        dow.dow_sema = _dispatch_get_thread_semaphore();
-        <span class="keyword">for</span> (;;) {
-            <span class="comment">// 13. 遍历每一个后续请求，如果状态已经是Done，直接进行下一个</span>
-            <span class="comment">// 同时该状态检测还用于避免在后续wait之前，信号量已经发出(signal)造成</span>
-            <span class="comment">// 的死锁</span>
-            tmp = *vval;
-            <span class="keyword">if</span> (tmp == DISPATCH_ONCE_DONE) {
-                <span class="keyword">break</span>;
-            }
-            dispatch_atomic_store_barrier();
-            <span class="comment">// 14. 如果当前dispatch_once执行的block没有结束，那么就将这些</span>
-            <span class="comment">// 后续请求添加到链表当中</span>
-            <span class="keyword">if</span> (dispatch_atomic_cmpxchg(vval, tmp, &amp;dow)) {
-                dow.dow_next = tmp;
-                _dispatch_thread_semaphore_wait(dow.dow_sema);
-            }
-        }
-        _dispatch_put_thread_semaphore(dow.dow_sema);
-    }
-}
-</code></pre><p>根据以上注释对源代码的分析，我们可以大致知道如下几点：</p>
-<ol>
-<li><code>dispatch_once</code>并不是简单的只执行一次那么简单</li>
-<li><code>dispatch_once</code>本质上可以接受多次请求，会对此维护一个请求链表</li>
-<li>如果在block执行期间，多次进入调用同类的<code>dispatch_once</code>函数（即单例函数），会导致整体链表无限增长，造成永久性死锁。(<strong>其实只要进入两次就完蛋，其原因在于<code>block_invoke</code>的完成依赖于第二次进入的请求的完成，而第二次请求的完成又必须依赖之前信号量的出发。可是第一次block不结束，信号量压根不会触发</strong>)</li>
-</ol>
-<h3 id="备注">备注</h3><ol>
-<li>根据以上分析，相对应地写了一个简易的死锁Demo，就是在两个单例的初始化调用中直接相互调用。A&lt;-&gt;B。也许这个Demo过于简单，大家轻易不会犯。但是如果是A-&gt;B-&gt;C-&gt;A，甚至是更多个模块的相互引用，那又该如何轻易避免呢？</li>
-<li>以上的Demo，如果在Xcode模拟器测试环境下，是不会死锁从而导致应用启动被杀。这是因为模拟器不具备守护进程，如果要观察现象，可以输出Log或者直接利用真机进行测试。</li>
-<li>有时候，启动耗时是因为占用了太多的CPU资源。但是从我们的Crash Log中可以发现，我们仅仅占用了<strong>Elapsed application CPU time (seconds): 0.h秒, k% CPU</strong>。通过这个，我们也可以发现，CPU占用率高并不是导致启动阶段APP Crash的唯一原因。</li>
-</ol>
-<h3 id="反思">反思</h3><p>虽然这次的问题直接原因是<code>dispatch_once</code>引出的<strong>死锁</strong>问题，但是个人认为，这却是滥用单例造成的后果。各位可以打开自己公司的app源代码查看一下，究竟存在着多少的单例。</p>
-<p>实话实说，单例和全局变量几乎没有任何区别，不仅仅占用了全生命周期的内存，还对解耦造成了巨大的负作用。写起来容易，但是对于整个项目的架构梳理却是有着巨大的影响，因为在不读完整个相关代码的前提下，你压根不知道究竟哪里会触发单例的调用。</p>
-<p>因此在这里，谈谈个人认为可以不使用单例的几个方面：</p>
-<ol>
-<li>仅仅使用一次的模块，可以不使用单例，<strong>可以采用在对应的周期内维护成员实例变量进行替换</strong>。</li>
-<li>和状态无关的模块，<strong>可以采用静态（类）方法直接替换</strong>。</li>
-<li>可以通过页面跳转进行依赖注入的模块，<strong>可以采用依赖注入或者变量传递等方式解决</strong>。</li>
-</ol>
-<p><strong>当然，的确有一些情况我们仍然需要使用单例。那在这种情况，也请将<code>dispatch_once</code>调用的block内减少尽可能多的任务，最好是仅仅负责初始化，剩下的配置、调用等等在后续进行。</strong></p>
-]]></content>
-    <summary type="html">
-    <![CDATA[<h3 id="现象">现象</h3><p>上周排查了一个bug，现象很简单，就是个Crash问题。但是读了一下crash Log以后，却发现堆栈报的错误信息却是第一次见到（<strong>吹牛的说，我在国内的iOS也能算第十二人了</strong>），包含以下还未符号化信息：<]]>
-    </summary>
-    
-      <category term="iOS" scheme="http://satanwoo.github.io/tags/iOS/"/>
     
   </entry>
   

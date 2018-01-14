@@ -62,6 +62,631 @@
       <div class="outer">
         <section id="main">
   
+    <article id="post-iOS-virtual" class="article article-type-post" itemscope itemprop="blogPost">
+  <div class="article-meta">
+    <a href="/2018/01/14/iOS-virtual/" class="article-date">
+  <time datetime="2018-01-14T13:37:12.000Z" itemprop="datePublished">2018-01-14</time>
+</a>
+    
+  </div>
+  <div class="article-inner">
+    
+    
+      <header class="article-header">
+        
+  
+    <h1 itemprop="name">
+      <a class="article-title" href="/2018/01/14/iOS-virtual/">XNU之四：iOS虚拟内存限制（一）</a>
+    </h1>
+  
+
+      </header>
+    
+    <div class="article-entry" itemprop="articleBody">
+      
+        <p>XNU之二和之三两篇由于涉及的量过大，就不发了，当然本文我也删除了一定的内容，哈哈哈。</p>
+<p><b style="color:red">欢迎加入我们<strong>手淘／天猫的架构组</strong>来内网阅读</b></p>
+<p>提起iOS的内存管理，大多数人第一反应想到的都是引用计数、<code>ARC</code>、<code>AutoreleasePool</code>之类的词眼。但是事实上，这只是iOS内存管理的冰山一角，今天就让我们来探究水面之下的内存管理。</p>
+<h3 id="虚拟内存的限制">虚拟内存的限制</h3><p>我之所以想研究这个议题，主要还是之前有个UC同事问了我一个问题：</p>
+<blockquote>
+<p>“现在绝大多数都是ARM64的设备，即64位寻址空间，而且iOS上的通过malloc申请的内存只是虚拟内存，还不是真正物理内存，为什么分配了两三G就会失败了。”</p>
+</blockquote>
+<p>按照他的想法，我在我的iPhone上测试了如下代码：</p>
+<pre><code><span class="keyword">void</span> *buffer = <span class="built_in">malloc</span>(<span class="number">2000</span> * <span class="number">1024</span> * <span class="number">1024</span>);
+</code></pre><p>果不其然，报出了如下错误：</p>
+<pre><code>malloc: <span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span> mach_vm_map(size=2097152000) failed (error code=3)
+<span class="keyword">*</span><span class="keyword">*</span><span class="keyword">*</span> error: can't allocate region
+</code></pre><p>次奥，我xxxxx分配一个<strong>2G<b style="color:red">虚拟</b>内存</strong>就懵逼？</p>
+<p>还是赶紧翻翻看源码，由于我分配的是一个超大的内存，所以按照<code>nano_zone</code>和<code>scalable_zone</code>的设计理念，</p>
+<ul>
+<li>小于256byte的走<code>nano_zone</code>进行分配。</li>
+<li>剩下的我记不得了</li>
+</ul>
+<p>赶紧翻翻<code>scalable_zone</code>看看源码，如下所示：</p>
+<pre><code>void *    szone_malloc_should_clear<span class="list">(<span class="keyword">szone_t</span> <span class="variable">*szone, size_t size, boolean_t cleared_requested)
+{
+    void *</span>ptr<span class="comment">;</span>
+    msize_t msize<span class="comment">;</span>
+
+    if <span class="list">(<span class="keyword">size</span> &lt;= SMALL_THRESHOLD)</span> {
+        // tiny size: &lt;1024 bytes <span class="list">(<span class="number">64</span>-bit)</span>, &lt;512 bytes <span class="list">(<span class="number">32</span>-bit)</span>
+        // think tiny
+        msize = TINY_MSIZE_FOR_BYTES<span class="list">(<span class="keyword">size</span> + TINY_QUANTUM - <span class="number">1</span>)</span><span class="comment">;</span>
+        if <span class="list">(!msize)</span> {
+            msize = <span class="number">1</span><span class="comment">;</span>
+        }
+        ptr = tiny_malloc_should_clear<span class="list">(<span class="keyword">szone</span>, msize, cleared_requested)</span><span class="comment">;</span>
+    } else if <span class="list">(<span class="keyword">size</span> &lt;= szone-&gt;large_threshold)</span> {
+        // small size: &lt;15k <span class="list">(<span class="keyword">&lt;1GB</span> machines)</span>, &lt;127k <span class="list">(<span class="keyword">&gt;1GB</span> machines)</span>
+        // think small
+        msize = SMALL_MSIZE_FOR_BYTES<span class="list">(<span class="keyword">size</span> + SMALL_QUANTUM - <span class="number">1</span>)</span><span class="comment">;</span>
+        if <span class="list">(!msize)</span> {
+            msize = <span class="number">1</span><span class="comment">;</span>
+        }
+        ptr = small_malloc_should_clear<span class="list">(<span class="keyword">szone</span>, msize, cleared_requested)</span><span class="comment">;</span>
+    } else {
+        // large: all other allocations
+        size_t num_kernel_pages = round_page_quanta<span class="list">(<span class="keyword">size</span>)</span> &gt;&gt; vm_page_quanta_shift<span class="comment">;</span>
+        if <span class="list">(<span class="keyword">num_kernel_pages</span> == <span class="number">0</span>)</span> { /* Overflowed <span class="variable">*/
+            ptr = 0;
+        } else {
+            ptr = large_malloc(szone, num_kernel_pages, 0, cleared_requested);
+        }
+    }
+#if DEBUG_MALLOC
+    if (LOG(szone, ptr)) {
+        malloc_printf("szone_malloc returned %p\n", ptr);
+    }
+#endif
+    /*</span>
+     <span class="variable">* If requested, scribble on allocated memory.
+     *</span>/
+    if <span class="list">(<span class="list">(<span class="keyword">szone-&gt;debug_flags</span> &amp; MALLOC_DO_SCRIBBLE)</span> <span class="keyword">&amp;&amp;</span> ptr <span class="keyword">&amp;&amp;</span> !cleared_requested <span class="keyword">&amp;&amp;</span> size)</span> {
+        memset<span class="list">(<span class="keyword">ptr</span>, SCRIBBLE_BYTE, szone_size<span class="list">(<span class="keyword">szone</span>, ptr)</span>)</span><span class="comment">;</span>
+    }
+
+    return ptr<span class="comment">;</span>
+}</span>
+</code></pre><ul>
+<li>小于1k的走<code>tiny_malloc</code></li>
+<li>小于15k或者127k的走<code>small_malloc</code>（视具体不同的设备内存上限不同）</li>
+<li>剩下的走<code>large_malloc</code>。</li>
+</ul>
+<p>OK，由于我们分配的非常大，我们可以确定我们的逻辑是落入<code>large_malloc</code>中。需要特别注意的是：<code>large_malloc</code>分配内存的基本单位是一页大小，而对于其他的几种分配方式，则不是必须按照页大小进行分配。</p>
+<p>由于<code>large_malloc</code>这个函数本身并没有特殊需要注意的地方，我们直接关注其真正分配内存的地方，即<code>allocate_pages</code>，如下所示：</p>
+<pre><code>vm_addr = vm_page_quanta_size;
+kr = mach_vm_map(mach_task_self(), &amp;vm_addr, allocation_size, allocation_mask, alloc_flags, MEMORY_OBJECT_NULL, <span class="number">0</span>, FALSE,
+            VM_PROT_DEFAULT, VM_PROT_ALL, VM_INHERIT_DEFAULT);
+<span class="keyword">if</span> (kr) {
+    szone_error(szone, <span class="number">0</span>, <span class="string">"can't allocate region"</span>, <span class="literal">NULL</span>, <span class="string">"*** mach_vm_map(size=%lu) failed (error code=%d)\n"</span>, size, kr);
+    <span class="keyword">return</span> <span class="literal">NULL</span>;
+}
+addr = (<span class="keyword">uintptr_t</span>)vm_addr;
+</code></pre><p>从上我们不难看出，如果分配失败，就是提示报错。而<code>mach_vm_map</code>则是整个内存的分配核心。</p>
+<p>可能你一开始看到这个<code>mach_vm_map</code>会比较懵逼，可以先看下我下面这张图：</p>
+<p><img src="https://github.com/SatanWoo/BeeHive/blob/master/virtual.png?raw=true" alt="屏幕快照 2018-01-03 上午10.55.41.png"> </p>
+<p>OK，是不是有冒出很多名词。没关系，你其实只要记住两点：<code>vm_map</code>代表就是一个进程运行时候涉及的虚拟内存，<code>pmap</code>代表的就是和具体硬件架构相关的物理内存。（这里我们暂时先不考虑<strong>submap</strong>这种情况）。</p>
+<p>好，<code>vm_map</code>本身是进程（或者从Mach内核的角度看是task的地址分布图）。这个地址分布图维护着一个<strong><b style="color:red">双向列表</b></strong>，列表的每一项都是<code>vm_entry_t</code>，代表着虚拟地址上连续的一个范围。而<code>pmap</code>这个结构体代表了个硬件相关的内存转换：即利用<code>pmap</code>这个结构体来描述抽象的物理地址访问和使用。</p>
+<h3 id="进程（任务）的创建">进程（任务）的创建</h3><p>在继续深入我们的话题之前，我们还需要具备一个额外的知识，就是iOS上的进程创建和加载执行Mach-O过程。</p>
+<p>类UNIX系统本质上是没法无缘无故创建出一个全新的进程的，基本上必须要通过<code>fork</code>的形式来创建。(这块不太熟悉，有错请指正)。</p>
+<p>在XNU的实现里，不论用户态调用<code>posix</code>相关API还是别的API，落入到内核里面都走的是<code>fork_create_child</code>函数来创建属于Mach内核的任务（task）。其实现如下：</p>
+<pre><code>thread_t
+fork_create_child(task_t parent_task, coalition_t *parent_coalitions, proc_t child_proc, <span class="type">int</span> inherit_memory, <span class="type">int</span> is64bit, <span class="type">int</span> in_exec)
+{
+    thread_t    child_thread = <span class="type">NULL</span>;
+    task_t        child_task;
+    kern_return_t    <span class="literal">result</span>;
+
+    /* <span class="type">Create</span> a new task <span class="keyword">for</span> the child process */
+    <span class="literal">result</span> = task_create_internal(parent_task,
+                    parent_coalitions,
+                    inherit_memory,
+                    is64bit,
+                    <span class="type">TF_LRETURNWAIT</span> | <span class="type">TF_LRETURNWAITER</span>,         /* <span class="type">All</span> created threads will wait <span class="keyword">in</span> task_wait_to_return */
+                    in_exec ? <span class="type">TPF_EXEC_COPY</span> : <span class="type">TPF_NONE</span>,   /* <span class="type">Mark</span> the task exec copy <span class="keyword">if</span> <span class="keyword">in</span> execve */
+                    &amp;child_task);
+
+    <span class="keyword">if</span> (<span class="literal">result</span> != <span class="type">KERN_SUCCESS</span>) {
+        printf(<span class="string">"%s: task_create_internal failed.  Code: %d\n"</span>,
+            __func__, <span class="literal">result</span>);
+        goto bad;
+    }
+
+    <span class="keyword">if</span> (!in_exec) {
+        /*
+         * <span class="type">Set</span> the child process task to the new task <span class="keyword">if</span> <span class="keyword">not</span> <span class="keyword">in</span> exec,
+         * will <span class="type">set</span> the task <span class="keyword">for</span> exec <span class="keyword">case</span> <span class="keyword">in</span> proc_exec_switch_task after image activation.
+         */
+
+         // 注意点：
+        child_proc-&gt;task = child_task;
+    }
+</code></pre><ul>
+<li>这个函数本身实现并没什么出彩的，我们唯一要注意的就是<strong>Mach内核里面没有进程的概念，只有任务</strong>，进程是属于BSD之上的抽象。它们之间的联系就是通过指针建立，<code>child_proc-&gt;task = child_task。</code></li>
+</ul>
+<p><code>fork</code>出来的进程更像是一个空壳，我们需要利用这个进程壳去执行可执行文件变成我们通常意义上理解的<code>程序进程</code>。</p>
+<p>从XNU上来看，可执行的文件种类如下：</p>
+<pre><code>{ <span class="built_in">exec</span>_mach_imgact,        <span class="string">"Mach-o Binary"</span> },
+{ <span class="built_in">exec</span>_fat_imgact,        <span class="string">"Fat Binary"</span> },
+{ <span class="built_in">exec</span>_shell_imgact,    <span class="string">"Interpreter Script"</span> }
+</code></pre><p>这里咱们先只看最常用的<code>Mach-O</code>文件：</p>
+<pre><code>exec_mach_imgact(struct image_params *imgp)
+{
+    ... 省略无数
+
+    <span class="keyword">if</span> ((mach_header-&gt;magic == MH_CIGAM) ||
+        (mach_header-&gt;magic == MH_CIGAM_64)) {
+        error = EBADARCH;
+        <span class="keyword">goto</span> bad;
+    }
+
+    <span class="keyword">if</span> ((mach_header-&gt;magic != MH_MAGIC) &amp;&amp;
+        (mach_header-&gt;magic != MH_MAGIC_64)) {
+        error = -<span class="number">1</span>;
+        <span class="keyword">goto</span> bad;
+    }
+
+    <span class="keyword">if</span> (mach_header-&gt;filetype != MH_EXECUTE) {
+        error = -<span class="number">1</span>;
+        <span class="keyword">goto</span> bad;
+    }
+
+    <span class="keyword">if</span> (imgp-&gt;ip_origcputype != <span class="number">0</span>) {
+        <span class="comment">/* Fat header previously had an idea about this thin file */</span>
+        <span class="keyword">if</span> (imgp-&gt;ip_origcputype != mach_header-&gt;cputype ||
+            imgp-&gt;ip_origcpusubtype != mach_header-&gt;cpusubtype) {
+            error = EBADARCH;
+            <span class="keyword">goto</span> bad;
+        }
+    } <span class="keyword">else</span> {
+        imgp-&gt;ip_origcputype = mach_header-&gt;cputype;
+        imgp-&gt;ip_origcpusubtype = mach_header-&gt;cpusubtype;
+    }
+
+    task = current_task();
+    thread = current_thread();
+    uthread = get_bsdthread_info(thread);
+
+    <span class="keyword">if</span> ((mach_header-&gt;cputype &amp; CPU_ARCH_ABI64) == CPU_ARCH_ABI64)
+        imgp-&gt;ip_flags |= IMGPF_IS_64BIT;
+
+    <span class="comment">/* If posix_spawn binprefs exist, respect those prefs. */</span>
+    psa = (struct _posix_spawnattr *) imgp-&gt;ip_px_sa;
+    <span class="keyword">if</span> (psa != <span class="keyword">NULL</span> &amp;&amp; psa-&gt;psa_binprefs[<span class="number">0</span>] != <span class="number">0</span>) {
+        <span class="keyword">int</span> pr = <span class="number">0</span>;
+        <span class="keyword">for</span> (pr = <span class="number">0</span>; pr &lt; NBINPREFS; pr++) {
+            cpu_type_t pref = psa-&gt;psa_binprefs[pr];
+            <span class="keyword">if</span> (pref == <span class="number">0</span>) {
+                <span class="comment">/* No suitable arch in the pref list */</span>
+                error = EBADARCH;
+                <span class="keyword">goto</span> bad;
+            }
+
+            <span class="keyword">if</span> (pref == CPU_TYPE_ANY) {
+                <span class="comment">/* Jump to regular grading */</span>
+                <span class="keyword">goto</span> grade;
+            }
+
+            <span class="keyword">if</span> (pref == imgp-&gt;ip_origcputype) {
+                <span class="comment">/* We have a match! */</span>
+                <span class="keyword">goto</span> grade;
+            }
+        }
+        error = EBADARCH;
+        <span class="keyword">goto</span> bad;
+    }
+grade:
+    <span class="keyword">if</span> (!grade_binary(imgp-&gt;ip_origcputype, imgp-&gt;ip_origcpusubtype &amp; ~CPU_SUBTYPE_MASK)) {
+        error = EBADARCH;
+        <span class="keyword">goto</span> bad;
+    }
+
+    <span class="comment">/* Copy in arguments/environment from the old process */</span>
+    error = exec_extract_strings(imgp);
+    <span class="keyword">if</span> (error)
+        <span class="keyword">goto</span> bad;
+
+    AUDIT_ARG(argv, imgp-&gt;ip_startargv, imgp-&gt;ip_argc, 
+        imgp-&gt;ip_endargv - imgp-&gt;ip_startargv);
+    AUDIT_ARG(envv, imgp-&gt;ip_endargv, imgp-&gt;ip_envc,
+        imgp-&gt;ip_endenvv - imgp-&gt;ip_endargv);
+
+    <span class="comment">/* reset local idea of thread, uthread, task */</span>
+    thread = imgp-&gt;ip_new_thread;
+    uthread = get_bsdthread_info(thread);
+    task = new_task = get_threadtask(thread);
+
+    <span class="comment">// 注意点：</span>
+    lret = load_machfile(imgp, mach_header, thread, &amp;map, &amp;load_result);
+
+    ... 省略无数
+</code></pre><p>整个代码都没啥用，就是做些检查，分配个进程壳，然后通过<code>load_machfile</code>加载真正的二进制文件。</p>
+<pre><code>load_return_t
+load_machfile(
+    struct image_params    *imgp,
+    struct mach_header    *header,
+    thread_t         thread,
+    vm_map_t         *mapp,
+    load_result_t        *<span class="literal">result</span>
+)
+{
+    ... 省略一大堆
+
+    <span class="keyword">if</span> (macho_size &gt; file_size) {
+        <span class="keyword">return</span>(<span class="type">LOAD_BADMACHO</span>);
+    }
+
+    <span class="literal">result</span>-&gt;is64bit = ((imgp-&gt;ip_flags &amp; <span class="type">IMGPF_IS_64BIT</span>) == <span class="type">IMGPF_IS_64BIT</span>);
+
+    task_t ledger_task;
+    <span class="keyword">if</span> (imgp-&gt;ip_new_thread) {
+        ledger_task = get_threadtask(imgp-&gt;ip_new_thread);
+    } <span class="keyword">else</span> {
+        ledger_task = task;
+    }
+
+    // 注意点<span class="number">1</span>
+    pmap = pmap_create(get_task_ledger(ledger_task),
+               (vm_map_size_t) <span class="number">0</span>,
+               <span class="literal">result</span>-&gt;is64bit);
+
+    // 注意点<span class="number">2</span>
+    map = vm_map_create(pmap,
+            <span class="number">0</span>,
+            vm_compute_max_offset(<span class="literal">result</span>-&gt;is64bit),
+            <span class="type">TRUE</span>);
+
+<span class="comment">#if defined(__arm64__)</span>
+    // 注意点三
+    <span class="keyword">if</span> (<span class="literal">result</span>-&gt;is64bit) {
+        /* enforce <span class="number">16</span>KB alignment <span class="keyword">of</span> <span class="type">VM</span> map entries */
+        vm_map_set_page_shift(map, <span class="type">SIXTEENK_PAGE_SHIFT</span>);
+    } <span class="keyword">else</span> {
+        vm_map_set_page_shift(map, page_shift_user32);
+    }
+</code></pre><ul>
+<li>利用<code>pmap_create</code>创建硬件相关的物理内存抽象。</li>
+<li>利用<code>vmap_create</code>创建虚拟内存的地址图。</li>
+<li>ARM64下的页是16k一个虚拟页对应一个物理页。</li>
+</ul>
+<p>别的没啥关注，我们重点关注<code>vm_map_create</code><b style="color:red"><code>0</code>和<code>vm_compute_max_offset(result-&gt;is64bit)</code></b>。</p>
+<p><b style="color:red">因为这个代表了这个任务分配的虚拟地址上下限！</b>这个函数的实现如下：</p>
+<pre><code><span class="tag">vm_map_offset_t</span>
+<span class="tag">vm_compute_max_offset</span>(boolean_t is64)
+{
+<span class="id">#if</span> <span class="tag">defined</span>(__arm__) || <span class="tag">defined</span>(__arm64__)
+    <span class="tag">return</span> (<span class="function">pmap_max_offset</span>(is64, ARM_PMAP_MAX_OFFSET_DEVICE));
+<span class="id">#else</span>
+    <span class="tag">return</span> (is64 ? (vm_map_offset_t)<span class="attribute">MACH_VM_MAX_ADDRESS </span>: (vm_map_offset_t)VM_MAX_ADDRESS);
+<span class="id">#endif</span>
+}
+</code></pre><p>继续往下看：</p>
+<pre><code><span class="keyword">vm_map_offset_t</span> pmap_max_offset(
+    <span class="keyword">boolean_t</span>    is64 __unused,
+    <span class="keyword">unsigned</span> <span class="keyword">int</span>    option)
+{
+    <span class="keyword">vm_map_offset_t</span>    max_offset_ret = <span class="number">0</span>;
+
+<span class="preprocessor">#<span class="keyword">if</span> defined(__arm64__)</span>
+    assert (is64);
+    <span class="keyword">vm_map_offset_t</span> min_max_offset = SHARED_REGION_BASE_ARM64 + SHARED_REGION_SIZE_ARM64 + <span class="number">0x20000000</span>; <span class="comment">// end of shared region + 512MB for various purposes</span>
+    <span class="keyword">if</span> (option == ARM_PMAP_MAX_OFFSET_DEFAULT) {
+        max_offset_ret = arm64_pmap_max_offset_default;
+    } <span class="keyword">else</span> <span class="keyword">if</span> (option == ARM_PMAP_MAX_OFFSET_MIN) {
+        max_offset_ret = min_max_offset;
+    } <span class="keyword">else</span> <span class="keyword">if</span> (option == ARM_PMAP_MAX_OFFSET_MAX) {
+        max_offset_ret = MACH_VM_MAX_ADDRESS;
+    } <span class="keyword">else</span> <span class="keyword">if</span> (option == ARM_PMAP_MAX_OFFSET_DEVICE) {
+        <span class="keyword">if</span> (arm64_pmap_max_offset_default) {
+            max_offset_ret = arm64_pmap_max_offset_default;
+        } <span class="keyword">else</span> <span class="keyword">if</span> (max_mem &gt; <span class="number">0xC0000000</span>) {
+            max_offset_ret = <span class="number">0x0000000318000000</span>ULL;     <span class="comment">// Max offset is 12.375GB for devices with &gt; 3GB of memory</span>
+        } <span class="keyword">else</span> <span class="keyword">if</span> (max_mem &gt; <span class="number">0x40000000</span>) {
+            max_offset_ret = <span class="number">0x0000000218000000</span>ULL;     <span class="comment">// Max offset is 8.375GB for devices with &gt; 1GB and &lt;= 3GB of memory</span>
+        } <span class="keyword">else</span> {
+            max_offset_ret = min_max_offset;
+        }
+    } <span class="keyword">else</span> <span class="keyword">if</span> (option == ARM_PMAP_MAX_OFFSET_JUMBO) {
+        max_offset_ret = <span class="number">0x0000000518000000</span>ULL;     <span class="comment">// Max offset is 20.375GB for pmaps with special "jumbo" blessing</span>
+    } <span class="keyword">else</span> {
+        panic(<span class="string">"pmap_max_offset illegal option 0x%x\n"</span>, option);
+    }
+
+    assert(max_offset_ret &gt;= min_max_offset);
+    <span class="keyword">return</span> max_offset_ret;
+</code></pre><p>其实关键点就是这里的代码：</p>
+<pre><code><span class="keyword">if</span> (max_mem &gt; <span class="number">0xC0000000</span>) {
+    max_offset_ret = <span class="number">0x0000000318000000</span>ULL;     <span class="regexp">//</span> <span class="constant">Max</span> offset is <span class="number">12.375</span>GB <span class="keyword">for</span> devices <span class="keyword">with</span> &gt; <span class="number">3</span>GB <span class="keyword">of</span> memory
+} <span class="keyword">else</span> <span class="keyword">if</span> (max_mem &gt; <span class="number">0x40000000</span>) {
+    max_offset_ret = <span class="number">0x0000000218000000</span>ULL;     <span class="regexp">//</span> <span class="constant">Max</span> offset is <span class="number">8.375</span>GB <span class="keyword">for</span> devices <span class="keyword">with</span> &gt; <span class="number">1</span>GB and &lt;= <span class="number">3</span>GB <span class="keyword">of</span> memory
+} <span class="keyword">else</span> {
+    max_offset_ret = min_max_offset;
+}
+</code></pre><p><code>max_offset_ret</code>这个值就代表了我们任务对应的<code>vm_map_t</code>的最大地址范围，比如说这里是8.375GB。</p>
+<h3 id="虚拟内存分配的限制">虚拟内存分配的限制</h3><p>好，在说了那么多前置知识后，我们言归正传，来谈谈为什么虚拟内存有限制。</p>
+<p>之前我们提到了<code>large_malloc</code>会走入到最后的<code>vm_map_enter</code>，那么我们来看看<code>vm_map_enter</code>的实现：</p>
+<pre><code>vm_map_enter(
+    <span class="keyword">vm_map_t</span>        <span class="built_in">map</span>,
+    <span class="keyword">vm_map_offset_t</span>        *address,    <span class="comment">/* IN/OUT */</span>
+    <span class="keyword">vm_map_size_t</span>        size,
+    <span class="keyword">vm_map_offset_t</span>        mask,
+    <span class="keyword">int</span>            flags,
+    <span class="keyword">vm_map_kernel_flags_t</span>    vmk_flags,
+    <span class="keyword">vm_tag_t</span>        alias,
+    <span class="keyword">vm_object_t</span>        object,
+    <span class="keyword">vm_object_offset_t</span>    offset,
+    <span class="keyword">boolean_t</span>        needs_copy,
+    <span class="keyword">vm_prot_t</span>        cur_protection,
+    <span class="keyword">vm_prot_t</span>        max_protection,
+    <span class="keyword">vm_inherit_t</span>        inheritance)
+{
+
+<span class="preprocessor">#<span class="keyword">if</span> CONFIG_EMBEDDED</span>
+    <span class="comment">// 注意点1:检查页的权限</span>
+    <span class="keyword">if</span> (cur_protection &amp; VM_PROT_WRITE){
+        <span class="keyword">if</span> ((cur_protection &amp; VM_PROT_EXECUTE) &amp;&amp; !entry_for_jit){
+            <span class="built_in">printf</span>(<span class="string">"EMBEDDED: %s: curprot cannot be write+execute. "</span>
+                   <span class="string">"turning off execute\n"</span>,
+                   __FUNCTION__);
+            cur_protection &amp;= ~VM_PROT_EXECUTE;
+        }
+    }
+<span class="preprocessor">#<span class="keyword">endif</span> <span class="comment">/* CONFIG_EMBEDDED */</span></span>
+
+    <span class="keyword">if</span> (resilient_codesign || resilient_media) {
+        <span class="keyword">if</span> ((cur_protection &amp; (VM_PROT_WRITE | VM_PROT_EXECUTE)) ||
+            (max_protection &amp; (VM_PROT_WRITE | VM_PROT_EXECUTE))) {
+            <span class="keyword">return</span> KERN_PROTECTION_FAILURE;
+        }
+    }
+
+    <span class="comment">// 1. 获取任务的可用的地址最小值和最大值</span>
+    effective_min_offset = <span class="built_in">map</span>-&gt;min_offset;
+    effective_max_offset = <span class="built_in">map</span>-&gt;max_offset;
+
+    <span class="keyword">if</span> (<span class="built_in">map</span>-&gt;pmap == kernel_pmap) {
+        user_alias = VM_KERN_MEMORY_NONE;
+    } <span class="keyword">else</span> {
+        user_alias = alias;
+    }
+
+<span class="preprocessor">#<span class="keyword">define</span>    RETURN(value)    { result = value; goto BailOut; }</span>
+
+    assert(page_aligned(*address));
+    assert(page_aligned(size));
+
+    <span class="keyword">if</span> (!VM_MAP_PAGE_ALIGNED(size, VM_MAP_PAGE_MASK(<span class="built_in">map</span>))) {
+        clear_map_aligned = TRUE;
+    }
+
+StartAgain: ;
+
+    start = *address;
+
+    <span class="keyword">if</span> (anywhere) {
+        vm_map_lock(<span class="built_in">map</span>);
+        map_locked = TRUE;
+
+        <span class="keyword">if</span> (start &lt; effective_min_offset)
+            start = effective_min_offset;
+        <span class="keyword">if</span> (start &gt; effective_max_offset)
+            RETURN(KERN_NO_SPACE);
+
+
+        <span class="keyword">if</span>( FALSE ) {
+
+        } <span class="keyword">else</span> {
+
+            <span class="keyword">if</span> (<span class="built_in">map</span>-&gt;holelistenabled) {
+                hole_entry = (<span class="keyword">vm_map_entry_t</span>)<span class="built_in">map</span>-&gt;holes_list;
+
+                <span class="keyword">if</span> (hole_entry == <span class="literal">NULL</span>) {
+                    <span class="comment">/*
+                     * No more space in the map?
+                     */</span>
+                    result = KERN_NO_SPACE;
+                    <span class="keyword">goto</span> BailOut;
+                } <span class="keyword">else</span> {
+
+                    <span class="keyword">boolean_t</span> found_hole = FALSE;
+
+                    <span class="keyword">do</span> {
+                        <span class="keyword">if</span> (hole_entry-&gt;vme_start &gt;= start) {
+                            start = hole_entry-&gt;vme_start;
+                            found_hole = TRUE;
+                            <span class="keyword">break</span>;
+                        }
+
+                        <span class="keyword">if</span> (hole_entry-&gt;vme_end &gt; start) {
+                            found_hole = TRUE;
+                            <span class="keyword">break</span>;
+                        }
+                        hole_entry = hole_entry-&gt;vme_next;
+
+                    } <span class="keyword">while</span> (hole_entry != (<span class="keyword">vm_map_entry_t</span>) <span class="built_in">map</span>-&gt;holes_list);
+
+                    <span class="keyword">if</span> (found_hole == FALSE) {
+                        result = KERN_NO_SPACE;
+                        <span class="keyword">goto</span> BailOut;
+                    }
+
+                    entry = hole_entry;
+
+                    <span class="keyword">if</span> (start == <span class="number">0</span>)
+                        start += PAGE_SIZE_64;
+                }
+            }
+        }
+
+        <span class="keyword">while</span> (TRUE) {
+            <span class="keyword">vm_map_entry_t</span>    next;
+
+            end = ((start + mask) &amp; ~mask);
+            end = vm_map_round_page(end,
+                        VM_MAP_PAGE_MASK(<span class="built_in">map</span>));
+
+            <span class="keyword">if</span> (end &lt; start)
+                RETURN(KERN_NO_SPACE);
+
+            start = end;
+            end += size;
+
+            <span class="keyword">if</span> ((end &gt; effective_max_offset) || (end &lt; start)) {
+                RETURN(KERN_NO_SPACE);
+            }
+
+            next = entry-&gt;vme_next;
+
+            <span class="keyword">if</span> (<span class="built_in">map</span>-&gt;holelistenabled) {
+                <span class="keyword">if</span> (entry-&gt;vme_end &gt;= end)
+                    <span class="keyword">break</span>;
+            } <span class="keyword">else</span> {
+
+                <span class="keyword">if</span> (next == vm_map_to_entry(<span class="built_in">map</span>))
+                    <span class="keyword">break</span>;
+
+                <span class="keyword">if</span> (next-&gt;vme_start &gt;= end)
+                    <span class="keyword">break</span>;
+            }
+
+            entry = next;
+
+            <span class="keyword">if</span> (<span class="built_in">map</span>-&gt;holelistenabled) {
+                <span class="keyword">if</span> (entry == (<span class="keyword">vm_map_entry_t</span>) <span class="built_in">map</span>-&gt;holes_list) {
+                    result = KERN_NO_SPACE;
+                    <span class="keyword">goto</span> BailOut;
+                }
+                start = entry-&gt;vme_start;
+            } <span class="keyword">else</span> {
+                start = entry-&gt;vme_end;
+            }
+
+            start = vm_map_round_page(start,
+                          VM_MAP_PAGE_MASK(<span class="built_in">map</span>));
+        }
+
+        <span class="keyword">if</span> (<span class="built_in">map</span>-&gt;holelistenabled) {
+            <span class="keyword">if</span> (vm_map_lookup_entry(<span class="built_in">map</span>, entry-&gt;vme_start, &amp;entry)) {
+                panic(<span class="string">"Found an existing entry (%p) instead of potential hole at address: 0x%llx.\n"</span>, entry, (<span class="keyword">unsigned</span> <span class="keyword">long</span> <span class="keyword">long</span>)entry-&gt;vme_start);
+            }
+        }
+
+        *address = start;
+    } 
+</code></pre><ul>
+<li>注意点1：基本上就是检查页的权限啥的，iOS上不允许可写和可执行并存。</li>
+<li>剩下的就是作各种前置检查</li>
+</ul>
+<p>老实说，我一开始看苹果这最新的XNU代码，我压根没读懂。这一堆<code>hole</code>啥的在干啥，后来我就往之前XNU版本翻了翻，果然好懂了很多：</p>
+<pre><code>entry = <span class="built_in">map</span><span class="subst">-&gt;</span>first_free;
+
+<span class="keyword">if</span> (entry == vm_map_to_entry(<span class="built_in">map</span>)) {
+    entry = <span class="built_in">NULL</span>;
+} <span class="keyword">else</span> {
+       <span class="keyword">if</span> (entry<span class="subst">-&gt;</span>vme_next == vm_map_to_entry(<span class="built_in">map</span>)){
+            entry = <span class="built_in">NULL</span>;
+       } <span class="keyword">else</span> {
+            <span class="keyword">if</span> (start &lt; (entry<span class="subst">-&gt;</span>vme_next)<span class="subst">-&gt;</span>vme_start ) {
+                start = entry<span class="subst">-&gt;</span>vme_end;
+                start = vm_map_round_page(start,
+                              VM_MAP_PAGE_MASK(<span class="built_in">map</span>));
+            } <span class="keyword">else</span> {
+                entry = <span class="built_in">NULL</span>;
+            }
+       }
+}
+
+<span class="keyword">if</span> (entry == <span class="built_in">NULL</span>) {
+    vm_map_entry_t    tmp_entry;
+    <span class="keyword">if</span> (vm_map_lookup_entry(<span class="built_in">map</span>, start, <span class="subst">&amp;</span>tmp_entry)) {
+        assert(<span class="subst">!</span>entry_for_jit);
+        start = tmp_entry<span class="subst">-&gt;</span>vme_end;
+        start = vm_map_round_page(start,
+                      VM_MAP_PAGE_MASK(<span class="built_in">map</span>));
+    }
+    entry = tmp_entry;
+}
+</code></pre><ul>
+<li><p>整个这段代码的意思是，就是要我们要找个一个比我们这个<code>start</code>地址大的<code>vm_entry_t</code>。(这句话比较绕口)，<b style="color:red">我们最终的目的是为了在两个已经存在<code>vm_entry_t</code>之间尝试插入一个能包含从<code>start</code>到<code>start + size</code>的新的<code>vm_entry_t</code></b></p>
+</li>
+<li><p>如果没找到的话，就尝试利用<code>vm_map_lookup_entry</code>找一个<code>preceding</code>我们地址的的<code>vm_entry_t</code>。</p>
+</li>
+</ul>
+<p>好，现在我们找到了一个满足<code>start</code>其实地址条件的<code>vm_entry_t</code>了，剩下就是要满足分配大小<code>size</code>的需求了。</p>
+<pre><code><span class="label">while</span> (TRUE) {
+    register vm_map_entry_t    next<span class="comment">;</span>
+
+    <span class="preprocessor">end</span> = ((start + mask) &amp; ~mask)<span class="comment">;</span>
+    <span class="preprocessor">end</span> = vm_map_round_page(<span class="preprocessor">end</span>,
+                VM_MAP_PAGE_MASK(<span class="preprocessor">map</span>))<span class="comment">;</span>
+    <span class="preprocessor">if</span> (<span class="preprocessor">end</span> &lt; start)
+        RETURN(KERN_NO_SPACE)<span class="comment">;</span>
+
+    start = <span class="preprocessor">end</span><span class="comment">;</span>
+    <span class="preprocessor">end</span> += size<span class="comment">;</span>
+
+    <span class="preprocessor">if</span> ((<span class="preprocessor">end</span> &gt; effective_max_offset) <span class="title">||</span> (<span class="preprocessor">end</span> &lt; start)) {
+        RETURN(KERN_NO_SPACE)<span class="comment">;</span>
+    }
+
+    next = <span class="preprocessor">entry</span>-&gt;vme_next<span class="comment">;</span>
+
+    // 如果是空的头
+    <span class="preprocessor">if</span> (next == vm_map_to_entry(<span class="preprocessor">map</span>))
+        <span class="keyword">break;
+</span>
+    // 如果下一个的start 
+    <span class="preprocessor">if</span> (next-&gt;vme_start &gt;= <span class="preprocessor">end</span>)
+        <span class="keyword">break;
+</span>
+    <span class="preprocessor">entry</span> = next<span class="comment">;</span>
+    start = <span class="preprocessor">entry</span>-&gt;vme_end<span class="comment">;</span>
+    start = vm_map_round_page(start,
+                  VM_MAP_PAGE_MASK(<span class="preprocessor">map</span>))<span class="comment">;</span>
+}
+*<span class="keyword">address </span>= start<span class="comment">;</span>
+<span class="label">assert</span>(VM_MAP_PAGE_ALIGNED(*<span class="keyword">address,
+</span>               VM_MAP_PAGE_MASK(<span class="preprocessor">map</span>)))<span class="comment">;</span>
+</code></pre><p>这段代码相对来说就很简单了，我们判断<code>start + size</code>是不是可以正好插入在<code>vm_entry_t</code>代表的地址范围的空隙内，如果一直遍历到最后的任务地址上限都找不到，那就说明不存在我们需求的连续的虚拟内存空间用于作分配了。</p>
+<h3 id="其他">其他</h3><p>除了本文说明的虚拟内存分配的连续性限制以外，虚拟内存作为堆内存分配的一种，在布局范围上也有限制。此文不表，且听下回分解。</p>
+
+      
+    </div>
+    <footer class="article-footer">
+      <a data-url="http://satanwoo.github.io/2018/01/14/iOS-virtual/" data-id="cjceu91tj000lm6i1zir7zvh4" class="article-share-link">Share</a>
+      
+        <a href="http://satanwoo.github.io/2018/01/14/iOS-virtual/#disqus_thread" class="article-comment-link">Comments</a>
+      
+      
+  <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/XNU/">XNU</a></li><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
+
+    </footer>
+  </div>
+  
+</article>
+
+<div id="disqus_thread"></div>
+<script>
+
+/**
+*  RECOMMENDED CONFIGURATION VARIABLES: EDIT AND UNCOMMENT THE SECTION BELOW TO INSERT DYNAMIC VALUES FROM YOUR PLATFORM OR CMS.
+*  LEARN WHY DEFINING THESE VARIABLES IS IMPORTANT: https://disqus.com/admin/universalcode/#configuration-variables*/
+/*
+var disqus_config = function () {
+this.page.url = PAGE_URL;  // Replace PAGE_URL with your page's canonical URL variable
+this.page.identifier = PAGE_IDENTIFIER; // Replace PAGE_IDENTIFIER with your page's unique identifier variable
+};
+*/
+(function() { // DON'T EDIT BELOW THIS LINE
+var d = document, s = d.createElement('script');
+s.src = 'https://satanwoo-2.disqus.com/embed.js';
+s.setAttribute('data-timestamp', +new Date());
+(d.head || d.body).appendChild(s);
+})();
+</script>
+<noscript>Please enable JavaScript to view the <a href="https://disqus.com/?ref_noscript">comments powered by Disqus.</a></noscript>
+                                
+  
     <article id="post-KVO-Swizzle" class="article article-type-post" itemscope itemprop="blogPost">
   <div class="article-meta">
     <a href="/2017/11/27/KVO-Swizzle/" class="article-date">
@@ -239,7 +864,7 @@ remover.keyPath = identifier.copy<span class="comment">;</span>
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2017/11/27/KVO-Swizzle/" data-id="cjagypmvi002bbqi1i54a471y" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2017/11/27/KVO-Swizzle/" data-id="cjceu91wy002em6i12hrzvc2b" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2017/11/27/KVO-Swizzle/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -401,7 +1026,7 @@ frame <span class="preprocessor">#<span class="number">14</span>: <span class="n
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2017/11/02/load-twice/" data-id="cjagypmsz000hbqi12t3lf9ey" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2017/11/02/load-twice/" data-id="cjceu91td000hm6i106szsqvu" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2017/11/02/load-twice/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -802,7 +1427,7 @@ NSDate* bootTime = [NSDate dateWithTimeIntervalSince1970:timestamp];
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2017/10/18/abort/" data-id="cjagypmtt0010bqi1qhj5oqx7" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2017/10/18/abort/" data-id="cjceu91ud0014m6i1lv3q9no0" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2017/10/18/abort/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -1188,7 +1813,7 @@ WKContentExtensionStore
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2017/09/24/mainthreadchecker1/" data-id="cjagypmsw000dbqi1mbgjwh3i" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2017/09/24/mainthreadchecker1/" data-id="cjceu91t7000dm6i1myjhvuox" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2017/09/24/mainthreadchecker1/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -1515,7 +2140,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2017/09/11/KVO-CRASH/" data-id="cjagypmvk002dbqi15eqn68wf" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2017/09/11/KVO-CRASH/" data-id="cjceu91x2002gm6i1n2ng3p94" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2017/09/11/KVO-CRASH/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -1811,7 +2436,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2017/08/06/UITableViewController/" data-id="cjagypmtz0016bqi1qz2olo82" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2017/08/06/UITableViewController/" data-id="cjceu91uj0019m6i16ngtiinc" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2017/08/06/UITableViewController/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -2102,7 +2727,7 @@ BOOT_RUN_EXIT(appender_close);
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2017/07/30/xlog/" data-id="cjagypms40003bqi1yrmckjm2" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2017/07/30/xlog/" data-id="cjceu91sb0003m6i1dnp8mcpr" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2017/07/30/xlog/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -2405,7 +3030,7 @@ ldp    x9, x17, [x12]        <span class="comment">// {x9, x17} = *bucket</span>
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2017/06/29/Macho-2/" data-id="cjagypmv2001xbqi1g5zjg6kj" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2017/06/29/Macho-2/" data-id="cjceu91w90020m6i1nz4ls5t1" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2017/06/29/Macho-2/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -2694,7 +3319,7 @@ _magic = [cursor readBigInt32];
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2017/06/13/Macho-1/" data-id="cjagypmv5001zbqi1el0u6r2e" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2017/06/13/Macho-1/" data-id="cjceu91wc0022m6i10dra8y0r" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2017/06/13/Macho-1/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -2956,7 +3581,7 @@ _attribute__((section (<span class="string">"__DATA, MinyiSpecific"</span>))) <s
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2017/06/01/FBTweak/" data-id="cjagypmvv002obqi1464to1gu" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2017/06/01/FBTweak/" data-id="cjceu91xh002rm6i1mix2iji1" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2017/06/01/FBTweak/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -3096,7 +3721,7 @@ foo(&amp;s, <span class="number">1</span>, <span class="number">2</span>);
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2017/04/23/ARM64IndirectReturn/" data-id="cjagypmwi0035bqi1t0v67d4i" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2017/04/23/ARM64IndirectReturn/" data-id="cjceu91yp0038m6i1fzec0du1" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2017/04/23/ARM64IndirectReturn/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -3267,7 +3892,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2017/04/18/CalculateTwoArrayDiff/" data-id="cjagypmwg0031bqi12oimpemq" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2017/04/18/CalculateTwoArrayDiff/" data-id="cjceu91ya0034m6i1k16o4xcz" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2017/04/18/CalculateTwoArrayDiff/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -3457,7 +4082,7 @@ dispatch_group_create(<span class="keyword">void</span>)
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2017/01/07/DispatchGroupCrash/" data-id="cjagypmvy002sbqi1tpe18psw" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2017/01/07/DispatchGroupCrash/" data-id="cjceu91xq002vm6i1oqo0301j" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2017/01/07/DispatchGroupCrash/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -3705,7 +4330,7 @@ func <span class="function"><span class="title">resultFromBatchObjects</span><sp
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2017/01/07/JSONRPCKit/" data-id="cjagypmvm002gbqi1tr34xh69" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2017/01/07/JSONRPCKit/" data-id="cjceu91x6002jm6i1ruvw5a3e" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2017/01/07/JSONRPCKit/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -3989,7 +4614,7 @@ dispatch_sync(dq, ^{
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/10/23/multithread-dangling-pointer/" data-id="cjagypmst000bbqi1lg4zyp9v" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/10/23/multithread-dangling-pointer/" data-id="cjceu91t4000bm6i15f8c4zop" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/10/23/multithread-dangling-pointer/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -4145,7 +4770,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/09/17/uiwindow-iOS/" data-id="cjagypmsn0007bqi1h7u725dm" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/09/17/uiwindow-iOS/" data-id="cjceu91sy0007m6i176mapo73" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/09/17/uiwindow-iOS/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -4305,7 +4930,7 @@ OSSpinUnlock(&amp;_lock)<span class="comment">;</span>
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/07/10/immutable-thread/" data-id="cjagypmt1000jbqi1ul9y0ije" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/07/10/immutable-thread/" data-id="cjceu91tg000jm6i18rb1nikc" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/07/10/immutable-thread/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -4429,7 +5054,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/05/02/Spotify/" data-id="cjagypmue001hbqi10e2oqar2" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/05/02/Spotify/" data-id="cjceu91v7001km6i1xepg7bvs" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/05/02/Spotify/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -4557,7 +5182,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/04/26/blank-space-in-html/" data-id="cjagypmtp000ybqi12t0f7m20" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/04/26/blank-space-in-html/" data-id="cjceu91ua0012m6i15nwilkbm" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/04/26/blank-space-in-html/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -4815,7 +5440,7 @@ Elapsed application CPU <span class="keyword">time</span> (seconds): <span class
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/04/11/dispatch-once/" data-id="cjagypmta000obqi1kduc06ej" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/04/11/dispatch-once/" data-id="cjceu91tt000sm6i108mf3uwu" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/04/11/dispatch-once/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -5032,7 +5657,7 @@ a4.<span class="function"><span class="title">staticInfo</span><span class="para
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/03/22/dispatch-in-swift/" data-id="cjagypmtg000qbqi1ud8f6619" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/03/22/dispatch-in-swift/" data-id="cjceu91tw000um6i1lx11yklu" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/03/22/dispatch-in-swift/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -5146,7 +5771,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/03/14/RxSwift/" data-id="cjagypmun001mbqi1oaghlms5" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/03/14/RxSwift/" data-id="cjceu91vh001pm6i13o19vqj9" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/03/14/RxSwift/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -5256,7 +5881,7 @@ val = edx(<span class="literal">true</span>)
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/03/14/SizeUp/" data-id="cjagypmuh001kbqi1peintxml" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/03/14/SizeUp/" data-id="cjceu91ve001nm6i1p4idmg6f" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/03/14/SizeUp/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -5418,7 +6043,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/03/14/DXXcodeConsoleUnicodePlugin/" data-id="cjagypmw4002xbqi18l8p99mb" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/03/14/DXXcodeConsoleUnicodePlugin/" data-id="cjceu91y10030m6i1axfmjbl7" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/03/14/DXXcodeConsoleUnicodePlugin/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -5517,7 +6142,7 @@ fi
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/02/27/check-manifest/" data-id="cjagypmtn000vbqi108eq0lp3" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/02/27/check-manifest/" data-id="cjceu91u2000zm6i1gj0jsg9y" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/02/27/check-manifest/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -5649,7 +6274,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/02/27/pod-install-plugin/" data-id="cjagypmsr0009bqi1d1c5ke0v" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/02/27/pod-install-plugin/" data-id="cjceu91t20009m6i13hv8zhm0" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/02/27/pod-install-plugin/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -5927,7 +6552,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/02/27/FBKVOController/" data-id="cjagypmvx002qbqi1j4l9suh4" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/02/27/FBKVOController/" data-id="cjceu91xl002tm6i1ra8bypuc" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/02/27/FBKVOController/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -6063,7 +6688,7 @@ selectedTitleLabelsContentView<span class="class">.layer</span><span class="clas
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/02/05/DGRunKeeperSwitch/" data-id="cjagypmw6002zbqi1fsv52cfo" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/02/05/DGRunKeeperSwitch/" data-id="cjceu91y70032m6i15wvccpqh" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/02/05/DGRunKeeperSwitch/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -6341,357 +6966,9 @@ NSLayoutConstraint *constraint = [NSLayoutConstraint <span class="string">constr
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/02/05/PureLayout/" data-id="cjagypmuy001tbqi1cw502kbb" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/02/05/PureLayout/" data-id="cjceu91vy001wm6i1v3pmk8sf" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/02/05/PureLayout/#disqus_thread" class="article-comment-link">Comments</a>
-      
-      
-  <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
-
-    </footer>
-  </div>
-  
-</article>
-
-<div id="disqus_thread"></div>
-<script>
-
-/**
-*  RECOMMENDED CONFIGURATION VARIABLES: EDIT AND UNCOMMENT THE SECTION BELOW TO INSERT DYNAMIC VALUES FROM YOUR PLATFORM OR CMS.
-*  LEARN WHY DEFINING THESE VARIABLES IS IMPORTANT: https://disqus.com/admin/universalcode/#configuration-variables*/
-/*
-var disqus_config = function () {
-this.page.url = PAGE_URL;  // Replace PAGE_URL with your page's canonical URL variable
-this.page.identifier = PAGE_IDENTIFIER; // Replace PAGE_IDENTIFIER with your page's unique identifier variable
-};
-*/
-(function() { // DON'T EDIT BELOW THIS LINE
-var d = document, s = d.createElement('script');
-s.src = 'https://satanwoo-2.disqus.com/embed.js';
-s.setAttribute('data-timestamp', +new Date());
-(d.head || d.body).appendChild(s);
-})();
-</script>
-<noscript>Please enable JavaScript to view the <a href="https://disqus.com/?ref_noscript">comments powered by Disqus.</a></noscript>
-                                
-  
-    <article id="post-Refactor-Mega-ViewController" class="article article-type-post" itemscope itemprop="blogPost">
-  <div class="article-meta">
-    <a href="/2015/12/30/Refactor-Mega-ViewController/" class="article-date">
-  <time datetime="2015-12-29T16:37:56.000Z" itemprop="datePublished">2015-12-30</time>
-</a>
-    
-  </div>
-  <div class="article-inner">
-    
-    
-      <header class="article-header">
-        
-  
-    <h1 itemprop="name">
-      <a class="article-title" href="/2015/12/30/Refactor-Mega-ViewController/">重构你的ViewController</a>
-    </h1>
-  
-
-      </header>
-    
-    <div class="article-entry" itemprop="articleBody">
-      
-        <p>这篇文章来自阅读<a href="https://realm.io/news/andy-matuschak-refactor-mega-controller/" target="_blank" rel="external">Let’s Play: Refactor the Mega Controller!</a></p>
-<p>在该文中，作者阐述了如何使用Swift重构一个臭名昭著的Massive View Controller。从中，我们可以一窥Swift诸多优秀的特性以及如何利用这些特性将ViewController的职责进行解耦。</p>
-<p>但是作者由于时间有限，并没有讲述完全，因此本文是我阅读<a href="https://github.com/andymatuschak/refactor-the-mega-controller" target="_blank" rel="external">源码</a>后的理解。</p>
-<p><strong>建议大家在阅读本文之前，能够先去看看链接中的视频。</strong></p>
-<h3 id="Let’s_get_started">Let’s get started</h3><p>首先我们下载源码，可以看到如下文件：</p>
-<pre><code>-<span class="ruby"> <span class="constant">NavigationController</span>.swift
-</span>-<span class="ruby"> <span class="constant">ViewController</span>.swift
-</span>-<span class="ruby"> <span class="constant">AddViewController</span>.swift</span>
-</code></pre><p>其中，<code>ViewController.swift</code>是项目的核心，代码行数超过<strong>246</strong>行。在这里我要强调一下，并不是代码行数多不好，而是要看你这个职责是不是相关。如果246行都是在实现一个数据结构或者算法，当然可行。但是如果246行里面包含了逻辑业务、网络请求、数据持久化，那必然是可以分离一部分职责出去。</p>
-<p>在本文的<code>ViewController.swift</code>，这个类在初始状态下包含了<code>UITableViewDataSource</code>, <code>UITableViewDelegate</code>, <code>UIViewControllerTransitioningDelegate</code>, <code>UIViewControllerAnimatedTransitioning</code>, <code>NSFetchedResultsController</code>以及一系类跟UI显示相关的代码。</p>
-<h4 id="1-_干掉UINavigationBar相关的内容">1. 干掉UINavigationBar相关的内容</h4><p>作者在app中构建了可变化的NavigationBar，因此bar的样式是根据不同状态进行改变的。原来的逻辑整体写在了<code>ViewController.swift</code>中，如下所示：</p>
-<pre><code> func updateNavigationBar() {
-        <span class="keyword">switch</span> fetchedResultsController!<span class="variable">.fetchedObjects</span>!<span class="variable">.count</span> {
-        <span class="keyword">case</span> <span class="number">0.</span>.<span class="number">.3</span>:
-            navigationController!<span class="variable">.navigationBar</span><span class="variable">.barTintColor</span> = <span class="literal">nil</span>
-            navigationController!<span class="variable">.navigationBar</span><span class="variable">.titleTextAttributes</span> = <span class="literal">nil</span>
-            navigationController!<span class="variable">.navigationBar</span><span class="variable">.tintColor</span> = <span class="literal">nil</span>
-        <span class="keyword">case</span> <span class="number">4.</span>.<span class="number">.9</span>:
-            navigationController!<span class="variable">.navigationBar</span><span class="variable">.barTintColor</span> = <span class="built_in">UIColor</span>(red: <span class="number">235</span>/<span class="number">255</span>, green: <span class="number">156</span>/<span class="number">255</span>, blue: <span class="number">77</span>/<span class="number">255</span>, alpha: <span class="number">1.0</span>)
-            navigationController!<span class="variable">.navigationBar</span><span class="variable">.titleTextAttributes</span> = [<span class="built_in">NSForegroundColorAttributeName</span>: <span class="built_in">UIColor</span><span class="variable">.whiteColor</span>()]
-            navigationController!<span class="variable">.navigationBar</span><span class="variable">.tintColor</span> = <span class="built_in">UIColor</span><span class="variable">.whiteColor</span>()
-        <span class="keyword">default</span>:
-            navigationController!<span class="variable">.navigationBar</span><span class="variable">.barTintColor</span> = <span class="built_in">UIColor</span>(red: <span class="number">248</span>/<span class="number">255</span>, green: <span class="number">73</span>/<span class="number">255</span>, blue: <span class="number">68</span>/<span class="number">255</span>, alpha: <span class="number">1.0</span>)
-            navigationController!<span class="variable">.navigationBar</span><span class="variable">.titleTextAttributes</span> = [<span class="built_in">NSForegroundColorAttributeName</span>: <span class="built_in">UIColor</span><span class="variable">.whiteColor</span>()]
-            navigationController!<span class="variable">.navigationBar</span><span class="variable">.tintColor</span> = <span class="built_in">UIColor</span><span class="variable">.whiteColor</span>()
-        }
-    }
-
-override func preferredStatusBarStyle() -&gt; <span class="built_in">UIStatusBarStyle</span> {
-    <span class="keyword">switch</span> fetchedResultsController?<span class="variable">.fetchedObjects</span>!<span class="variable">.count</span> {
-    <span class="keyword">case</span> <span class="variable">.Some</span>(<span class="number">0.</span>.<span class="number">.3</span>), <span class="variable">.None</span>:
-        <span class="keyword">return</span> <span class="variable">.Default</span>
-    <span class="keyword">case</span> <span class="variable">.Some</span>(_):
-        <span class="keyword">return</span> <span class="variable">.LightContent</span>
-    }
-}
-</code></pre><p>同时，还在几个事件回调的地方，如Core Data的<code>controllerDidChange</code>，调用了<code>setNeedsStatusBarAppearanceUpdate()</code>。</p>
-<p>这个想法粗略想想并没什么问题，因为我们需要根据一系列的事件变化来改变我们的界面样式，这是很明显的业务逻辑。而我们都很清楚，ViewController就是用来写业务逻辑的地方。</p>
-<p>先抛开ViewController是否是应该写业务逻辑的地方这一个有待商榷的论点之外，我们先看看，我们可以如何重构现有代码。</p>
-<p><strong>首先</strong>，<code>updateNavigationBar</code>中多个case中的代码有了重复，因此我们可以将其重构成一个函数，接受三个关于样式的参数，如下：</p>
-<pre><code>func applyTheme(<span class="string">barTintColor:</span>newBarTintColor, <span class="string">tintColor:</span>newTintColor, <span class="string">titleTextAttributes:</span>newTextAttributes) {
-    barTintColor = <span class="string">barTintColor:</span>newBarTintColor
-    tintColor = <span class="string">tintColor:</span>newTintColor
-    titleTextAttributes = <span class="string">titleTextAttributes:</span>newTextAttributes
-}
-</code></pre><p>重构完函数以后，我们发现在多个样式中用到了switch case进行业务逻辑参数转换样式参数的过程。<strong>这说明什么，我们可以将转换逻辑和switch case一起通过Enum进行重构（这里说的东西都是基于你懂Enum）</strong></p>
-<pre><code><span class="keyword">enum</span> NavigationTheme {
-    <span class="keyword">case</span> Normal
-    <span class="keyword">case</span> Warning
-    <span class="keyword">case</span> Doomed
-
-    var statusBarStyle: <span class="built_in">UIStatusBarStyle</span> {
-        <span class="keyword">switch</span> <span class="keyword">self</span> {
-        <span class="keyword">case</span> <span class="variable">.Normal</span>: <span class="keyword">return</span> <span class="variable">.Default</span>
-        <span class="keyword">case</span> <span class="variable">.Warning</span>, <span class="variable">.Doomed</span>: <span class="keyword">return</span> <span class="variable">.LightContent</span>
-        }
-    }
-
-    var barTintColor: <span class="built_in">UIColor</span>? {
-        <span class="keyword">switch</span> <span class="keyword">self</span> {
-        <span class="keyword">case</span> <span class="variable">.Normal</span>:
-            <span class="keyword">return</span> <span class="literal">nil</span>
-        <span class="keyword">case</span> <span class="variable">.Warning</span>:
-            <span class="keyword">return</span> <span class="built_in">UIColor</span>(red: <span class="number">235</span>/<span class="number">255</span>, green: <span class="number">156</span>/<span class="number">255</span>, blue: <span class="number">77</span>/<span class="number">255</span>, alpha: <span class="number">1.0</span>)
-        <span class="keyword">case</span> <span class="variable">.Doomed</span>:
-            <span class="keyword">return</span> <span class="built_in">UIColor</span>(red: <span class="number">248</span>/<span class="number">255</span>, green: <span class="number">73</span>/<span class="number">255</span>, blue: <span class="number">68</span>/<span class="number">255</span>, alpha: <span class="number">1.0</span>)
-        }
-    }
-
-    var titleTextAttributes: [String: <span class="built_in">NSObject</span>]? {
-        <span class="keyword">switch</span> <span class="keyword">self</span> {
-        <span class="keyword">case</span> <span class="variable">.Normal</span>:
-            <span class="keyword">return</span> <span class="literal">nil</span>
-        <span class="keyword">case</span> <span class="variable">.Warning</span>, <span class="variable">.Doomed</span>:
-            <span class="keyword">return</span> [<span class="built_in">NSForegroundColorAttributeName</span>: <span class="built_in">UIColor</span><span class="variable">.whiteColor</span>()]
-        }
-    }
-
-    var tintColor: <span class="built_in">UIColor</span>? {
-        <span class="keyword">switch</span> <span class="keyword">self</span> {
-        <span class="keyword">case</span> <span class="variable">.Normal</span>:
-            <span class="keyword">return</span> <span class="literal">nil</span>
-        <span class="keyword">case</span> <span class="variable">.Warning</span>, <span class="variable">.Doomed</span>:
-            <span class="keyword">return</span> <span class="built_in">UIColor</span><span class="variable">.whiteColor</span>()
-        }
-    }
-}
-
-extension NavigationTheme {
-    init(numberOfImminentTasks: Int) {
-        <span class="keyword">switch</span> numberOfImminentTasks {
-        <span class="keyword">case</span> -Int<span class="variable">.max</span> ... <span class="number">3</span>:
-            <span class="keyword">self</span> = <span class="variable">.Normal</span>
-        <span class="keyword">case</span> <span class="number">4.</span>.<span class="number">.9</span>:
-            <span class="keyword">self</span> = <span class="variable">.Warning</span>
-        <span class="keyword">default</span>:
-            <span class="keyword">self</span> = <span class="variable">.Doomed</span>
-        }
-    }
-}    
-</code></pre><p>由于Enum在swift中是一等公民，因此可以可以在其中构建大量的<strong>Computed Properties</strong>，这些计算变量依赖于当前enum的状态。不仅如此，我们还将之前分散的三种样式，组合成了一个<strong>紧凑的结构体</strong>，大大简化了变量传输。</p>
-<p>重构结束后，我们在<code>Viewcontroller.swift</code>中设置一个计算变量<code>navigationTheme</code>，其的构造函数是之前的<code>fetchedResultsController?.fetchedObjects?.count</code>。</p>
-<p>最后是在相应的事件后触发更新UINavigationBar即可，在本文的视线中，是采用了closure的形式完成：</p>
-<pre><code>navigationThemeDidChangeHandler = { [<span class="keyword">weak</span> <span class="keyword">self</span>] theme <span class="keyword">in</span>
-            <span class="keyword">if</span> <span class="keyword">let</span> navigationController = <span class="keyword">self</span>?.navigationController {
-                navigationController.navigationBar.applyTheme(theme)
-                navigationController.statusBarStyle = theme.statusBarStyle
-            }
-        }
-</code></pre><h3 id="2-_干掉时间相关的转换逻辑">2. 干掉时间相关的转换逻辑</h3><p>相信很多人做app的时候遇到过，服务器返回的是一系列标准时间参数，而你需要将其转换成界面需要的生日、星座、年龄等等，这又是一大堆的业务逻辑。为了解决这种逻辑代码和ViewController的耦合，很多人提出了<code>ViewModel</code>，将部分弱业务逻辑代码剥离出来，单独写在一个地方。</p>
-<p><strong>但是，我需要强调一点，这种形式的剥离，并不能叫ViewModal，而是一个简单的adapter而已。</strong></p>
-<p>在本文中，列表Cell里面需要根据日期距离当前时间的差距显示成昨天、今天、明天等等。因此，其构建了一个单独的的DateFormatter，根据传入的两个Date进行转换，代码如下：</p>
-<pre><code><span class="class"><span class="keyword">struct</span> <span class="title">RelativeTimeDateFormatter</span> </span>{
-    <span class="keyword">let</span> calendar: <span class="type">NSCalendar</span>
-
-    <span class="keyword">init</span>(calendar: <span class="type">NSCalendar</span> = <span class="type">NSCalendar</span>.autoupdatingCurrentCalendar()) {
-        <span class="keyword">self</span>.calendar = calendar
-    }
-
-    <span class="func"><span class="keyword">func</span> <span class="title">stringForDate</span><span class="params">(date: NSDate, relativeToDate baseDate: NSDate)</span></span> -&gt; <span class="type">String</span> {
-        <span class="keyword">var</span> beginningOfDate: <span class="type">NSDate</span>? = <span class="literal">nil</span>
-        <span class="keyword">var</span> beginningOfBaseDate: <span class="type">NSDate</span>? = <span class="literal">nil</span>
-
-        calendar.rangeOfUnit(.<span class="type">Day</span>, startDate: &amp;beginningOfDate, interval: <span class="literal">nil</span>, forDate: date)
-        calendar.rangeOfUnit(.<span class="type">Day</span>, startDate: &amp;beginningOfBaseDate, interval: <span class="literal">nil</span>, forDate: baseDate)
-        <span class="keyword">let</span> numberOfCalendarDaysBetweenDates = calendar.components(<span class="type">NSCalendarUnit</span>.<span class="type">Day</span>, fromDate: beginningOfBaseDate!, toDate: beginningOfDate!, options: <span class="type">NSCalendarOptions</span>()).day
-
-        <span class="keyword">switch</span> numberOfCalendarDaysBetweenDates {
-        <span class="keyword">case</span> -<span class="type">Int</span>.<span class="built_in">max</span> ... -<span class="number">2</span>:
-            <span class="keyword">return</span> <span class="string">"<span class="subst">\(<span class="built_in">abs</span>(numberOfCalendarDaysBetweenDates)</span>) days ago"</span>
-        <span class="keyword">case</span> -<span class="number">1</span>:
-            <span class="keyword">return</span> <span class="string">"Yesterday"</span>
-        <span class="keyword">case</span> <span class="number">0</span>:
-            <span class="keyword">return</span> <span class="string">"Today"</span>
-        <span class="keyword">case</span> <span class="number">1</span>:
-            <span class="keyword">return</span> <span class="string">"Tomorrow"</span>
-        <span class="keyword">default</span>:
-            <span class="keyword">return</span> <span class="string">"In <span class="subst">\(numberOfCalendarDaysBetweenDates)</span> days"</span>
-        }
-    }
-}
-</code></pre><p><strong>这里需要注意的是，NSCalendar的初始化非常耗时，过去在Objective-C时代常常使用dispatch_once构建单例传输，在这里通过结构体中的成员变量维护了一份，作用是同样的。</strong></p>
-<h3 id="3-_干掉NSPredicate">3. 干掉NSPredicate</h3><p>对于NSPredicate，有些人可能还不熟悉，他就是类似于SQLite中的查询语句，只不过其应用范围是CoreData。咦，查询语句还能重构？</p>
-<p>其实在本文中，对于NSPredicate的使用只有原先这一句  <code>fetchRequest.predicate = NSPredicate(format: &quot;dueDate &lt;= %@&quot;, argumentArray: [NSCalendar.currentCalendar().dateByAddingUnit(.Day, value: 10, toDate: NSDate(), options: NSCalendarOptions())!])</code></p>
-<p>这段代码从重复性上来说是不需要重构的。但是，我们可以看到，在这里的构造参数里面，我们还是进行了一定的业务逻辑转换。所以，和DateFormatter一样，我们也可以将这部分所谓为的”弱业务逻辑”代码进行剥离：</p>
-<pre><code>extension NSPredicate {
-    convenience init(forTasksWithinNumberOfDays <span class="string">numberOfDays:</span> Int, ofDate <span class="string">date:</span> NSDate, <span class="string">calendar:</span> NSCalendar = NSCalendar.currentCalendar()) {
-        self.init(<span class="string">format:</span> <span class="string">"dueDate &lt;= %@"</span>, <span class="string">argumentArray:</span> [calendar.dateByAddingUnit(.Day, <span class="string">value:</span> numberOfDays, <span class="string">toDate:</span> date, <span class="string">options:</span> NSCalendarOptions())!])
-    }
-}
-</code></pre><p><strong>除了业务逻辑剥离之外，其实我们也可以看到，在这个NSPredicate的新构造参数，可以接受一个<code>calendar</code>，这对于测试用例编写的依赖注入是非常有好处的。</strong></p>
-<h3 id="4-_Core_Data_Stack">4. Core Data Stack</h3><p>用过Core Data的人都知道，Core Data的使用非常麻烦，需要配置大量的选项，照着苹果源码写的经历相信大家都有过，那恶心的200-300行配置代码，真是么么哒了。</p>
-<p><strong>但是，这几百行代码又是无法省略的</strong>，那该怎么办呢？</p>
-<p>一个比较好的解决方案就<code>Core Data Stack</code>    。意为将CoreData的初始化以及多个NSManagerObjectContext封装进<code>CoreDataStack</code> 维护。 </p>
-<p>在本文中，因为只是使用了一个主线程的NSManagerObjectContext，所以可能读者在阅读源码的时候可能觉得这个重构只是将CoreData配置从View剥离了。但是实际上，使用CoreDataStack可以做到更多，建议大家阅读Github上相关项目。</p>
-<h3 id="5-_干掉NSFetchedResultsControllerDelegate">5. 干掉NSFetchedResultsControllerDelegate</h3><p>NSFetchedResultsController大家可以简单理解为获取CoreData数据的一个中介层。根据传输进入的谓语NSPredicate进行查询，查询结束后通过相应的Delegate事件回调。</p>
-<p>在作者的代码中，作者通过构建<code>manager</code>的方式剥离了NSFetchedResultsController的职责，将NSFetchedResultsController的初始化、回调封装进了<code>UpcomingTaskDataManager.swift</code>中。</p>
-<p><strong>不过值得注意的一点是，尽管作者封装的NSFetchedResultsControllerDelegate的回调，但是为了让调用者可以自定义处理事件，实际上作者还是需要暴露一些的Delegate，当然，新的回调相对来说进行了一定的简化，同时在数据回调时经过了业务转化。</strong></p>
-<pre><code><span class="class"><span class="keyword">protocol</span> <span class="title">UpcomingTaskDataManagerDelegate</span> </span>{
-    <span class="func"><span class="keyword">func</span> <span class="title">dataManagerWillChangeContent</span><span class="params">(dataManager: UpcomingTaskDataManager)</span></span>
-    <span class="func"><span class="keyword">func</span> <span class="title">dataManagerDidChangeContent</span><span class="params">(dataManager: UpcomingTaskDataManager)</span></span>
-    <span class="func"><span class="keyword">func</span> <span class="title">dataManager</span><span class="params">(dataManager: UpcomingTaskDataManager, didInsertRowAtIndexPath indexPath: NSIndexPath)</span></span>
-    <span class="func"><span class="keyword">func</span> <span class="title">dataManager</span><span class="params">(dataManager: UpcomingTaskDataManager, didDeleteRowAtIndexPath indexPath: NSIndexPath)</span></span>
-}
-</code></pre><h3 id="6-_CoreDataModel_&lt;=&gt;_Model">6. CoreDataModel &lt;=&gt; Model</h3><p>这一步是将从Core Data中获取的NSManagedObject Model 转换成业务中使用的Model。为什么要这么做呢？原因有三个：  </p>
-<ul>
-<li>CoreData中的属性一更改，就会触发NSFetchedResultsController，这会很影响性能。</li>
-<li>CoreData中的属性存在很多bug</li>
-<li>NSManagedObject不是一个struct类型，很有可能<strong>误伤</strong></li>
-</ul>
-<pre>
-import CoreData  
-import Foundation
-
-struct Task: Equatable {
-    var id: String
-    var title: String
-    var dueDate: NSDate
-}
-
-func ==(lhs: Task, rhs: Task) -> Bool {
-    return lhs.id == rhs.id && lhs.title == rhs.title && lhs.dueDate == rhs.dueDate
-}
-
-extension Task {
-    init(managedTask: NSManagedObject) {
-        self.id = managedTask.valueForKey("id") as! String
-        self.title = managedTask.valueForKey("title") as! String
-        self.dueDate = managedTask.valueForKey("dueDate") as! NSDate
-    }
-}
-</pre>
-
-<p>作者用以上的Task类型替换了CoreData中的ManagedObject，可以有效的避免以上问题。</p>
-<h3 id="7-封装数据结构">7.封装数据结构</h3><p>在这一步里，我将作者自定义<code>TaskTableViewCell</code>和构建<code>AddCompletionSegue</code>合并到了一块说。</p>
-<p>这两步的重构，看似简单，但是其实也蕴含了一个思想：<strong>类型越确定，编程越容易，运行越安全</strong></p>
-<p>在原文的实现，一开始作者都是通过采用基础的数据结构UITableViewCell和UISegue。这样带来的坏处就是类型不明确导致的职责不明确。对于基础的数据结构，我们常常还要进行类型判断和转换，容易犯错。</p>
-<h3 id="8-干掉UITableViewDelegate和UITableViewDataSource">8.干掉UITableViewDelegate和UITableViewDataSource</h3><p>这一步想必大家都很熟悉了，微博上整天热传了<em>用ViewModel重构你的ViewController</em>经常提及的就是干掉UITableViewDelegate和UITableViewDataSource。</p>
-<p>那说了那么多，我们来看看究竟如何干掉它。</p>
-<p>毫无以为，我们首先要构建一个类型，来实现UITableViewDelegate和DataSource，如下所示：</p>
-<pre><code><span class="comment">// 1. </span>
-<span class="class"><span class="keyword">class</span> <span class="title">UpcomingTaskDataManagerTableViewAdapter</span>&lt;<span class="title">CellType</span>: <span class="title">UITableViewCell</span>&gt;: <span class="title">NSObject</span>, <span class="title">UITableViewDataSource</span>, <span class="title">UpcomingTaskDataManagerDelegate</span> </span>{
-    private <span class="keyword">let</span> tableView: <span class="type">UITableView</span>
-    private <span class="keyword">let</span> upcomingTaskDataManager: <span class="type">UpcomingTaskDataManager</span>
-    private <span class="keyword">let</span> cellReuseIdentifier: <span class="type">String</span>
-    private <span class="keyword">let</span> cellConfigurationHandler: (<span class="type">CellType</span>, <span class="type">Task</span>) -&gt; ()
-    private <span class="keyword">let</span> didChangeHandler: () -&gt; <span class="type">Void</span>
-
-<span class="comment">// .2</span>
-    <span class="keyword">init</span>(tableView: <span class="type">UITableView</span>, upcomingTaskDataManager: <span class="type">UpcomingTaskDataManager</span>, cellReuseIdentifier: <span class="type">String</span>, cellConfigurationHandler: (<span class="type">CellType</span>, <span class="type">Task</span>) -&gt; (), didChangeHandler: () -&gt; <span class="type">Void</span>) {
-        <span class="keyword">self</span>.tableView = tableView
-        <span class="keyword">self</span>.upcomingTaskDataManager = upcomingTaskDataManager
-        <span class="keyword">self</span>.cellReuseIdentifier = cellReuseIdentifier
-        <span class="keyword">self</span>.cellConfigurationHandler = cellConfigurationHandler
-        <span class="keyword">self</span>.didChangeHandler = didChangeHandler
-
-        <span class="keyword">super</span>.<span class="keyword">init</span>()
-    }
-
-<span class="comment">// 3.</span>
-    <span class="func"><span class="keyword">func</span> <span class="title">tableView</span><span class="params">(tableView: UITableView, commitEditingStyle editingStyle: UITableViewCellEditingStyle, forRowAtIndexPath indexPath: NSIndexPath)</span></span> {
-        upcomingTaskDataManager.deleteTask(upcomingTaskDataManager.taskSections[indexPath.section].items[indexPath.row])
-    }
-
-    <span class="func"><span class="keyword">func</span> <span class="title">numberOfSectionsInTableView</span><span class="params">(tableView: UITableView)</span></span> -&gt; <span class="type">Int</span> {
-        <span class="keyword">return</span> upcomingTaskDataManager.taskSections.<span class="built_in">count</span>
-    }
-
-    <span class="func"><span class="keyword">func</span> <span class="title">tableView</span><span class="params">(tableView: UITableView, titleForHeaderInSection section: Int)</span></span> -&gt; <span class="type">String</span>? {
-        <span class="keyword">return</span> upcomingTaskDataManager.taskSections[section].title
-    }
-
-    <span class="func"><span class="keyword">func</span> <span class="title">tableView</span><span class="params">(tableView: UITableView, numberOfRowsInSection section: Int)</span></span> -&gt; <span class="type">Int</span> {
-        <span class="keyword">return</span> upcomingTaskDataManager.taskSections[section].items.<span class="built_in">count</span>
-    }
-
-    <span class="func"><span class="keyword">func</span> <span class="title">tableView</span><span class="params">(tableView: UITableView, cellForRowAtIndexPath indexPath: NSIndexPath)</span></span> -&gt; <span class="type">UITableViewCell</span> {
-        <span class="keyword">let</span> task = upcomingTaskDataManager.taskSections[indexPath.section].items[indexPath.row]
-        <span class="keyword">let</span> cell = tableView.dequeueReusableCellWithIdentifier(cellReuseIdentifier, forIndexPath: indexPath) <span class="keyword">as</span>! <span class="type">CellType</span>
-        cellConfigurationHandler(cell, task)
-        <span class="keyword">return</span> cell
-    }
-</code></pre><ol>
-<li>这个<code>UpcomingTaskDataManagerTableViewAdapter</code>通过传入一个CellType支持泛型。  </li>
-<li>通过接受几个closure来进行自定义的配置，包括cell的样式配置以及tableview数据更新后的回调。  </li>
-<li>实现的UITableViewDataSource</li>
-</ol>
-<p>同样，由于职责的重新分配，我们要将跟<code>TaskManager</code>（包括NSFetchedResultsController）相关的划入到这个adapter中。</p>
-<h3 id="大结局">大结局</h3><p>最后重构后的ViewController，只有<strong>37</strong>代码，效果如下：</p>
-<pre><code><span class="class"><span class="keyword">class</span> <span class="title">ViewController</span>: <span class="title">UITableViewController</span> </span>{
-    <span class="keyword">var</span> navigationThemeDidChangeHandler: ((<span class="type">NavigationTheme</span>) -&gt; <span class="type">Void</span>)?
-    <span class="keyword">var</span> navigationTheme: <span class="type">NavigationTheme</span> {
-        <span class="keyword">return</span> <span class="type">NavigationTheme</span>(numberOfImminentTasks: upcomingTaskDataManager.totalNumberOfTasks)
-    }
-
-    private <span class="keyword">let</span> upcomingTaskDataManager = <span class="type">UpcomingTaskDataManager</span>()
-    private <span class="keyword">var</span> upcomingTaskDataManagerTableViewAdapter: <span class="type">UpcomingTaskDataManagerTableViewAdapter</span>&lt;<span class="type">TaskTableViewCell</span>&gt;!
-
-    <span class="keyword">override</span> <span class="func"><span class="keyword">func</span> <span class="title">viewDidLoad</span><span class="params">()</span></span> {
-        <span class="keyword">super</span>.viewDidLoad()
-
-        upcomingTaskDataManagerTableViewAdapter = <span class="type">UpcomingTaskDataManagerTableViewAdapter</span>(
-            tableView: tableView,
-            upcomingTaskDataManager: upcomingTaskDataManager,
-            cellReuseIdentifier: <span class="string">"Cell"</span>,
-            cellConfigurationHandler: { cell, task <span class="keyword">in</span>
-                cell.viewData = <span class="type">TaskTableViewCell</span>.<span class="type">ViewData</span>(task: task, relativeToDate: <span class="type">NSDate</span>())
-            },
-            didChangeHandler: { [<span class="keyword">weak</span> <span class="keyword">self</span>] <span class="keyword">in</span> <span class="keyword">self</span>?.updateNavigationBar() }
-        )
-        upcomingTaskDataManager.delegate = upcomingTaskDataManagerTableViewAdapter
-        tableView.dataSource = upcomingTaskDataManagerTableViewAdapter
-
-        updateNavigationBar()
-    }
-
-    <span class="keyword">override</span> <span class="func"><span class="keyword">func</span> <span class="title">tableView</span><span class="params">(tableView: UITableView, canEditRowAtIndexPath indexPath: NSIndexPath)</span></span> -&gt; <span class="type">Bool</span> {
-        <span class="keyword">return</span> <span class="literal">true</span>
-    }
-
-    <span class="func"><span class="keyword">func</span> <span class="title">updateNavigationBar</span><span class="params">()</span></span> {
-        navigationThemeDidChangeHandler?(navigationTheme)
-    }
-
-    <span class="preprocessor">@IBAction</span> <span class="func"><span class="keyword">func</span> <span class="title">unwindFromAddController</span><span class="params">(segue: AddCompletionSegue)</span></span> {
-        upcomingTaskDataManager.createTaskWithTitle(segue.taskTitle, dueDate: segue.taskDueDate)
-    }
-}
-</code></pre>
-      
-    </div>
-    <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/12/30/Refactor-Mega-ViewController/" data-id="cjagypmut001rbqi1bfkdqxpd" class="article-share-link">Share</a>
-      
-        <a href="http://satanwoo.github.io/2015/12/30/Refactor-Mega-ViewController/#disqus_thread" class="article-comment-link">Comments</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
@@ -6738,7 +7015,7 @@ s.setAttribute('data-timestamp', +new Date());
   <div class="widget-wrap">
     <h3 class="widget-title">Tags</h3>
     <div class="widget">
-      <ul class="tag-list"><li class="tag-list-item"><a class="tag-list-link" href="/tags/Android/">Android</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/C/">C</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Growth/">Growth</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/JavaScript/">JavaScript</a><span class="tag-list-count">3</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Math/">Math</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Performance/">Performance</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/R/">R</a><span class="tag-list-count">2</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Reverse-Engineering/">Reverse Engineering</a><span class="tag-list-count">6</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Swift/">Swift</a><span class="tag-list-count">6</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/XNU/">XNU</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/iOS/">iOS</a><span class="tag-list-count">32</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/shell/">shell</a><span class="tag-list-count">1</span></li></ul>
+      <ul class="tag-list"><li class="tag-list-item"><a class="tag-list-link" href="/tags/Android/">Android</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/C/">C</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Growth/">Growth</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/JavaScript/">JavaScript</a><span class="tag-list-count">3</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Math/">Math</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Performance/">Performance</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/R/">R</a><span class="tag-list-count">2</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Reverse-Engineering/">Reverse Engineering</a><span class="tag-list-count">6</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Swift/">Swift</a><span class="tag-list-count">6</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/XNU/">XNU</a><span class="tag-list-count">2</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/iOS/">iOS</a><span class="tag-list-count">33</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/shell/">shell</a><span class="tag-list-count">1</span></li></ul>
     </div>
   </div>
 
@@ -6747,7 +7024,7 @@ s.setAttribute('data-timestamp', +new Date());
   <div class="widget-wrap">
     <h3 class="widget-title">Tag Cloud</h3>
     <div class="widget tagcloud">
-      <a href="/tags/Android/" style="font-size: 10px;">Android</a> <a href="/tags/C/" style="font-size: 10px;">C</a> <a href="/tags/Growth/" style="font-size: 10px;">Growth</a> <a href="/tags/JavaScript/" style="font-size: 15px;">JavaScript</a> <a href="/tags/Math/" style="font-size: 10px;">Math</a> <a href="/tags/Performance/" style="font-size: 10px;">Performance</a> <a href="/tags/R/" style="font-size: 12.5px;">R</a> <a href="/tags/Reverse-Engineering/" style="font-size: 17.5px;">Reverse Engineering</a> <a href="/tags/Swift/" style="font-size: 17.5px;">Swift</a> <a href="/tags/XNU/" style="font-size: 10px;">XNU</a> <a href="/tags/iOS/" style="font-size: 20px;">iOS</a> <a href="/tags/shell/" style="font-size: 10px;">shell</a>
+      <a href="/tags/Android/" style="font-size: 10px;">Android</a> <a href="/tags/C/" style="font-size: 10px;">C</a> <a href="/tags/Growth/" style="font-size: 10px;">Growth</a> <a href="/tags/JavaScript/" style="font-size: 15px;">JavaScript</a> <a href="/tags/Math/" style="font-size: 10px;">Math</a> <a href="/tags/Performance/" style="font-size: 10px;">Performance</a> <a href="/tags/R/" style="font-size: 12.5px;">R</a> <a href="/tags/Reverse-Engineering/" style="font-size: 17.5px;">Reverse Engineering</a> <a href="/tags/Swift/" style="font-size: 17.5px;">Swift</a> <a href="/tags/XNU/" style="font-size: 12.5px;">XNU</a> <a href="/tags/iOS/" style="font-size: 20px;">iOS</a> <a href="/tags/shell/" style="font-size: 10px;">shell</a>
     </div>
   </div>
 
@@ -6756,7 +7033,7 @@ s.setAttribute('data-timestamp', +new Date());
   <div class="widget-wrap">
     <h3 class="widget-title">Archives</h3>
     <div class="widget">
-      <ul class="archive-list"><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/11/">November 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/10/">October 2017</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/09/">September 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/08/">August 2017</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/07/">July 2017</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/06/">June 2017</a><span class="archive-list-count">3</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/04/">April 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/01/">January 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/10/">October 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/09/">September 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/07/">July 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/05/">May 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/04/">April 2016</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/03/">March 2016</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/02/">February 2016</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/12/">December 2015</a><span class="archive-list-count">6</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/11/">November 2015</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/10/">October 2015</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/09/">September 2015</a><span class="archive-list-count">4</span></li></ul>
+      <ul class="archive-list"><li class="archive-list-item"><a class="archive-list-link" href="/archives/2018/01/">January 2018</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/11/">November 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/10/">October 2017</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/09/">September 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/08/">August 2017</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/07/">July 2017</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/06/">June 2017</a><span class="archive-list-count">3</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/04/">April 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/01/">January 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/10/">October 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/09/">September 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/07/">July 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/05/">May 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/04/">April 2016</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/03/">March 2016</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/02/">February 2016</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/12/">December 2015</a><span class="archive-list-count">6</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/11/">November 2015</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/10/">October 2015</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/09/">September 2015</a><span class="archive-list-count">4</span></li></ul>
     </div>
   </div>
 
@@ -6766,6 +7043,10 @@ s.setAttribute('data-timestamp', +new Date());
     <h3 class="widget-title">Recents</h3>
     <div class="widget">
       <ul>
+        
+          <li>
+            <a href="/2018/01/14/iOS-virtual/">XNU之四：iOS虚拟内存限制（一）</a>
+          </li>
         
           <li>
             <a href="/2017/11/27/KVO-Swizzle/">一种基于KVO的页面加载，渲染耗时监控方法</a>
@@ -6783,10 +7064,6 @@ s.setAttribute('data-timestamp', +new Date());
             <a href="/2017/09/24/mainthreadchecker1/">基于桥的全量方法Hook方案 - 探究苹果主线程检查实现</a>
           </li>
         
-          <li>
-            <a href="/2017/09/11/KVO-CRASH/">KVO在不同的二进制中多个符号并存的Crash问题</a>
-          </li>
-        
       </ul>
     </div>
   </div>
@@ -6799,7 +7076,7 @@ s.setAttribute('data-timestamp', +new Date());
   
   <div class="outer">
     <div id="footer-info" class="inner">
-      &copy; 2017 John Doe<br>
+      &copy; 2018 John Doe<br>
       Powered by <a href="http://hexo.io/" target="_blank">Hexo</a>
     </div>
   </div>
