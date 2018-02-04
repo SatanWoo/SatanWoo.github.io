@@ -62,6 +62,252 @@
       <div class="outer">
         <section id="main">
   
+    <article id="post-iOS-iVar" class="article article-type-post" itemscope itemprop="blogPost">
+  <div class="article-meta">
+    <a href="/2018/02/04/iOS-iVar/" class="article-date">
+  <time datetime="2018-02-04T15:14:33.000Z" itemprop="datePublished">2018-02-04</time>
+</a>
+    
+  </div>
+  <div class="article-inner">
+    
+    
+      <header class="article-header">
+        
+  
+    <h1 itemprop="name">
+      <a class="article-title" href="/2018/02/04/iOS-iVar/">谈谈ivar的直接访问</a>
+    </h1>
+  
+
+      </header>
+    
+    <div class="article-entry" itemprop="articleBody">
+      
+        <blockquote>
+<p>大水文一篇<br>大水文一篇<br>大水文一篇  </p>
+</blockquote>
+<h3 id="起因">起因</h3><p>最近对<code>Block</code>的一些实现细节又进行了一次复习，主要涉及的是捕捉变量的部分。有一个点我之前一直没太关注：对<code>ivar</code>变量的直接访问为啥会产生循环引用。</p>
+<p>在我原先的理解中，之所以会产生循环引用，绝大多数场景都是由于<code>block</code>里面涉及了<strong>self</strong>关键字，比如<code>[self doSomething]</code>（同理，对于<code>property</code>的访问本质也是一堆方法），但是为啥对<code>ivar</code>的访问也会导致循环引用呢？</p>
+<p>不是直接采用 <code>*(void *)address = xxx</code>这样的直接对编译好的静态地址赋值就好了？</p>
+<blockquote>
+<p>当时傻逼了，写完本文后想想就算编译成地址了，基地址从哪算还是要依赖<code>self</code>变量。</p>
+</blockquote>
+<h3 id="谈谈ivar的访问是啥形式">谈谈ivar的访问是啥形式</h3><p>还是回到runtime来看看吧，万变不离其宗，从<code>objc_class</code>结构体看起：</p>
+<pre><code>struct objc<span class="number">_</span><span class="keyword">class</span> : objc<span class="number">_</span><span class="keyword">object</span> {
+    <span class="comment">// Class ISA; // 8byte</span>
+    Class superclass; <span class="comment">// 8byte</span>
+    cache<span class="number">_</span>t cache;             <span class="comment">// formerly cache pointer and vtable // 4 + 4 + 8</span>
+    <span class="keyword">class</span><span class="number">_</span>data<span class="number">_</span>bits<span class="number">_</span>t bits;    <span class="comment">// class_rw_t * plus custom rr/alloc flags</span>
+
+    <span class="keyword">class</span><span class="number">_</span>rw<span class="number">_</span>t *data() { 
+        <span class="keyword">return</span> bits.data();
+    }
+</code></pre><p>主要的运行时数据都是<code>class_rw_t</code>表示，继续瞅瞅：</p>
+<pre><code><span class="keyword">struct</span> <span class="keyword">class_rw_t</span> {
+    <span class="comment">// Be warned that Symbolication knows the layout of this structure.</span>
+    <span class="keyword">uint32_t</span> flags;
+    <span class="keyword">uint32_t</span> version;
+
+    <span class="keyword">const</span> <span class="keyword">class_ro_t</span> *ro;
+</code></pre><p>其中<code>class_ro_t</code>基本上是从二进制产物中读取的“副本”数据，我们看看：</p>
+<pre><code><span class="keyword">struct</span> <span class="keyword">class_ro_t</span> {
+    <span class="keyword">uint32_t</span> flags;
+    <span class="keyword">uint32_t</span> instanceStart;
+    <span class="keyword">uint32_t</span> instanceSize;
+<span class="preprocessor">#<span class="keyword">ifdef</span> __LP64__</span>
+    <span class="keyword">uint32_t</span> reserved;
+<span class="preprocessor">#<span class="keyword">endif</span></span>
+
+    <span class="keyword">const</span> <span class="keyword">uint8_t</span> * ivarLayout;
+
+    <span class="keyword">const</span> <span class="keyword">char</span> * name;
+    <span class="keyword">method_list_t</span> * baseMethodList;
+    <span class="keyword">protocol_list_t</span> * baseProtocols;
+    <span class="keyword">const</span> <span class="keyword">ivar_list_t</span> * ivars;
+</code></pre><p>看起来<code>ivar_list_t</code>就是存放<code>ivar</code>的列表，他的实现是一个模版类，看看具体结构表示：</p>
+<pre><code><span class="title">struct</span> entsize_list_tt {
+    <span class="title">uint32_t</span> entsizeAndFlags;
+    <span class="title">uint32_t</span> count;
+    <span class="title">Element</span> first;
+</code></pre><p>具体对应<code>ivar</code>，替换掉模版就是：</p>
+<pre><code><span class="keyword">struct</span> <span class="keyword">ivar_list_t</span> {
+    <span class="keyword">uint32_t</span> entsizeAndFlags;
+    <span class="keyword">uint32_t</span> count;
+    <span class="keyword">ivar_t</span> first;
+</code></pre><p>其中，<code>ivar_t</code>表征的就是我们每个<code>ivar</code>，</p>
+<pre><code><span class="keyword">int32_t</span> *offset;
+<span class="keyword">const</span> <span class="keyword">char</span> *name;
+<span class="keyword">const</span> <span class="keyword">char</span> *type;
+</code></pre><p>嗯，从这里开始<code>offset</code>是用一个<code>int32_t *</code>的指针来表示，就开始有意思了。<strong>这里我们先暂时忽略</strong></p>
+<p>看起来，如果按照这种方式访问<code>ivar</code>，整个流程要经过好多次指针转移：</p>
+<pre><code>class -&gt; class<span class="class">.rw_data</span> -&gt; class<span class="class">.rw_data</span><span class="class">.ro_data</span> -&gt; class<span class="class">.rw_data</span><span class="class">.ro_data</span><span class="class">.ivars</span> -&gt; 
+-&gt; class<span class="class">.rw_data</span><span class="class">.ro_data</span><span class="class">.ivars</span><span class="class">.first</span>[n]
+</code></pre><p>如果是这样，大量使用<code>ivar</code>肯定很耗时。那么，对于<code>ivar</code>的访问究竟是怎么玩的呢？</p>
+<h3 id="全局变量">全局变量</h3><p>我们用如下这个非常简单的例子来瞅瞅：</p>
+<pre><code><span class="keyword">typedef</span> <span class="keyword">void</span>(^MyBlock)(<span class="keyword">void</span>);
+
+<span class="class"><span class="keyword">@interface</span> <span class="title">MyObject</span> : <span class="title">NSObject</span></span>
+<span class="keyword">@property</span> (<span class="keyword">nonatomic</span>) <span class="built_in">NSUInteger</span> haha;
+<span class="keyword">@property</span> (<span class="keyword">nonatomic</span>, <span class="keyword">copy</span>) MyBlock block;
+
+- (<span class="keyword">void</span>)inits;
+
+<span class="keyword">@end</span>
+
+<span class="class"><span class="keyword">@implementation</span> <span class="title">MyObject</span></span>
+- (<span class="keyword">void</span>)inits
+{
+    <span class="keyword">self</span><span class="variable">.block</span> = ^{
+        _haha = <span class="number">5</span>;
+    };
+}
+<span class="keyword">@end</span>
+
+<span class="keyword">int</span> main(<span class="keyword">int</span> argc, <span class="keyword">char</span> * argv[]) {
+    MyObject *object = [MyObject new];
+    [object inits];
+}
+</code></pre><p>重写一把，基本转化成如下的形式：</p>
+<pre><code><span class="keyword">typedef</span> <span class="keyword">void</span>(*MyBlock)(<span class="keyword">void</span>);
+
+
+<span class="preprocessor">#ifndef _REWRITER_typedef_MyObject</span>
+<span class="preprocessor">#define _REWRITER_typedef_MyObject</span>
+<span class="keyword">typedef</span> <span class="keyword">struct</span> objc_object MyObject;
+<span class="keyword">typedef</span> <span class="keyword">struct</span> {} _objc_exc_MyObject;
+<span class="preprocessor">#endif</span>
+
+<span class="comment">// 注意点1!!!!!!!!!!!!!!!!!!!!</span>
+<span class="keyword">extern</span> <span class="string">"C"</span> <span class="keyword">unsigned</span> <span class="keyword">long</span> OBJC_IVAR_$_MyObject$_haha;
+<span class="keyword">extern</span> <span class="string">"C"</span> <span class="keyword">unsigned</span> <span class="keyword">long</span> OBJC_IVAR_$_MyObject$_block;
+<span class="keyword">struct</span> MyObject_I<span class="built_in">MPL</span> {
+    <span class="keyword">struct</span> <span class="built_in">NSObject_IMPL</span> <span class="built_in">NSObject_IVARS</span>;
+    <span class="built_in">NSUInteger</span> _haha;
+    MyBlock _block;
+};
+
+<span class="comment">// @property (nonatomic) NSUInteger haha;</span>
+<span class="comment">// @property (nonatomic, copy) MyBlock block;</span>
+
+<span class="comment">// - (void)inits;</span>
+
+<span class="comment">/* @end */</span>
+
+
+<span class="comment">// @implementation MyObject</span>
+
+<span class="keyword">struct</span> __MyObject__inits_block_impl_0 {
+  <span class="keyword">struct</span> __block_impl impl;
+  <span class="keyword">struct</span> __MyObject__inits_block_desc_0* Desc;
+  MyObject *<span class="keyword">self</span>;
+
+  <span class="comment">// 注意点2！！！！！！！！！！！！！！！</span>
+  __MyObject__inits_block_impl_0(<span class="keyword">void</span> *fp, <span class="keyword">struct</span> __MyObject__inits_block_desc_0 *desc, MyObject *_<span class="keyword">self</span>, <span class="keyword">int</span> flags=<span class="number">0</span>) : <span class="keyword">self</span>(_<span class="keyword">self</span>) {
+    impl<span class="variable">.isa</span> = &amp;_<span class="built_in">NSConcreteStackBlock</span>;
+    impl<span class="variable">.Flags</span> = flags;
+    impl<span class="variable">.FuncPtr</span> = fp;
+    Desc = desc;
+  }
+};
+
+／／ 注意点<span class="number">3</span>！！！！！！！！！！！！
+<span class="keyword">static</span> <span class="keyword">void</span> __MyObject__inits_block_func_0(<span class="keyword">struct</span> __MyObject__inits_block_impl_0 *__cself) {
+  MyObject *<span class="keyword">self</span> = __cself-&gt;<span class="keyword">self</span>; <span class="comment">// bound by copy</span>
+
+        (*(<span class="built_in">NSUInteger</span> *)((<span class="keyword">char</span> *)<span class="keyword">self</span> + OBJC_IVAR_$_MyObject$_haha)) = <span class="number">5</span>;
+    }
+<span class="keyword">static</span> <span class="keyword">void</span> __MyObject__inits_block_copy_0(<span class="keyword">struct</span> __MyObject__inits_block_impl_0*dst, <span class="keyword">struct</span> __MyObject__inits_block_impl_0*src) {_Block_object_assign((<span class="keyword">void</span>*)&amp;dst-&gt;<span class="keyword">self</span>, (<span class="keyword">void</span>*)src-&gt;<span class="keyword">self</span>, <span class="number">3</span><span class="comment">/*BLOCK_FIELD_IS_OBJECT*/</span>);}
+
+<span class="keyword">static</span> <span class="keyword">void</span> __MyObject__inits_block_dispose_0(<span class="keyword">struct</span> __MyObject__inits_block_impl_0*src) {_Block_object_dispose((<span class="keyword">void</span>*)src-&gt;<span class="keyword">self</span>, <span class="number">3</span><span class="comment">/*BLOCK_FIELD_IS_OBJECT*/</span>);}
+
+<span class="keyword">static</span> <span class="keyword">struct</span> __MyObject__inits_block_desc_0 {
+  size_t reserved;
+  size_t Block_size;
+  <span class="keyword">void</span> (*<span class="keyword">copy</span>)(<span class="keyword">struct</span> __MyObject__inits_block_impl_0*, <span class="keyword">struct</span> __MyObject__inits_block_impl_0*);
+  <span class="keyword">void</span> (*dispose)(<span class="keyword">struct</span> __MyObject__inits_block_impl_0*);
+} __MyObject__inits_block_desc_0_DATA = { <span class="number">0</span>, <span class="keyword">sizeof</span>(<span class="keyword">struct</span> __MyObject__inits_block_impl_0), __MyObject__inits_block_copy_0, __MyObject__inits_block_dispose_0};
+
+<span class="keyword">static</span> <span class="keyword">void</span> _I_MyObject_inits(MyObject * <span class="keyword">self</span>, SEL _cmd) {
+    ((<span class="keyword">void</span> (*)(<span class="keyword">id</span>, SEL, MyBlock))(<span class="keyword">void</span> *)objc_msgSend)((<span class="keyword">id</span>)<span class="keyword">self</span>, sel_registerName(<span class="string">"setBlock:"</span>), ((<span class="keyword">void</span> (*)())&amp;__MyObject__inits_block_impl_0((<span class="keyword">void</span> *)__MyObject__inits_block_func_0, &amp;__MyObject__inits_block_desc_0_DATA, <span class="keyword">self</span>, <span class="number">570425344</span>)));
+}
+
+<span class="keyword">static</span> <span class="built_in">NSUInteger</span> _I_MyObject_haha(MyObject * <span class="keyword">self</span>, SEL _cmd) { <span class="keyword">return</span> (*(<span class="built_in">NSUInteger</span> *)((<span class="keyword">char</span> *)<span class="keyword">self</span> + OBJC_IVAR_$_MyObject$_haha)); }
+<span class="keyword">static</span> <span class="keyword">void</span> _I_MyObject_setHaha_(MyObject * <span class="keyword">self</span>, SEL _cmd, <span class="built_in">NSUInteger</span> haha) { (*(<span class="built_in">NSUInteger</span> *)((<span class="keyword">char</span> *)<span class="keyword">self</span> + OBJC_IVAR_$_MyObject$_haha)) = haha; }
+
+<span class="keyword">static</span> <span class="keyword">void</span>(* _I_MyObject_block(MyObject * <span class="keyword">self</span>, SEL _cmd) )(){ <span class="keyword">return</span> (*(MyBlock *)((<span class="keyword">char</span> *)<span class="keyword">self</span> + OBJC_IVAR_$_MyObject$_block)); }
+<span class="keyword">extern</span> <span class="string">"C"</span> __declspec(dllimport) <span class="keyword">void</span> objc_setProperty (<span class="keyword">id</span>, SEL, <span class="keyword">long</span>, <span class="keyword">id</span>, <span class="keyword">bool</span>, <span class="keyword">bool</span>);
+
+<span class="keyword">static</span> <span class="keyword">void</span> _I_MyObject_setBlock_(MyObject * <span class="keyword">self</span>, SEL _cmd, MyBlock block) { objc_setProperty (<span class="keyword">self</span>, _cmd, __OFFSETOFIVAR__(<span class="keyword">struct</span> MyObject, _block), (<span class="keyword">id</span>)block, <span class="number">0</span>, <span class="number">1</span>); }
+<span class="comment">// @end</span>
+
+<span class="keyword">int</span> main(<span class="keyword">int</span> argc, <span class="keyword">char</span> * argv[]) {
+    MyObject *object = ((MyObject *(*)(<span class="keyword">id</span>, SEL))(<span class="keyword">void</span> *)objc_msgSend)((<span class="keyword">id</span>)objc_getClass(<span class="string">"MyObject"</span>), sel_registerName(<span class="string">"new"</span>));
+    ((<span class="keyword">void</span> (*)(<span class="keyword">id</span>, SEL))(<span class="keyword">void</span> *)objc_msgSend)((<span class="keyword">id</span>)object, sel_registerName(<span class="string">"inits"</span>));
+}
+</code></pre><p>一大堆东西，没啥特别的地方，我们只要关注几个地方：</p>
+<ul>
+<li><p>对于每个<code>ivar</code>，都有对应的全局变量</p>
+<pre><code><span class="keyword">extern</span> <span class="string">"C"</span> <span class="keyword">unsigned</span> <span class="keyword">long</span> OBJC_IVAR_$_MyObject$_haha;
+<span class="keyword">extern</span> <span class="string">"C"</span> <span class="keyword">unsigned</span> <span class="keyword">long</span> OBJC_IVAR_$_MyObject$_block;
+</code></pre></li>
+<li><p>block_invoke对应的实现是通过对象自身作为基地址，全局变量作为偏移去对<code>haha</code>这个<code>ivar</code>进行赋值。</p>
+<pre><code><span class="keyword">static</span> <span class="keyword">void</span> __MyObject__inits_block_func_0(<span class="keyword">struct</span> __MyObject__inits_block_impl_0 *__cself) {
+  MyObject *<span class="keyword">self</span> = __cself-&gt;<span class="keyword">self</span>; <span class="comment">// bound by copy</span>
+
+        (*(<span class="built_in">NSUInteger</span> *)((<span class="keyword">char</span> *)<span class="keyword">self</span> + OBJC_IVAR_$_MyObject$_haha)) = <span class="number">5</span>;
+    }
+</code></pre></li>
+<li><p>block的构造函数，确实捕捉了<code>self</code></p>
+<pre><code>__MyObject__inits_block_impl_0(void *fp, <span class="keyword">struct</span> __MyObject__inits_block_desc_0 *desc, MyObject *_<span class="keyword">self</span>, <span class="keyword">int</span> flags=<span class="number">0</span>) : <span class="keyword">self</span>(_<span class="keyword">self</span>) {
+    <span class="keyword">impl</span>.isa = &amp;_NSConcreteStackBlock;
+    <span class="keyword">impl</span>.Flags = flags;
+    <span class="keyword">impl</span>.FuncPtr = fp;
+    Desc = desc;
+  }
+</code></pre></li>
+</ul>
+<p>由于全局变量的地址是在编译期就确定了，所以这里也就不难解释<code>ivar_t</code>里面为什么要保存<code>int32_t *</code>，保存的就是对应的全局变量地址。而全局变量的值则是对应的动态偏移。</p>
+<h3 id="结语">结语</h3><p>水完了，其实虽然runtime的结构体设计的比较绕，但是最后对于变量的访问和很多静态语言设计一样，也不会损失很多性能。</p>
+<p><b style="color:red">从另外一个角度看，如果声明了巨多的<code>ivar</code>，看来也会对包大小产生不可忽视的影响。</b></p>
+
+      
+    </div>
+    <footer class="article-footer">
+      <a data-url="http://satanwoo.github.io/2018/02/04/iOS-iVar/" data-id="cjd8xk1c3000p0fi1sjp1h9om" class="article-share-link">Share</a>
+      
+        <a href="http://satanwoo.github.io/2018/02/04/iOS-iVar/#disqus_thread" class="article-comment-link">Comments</a>
+      
+      
+  <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
+
+    </footer>
+  </div>
+  
+</article>
+
+<div id="disqus_thread"></div>
+<script>
+
+/**
+*  RECOMMENDED CONFIGURATION VARIABLES: EDIT AND UNCOMMENT THE SECTION BELOW TO INSERT DYNAMIC VALUES FROM YOUR PLATFORM OR CMS.
+*  LEARN WHY DEFINING THESE VARIABLES IS IMPORTANT: https://disqus.com/admin/universalcode/#configuration-variables*/
+/*
+var disqus_config = function () {
+this.page.url = PAGE_URL;  // Replace PAGE_URL with your page's canonical URL variable
+this.page.identifier = PAGE_IDENTIFIER; // Replace PAGE_IDENTIFIER with your page's unique identifier variable
+};
+*/
+(function() { // DON'T EDIT BELOW THIS LINE
+var d = document, s = d.createElement('script');
+s.src = 'https://satanwoo-2.disqus.com/embed.js';
+s.setAttribute('data-timestamp', +new Date());
+(d.head || d.body).appendChild(s);
+})();
+</script>
+<noscript>Please enable JavaScript to view the <a href="https://disqus.com/?ref_noscript">comments powered by Disqus.</a></noscript>
+                                
+  
     <article id="post-iOS-virtual" class="article article-type-post" itemscope itemprop="blogPost">
   <div class="article-meta">
     <a href="/2018/01/14/iOS-virtual/" class="article-date">
@@ -653,7 +899,7 @@ StartAgain: ;
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2018/01/14/iOS-virtual/" data-id="cjceu91tj000lm6i1zir7zvh4" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2018/01/14/iOS-virtual/" data-id="cjd8xk1bw000l0fi19lrdbuy1" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2018/01/14/iOS-virtual/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -864,7 +1110,7 @@ remover.keyPath = identifier.copy<span class="comment">;</span>
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2017/11/27/KVO-Swizzle/" data-id="cjceu91wy002em6i12hrzvc2b" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2017/11/27/KVO-Swizzle/" data-id="cjd8xk1e9002g0fi1rhcmzoqr" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2017/11/27/KVO-Swizzle/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -1026,7 +1272,7 @@ frame <span class="preprocessor">#<span class="number">14</span>: <span class="n
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2017/11/02/load-twice/" data-id="cjceu91td000hm6i106szsqvu" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2017/11/02/load-twice/" data-id="cjd8xk1br000h0fi1kgxvfcsy" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2017/11/02/load-twice/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -1427,7 +1673,7 @@ NSDate* bootTime = [NSDate dateWithTimeIntervalSince1970:timestamp];
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2017/10/18/abort/" data-id="cjceu91ud0014m6i1lv3q9no0" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2017/10/18/abort/" data-id="cjd8xk1cn00160fi1v1wlequy" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2017/10/18/abort/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -1813,7 +2059,7 @@ WKContentExtensionStore
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2017/09/24/mainthreadchecker1/" data-id="cjceu91t7000dm6i1myjhvuox" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2017/09/24/mainthreadchecker1/" data-id="cjd8xk1bo000d0fi1xgy8cv34" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2017/09/24/mainthreadchecker1/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -2140,7 +2386,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2017/09/11/KVO-CRASH/" data-id="cjceu91x2002gm6i1n2ng3p94" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2017/09/11/KVO-CRASH/" data-id="cjd8xk1eb002i0fi13w0lxfn7" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2017/09/11/KVO-CRASH/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -2436,7 +2682,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2017/08/06/UITableViewController/" data-id="cjceu91uj0019m6i16ngtiinc" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2017/08/06/UITableViewController/" data-id="cjd8xk1cs001b0fi19ht24g50" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2017/08/06/UITableViewController/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -2727,7 +2973,7 @@ BOOT_RUN_EXIT(appender_close);
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2017/07/30/xlog/" data-id="cjceu91sb0003m6i1dnp8mcpr" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2017/07/30/xlog/" data-id="cjd8xk1b600030fi1ktb267oq" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2017/07/30/xlog/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -3030,7 +3276,7 @@ ldp    x9, x17, [x12]        <span class="comment">// {x9, x17} = *bucket</span>
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2017/06/29/Macho-2/" data-id="cjceu91w90020m6i1nz4ls5t1" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2017/06/29/Macho-2/" data-id="cjd8xk1dp00220fi1escgwr05" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2017/06/29/Macho-2/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -3319,7 +3565,7 @@ _magic = [cursor readBigInt32];
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2017/06/13/Macho-1/" data-id="cjceu91wc0022m6i10dra8y0r" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2017/06/13/Macho-1/" data-id="cjd8xk1ds00240fi133sg38nf" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2017/06/13/Macho-1/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -3581,7 +3827,7 @@ _attribute__((section (<span class="string">"__DATA, MinyiSpecific"</span>))) <s
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2017/06/01/FBTweak/" data-id="cjceu91xh002rm6i1mix2iji1" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2017/06/01/FBTweak/" data-id="cjd8xk1ek002t0fi1162f7zxq" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2017/06/01/FBTweak/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -3721,7 +3967,7 @@ foo(&amp;s, <span class="number">1</span>, <span class="number">2</span>);
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2017/04/23/ARM64IndirectReturn/" data-id="cjceu91yp0038m6i1fzec0du1" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2017/04/23/ARM64IndirectReturn/" data-id="cjd8xk1f9003a0fi1tzkway8o" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2017/04/23/ARM64IndirectReturn/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -3892,7 +4138,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2017/04/18/CalculateTwoArrayDiff/" data-id="cjceu91ya0034m6i1k16o4xcz" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2017/04/18/CalculateTwoArrayDiff/" data-id="cjd8xk1f600360fi1z55izad2" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2017/04/18/CalculateTwoArrayDiff/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -4082,7 +4328,7 @@ dispatch_group_create(<span class="keyword">void</span>)
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2017/01/07/DispatchGroupCrash/" data-id="cjceu91xq002vm6i1oqo0301j" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2017/01/07/DispatchGroupCrash/" data-id="cjd8xk1ep002x0fi1rktqgfxo" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2017/01/07/DispatchGroupCrash/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -4330,7 +4576,7 @@ func <span class="function"><span class="title">resultFromBatchObjects</span><sp
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2017/01/07/JSONRPCKit/" data-id="cjceu91x6002jm6i1ruvw5a3e" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2017/01/07/JSONRPCKit/" data-id="cjd8xk1ed002l0fi185cnc5ul" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2017/01/07/JSONRPCKit/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -4614,7 +4860,7 @@ dispatch_sync(dq, ^{
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/10/23/multithread-dangling-pointer/" data-id="cjceu91t4000bm6i15f8c4zop" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/10/23/multithread-dangling-pointer/" data-id="cjd8xk1bm000b0fi1lytyzby8" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/10/23/multithread-dangling-pointer/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -4770,7 +5016,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/09/17/uiwindow-iOS/" data-id="cjceu91sy0007m6i176mapo73" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/09/17/uiwindow-iOS/" data-id="cjd8xk1bh00070fi1lwsespr1" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/09/17/uiwindow-iOS/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -4930,7 +5176,7 @@ OSSpinUnlock(&amp;_lock)<span class="comment">;</span>
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/07/10/immutable-thread/" data-id="cjceu91tg000jm6i18rb1nikc" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/07/10/immutable-thread/" data-id="cjd8xk1bt000j0fi1xwncp5z4" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/07/10/immutable-thread/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -5054,7 +5300,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/05/02/Spotify/" data-id="cjceu91v7001km6i1xepg7bvs" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/05/02/Spotify/" data-id="cjd8xk1d6001m0fi1br7gl2te" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/05/02/Spotify/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -5182,7 +5428,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/04/26/blank-space-in-html/" data-id="cjceu91ua0012m6i15nwilkbm" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/04/26/blank-space-in-html/" data-id="cjd8xk1cl00140fi1u7ppcluy" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/04/26/blank-space-in-html/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -5440,7 +5686,7 @@ Elapsed application CPU <span class="keyword">time</span> (seconds): <span class
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/04/11/dispatch-once/" data-id="cjceu91tt000sm6i108mf3uwu" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/04/11/dispatch-once/" data-id="cjd8xk1cb000u0fi18dby0foy" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/04/11/dispatch-once/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -5657,7 +5903,7 @@ a4.<span class="function"><span class="title">staticInfo</span><span class="para
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/03/22/dispatch-in-swift/" data-id="cjceu91tw000um6i1lx11yklu" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/03/22/dispatch-in-swift/" data-id="cjd8xk1cd000w0fi1xqihex53" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/03/22/dispatch-in-swift/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -5771,7 +6017,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/03/14/RxSwift/" data-id="cjceu91vh001pm6i13o19vqj9" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/03/14/RxSwift/" data-id="cjd8xk1dc001r0fi1mcj1oruz" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/03/14/RxSwift/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -5881,7 +6127,7 @@ val = edx(<span class="literal">true</span>)
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/03/14/SizeUp/" data-id="cjceu91ve001nm6i1p4idmg6f" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/03/14/SizeUp/" data-id="cjd8xk1d8001p0fi1vv7w9nfc" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/03/14/SizeUp/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -6043,7 +6289,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/03/14/DXXcodeConsoleUnicodePlugin/" data-id="cjceu91y10030m6i1axfmjbl7" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/03/14/DXXcodeConsoleUnicodePlugin/" data-id="cjd8xk1f300320fi1r8p2eaho" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/03/14/DXXcodeConsoleUnicodePlugin/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -6142,7 +6388,7 @@ fi
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/02/27/check-manifest/" data-id="cjceu91u2000zm6i1gj0jsg9y" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/02/27/check-manifest/" data-id="cjd8xk1cj00110fi1dbprzq14" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/02/27/check-manifest/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -6274,7 +6520,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/02/27/pod-install-plugin/" data-id="cjceu91t20009m6i13hv8zhm0" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/02/27/pod-install-plugin/" data-id="cjd8xk1bk00090fi1940g5lli" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/02/27/pod-install-plugin/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -6552,7 +6798,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/02/27/FBKVOController/" data-id="cjceu91xl002tm6i1ra8bypuc" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/02/27/FBKVOController/" data-id="cjd8xk1en002v0fi10h97ys5f" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/02/27/FBKVOController/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -6688,287 +6934,9 @@ selectedTitleLabelsContentView<span class="class">.layer</span><span class="clas
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/02/05/DGRunKeeperSwitch/" data-id="cjceu91y70032m6i15wvccpqh" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/02/05/DGRunKeeperSwitch/" data-id="cjd8xk1f400340fi1fcy0regu" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/02/05/DGRunKeeperSwitch/#disqus_thread" class="article-comment-link">Comments</a>
-      
-      
-  <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
-
-    </footer>
-  </div>
-  
-</article>
-
-<div id="disqus_thread"></div>
-<script>
-
-/**
-*  RECOMMENDED CONFIGURATION VARIABLES: EDIT AND UNCOMMENT THE SECTION BELOW TO INSERT DYNAMIC VALUES FROM YOUR PLATFORM OR CMS.
-*  LEARN WHY DEFINING THESE VARIABLES IS IMPORTANT: https://disqus.com/admin/universalcode/#configuration-variables*/
-/*
-var disqus_config = function () {
-this.page.url = PAGE_URL;  // Replace PAGE_URL with your page's canonical URL variable
-this.page.identifier = PAGE_IDENTIFIER; // Replace PAGE_IDENTIFIER with your page's unique identifier variable
-};
-*/
-(function() { // DON'T EDIT BELOW THIS LINE
-var d = document, s = d.createElement('script');
-s.src = 'https://satanwoo-2.disqus.com/embed.js';
-s.setAttribute('data-timestamp', +new Date());
-(d.head || d.body).appendChild(s);
-})();
-</script>
-<noscript>Please enable JavaScript to view the <a href="https://disqus.com/?ref_noscript">comments powered by Disqus.</a></noscript>
-                                
-  
-    <article id="post-PureLayout" class="article article-type-post" itemscope itemprop="blogPost">
-  <div class="article-meta">
-    <a href="/2016/02/05/PureLayout/" class="article-date">
-  <time datetime="2016-02-05T14:33:20.000Z" itemprop="datePublished">2016-02-05</time>
-</a>
-    
-  </div>
-  <div class="article-inner">
-    
-    
-      <header class="article-header">
-        
-  
-    <h1 itemprop="name">
-      <a class="article-title" href="/2016/02/05/PureLayout/">PureLayout 源码解析</a>
-    </h1>
-  
-
-      </header>
-    
-    <div class="article-entry" itemprop="articleBody">
-      
-        <p>在开始这篇文章之前，想必大家都应该使用过Autolayout方式的界面布局，相信大家都有过类似于如下这样的API调用：    </p>
-<pre><code>[NSLayoutConstraint(item: self.viewA, attribute: .CenterY, relatedBy: .Equal, toItem: self.viewB, attribute: .CenterY, multiplier: <span class="number">1.0</span>, constant: <span class="number">0.0</span>)]
-</code></pre><p>抑或是Visual Format Language</p>
-<pre><code>NSLayoutConstraint.constraintsWithVisualFormat(<span class="string">"|-(leftPadding)-[imageView(imageViewWidth)]-(rigntPadding)-[labelA]-(4)-[labelB]-(&gt;=44)-|"</span>, <span class="string">options:</span> NSLayoutFormatOptions(<span class="string">rawValue:</span> <span class="number">0</span>), <span class="string">metrics:</span> methics, <span class="string">views:</span> views)
-</code></pre><p>这种冗长而又晦涩的代码，真是恶心人啊。因此在Github上涌现了一大堆简化布局的开源库，如SnapKit, Mansory以及今天我们要说的PureLayout。  </p>
-<p>在这之中，PureLayout是最轻量级的，它仅仅是对Autolayout现成的语法进行了一层封装，相较于Mansory引入的一些<strong>新概念</strong>，Purelayout更直接易懂。</p>
-<h3 id="源码解析">源码解析</h3><p>Purelayout的源码基本没什么难懂的地方，我们首先来看一下其项目结构：</p>
-<ul>
-<li>PurelayoutDefines.h</li>
-<li>ALView + PureLayout.h/.m</li>
-<li>NSArray + PureLayout.h/.m</li>
-<li>NSLayoutConstraint + Purelayout.h/.m</li>
-</ul>
-<h4 id="PurelayoutDefines">PurelayoutDefines</h4><p>首先从PurelayoutDefines上入手，这个文件主要是进行一些类似<strong>Domain Specific Language</strong>定义的转化，如：</p>
-<pre><code>typedef NS_ENUM(NSInteger, ALEdge) {
-    /** The <span class="built_in">left</span> edge of the view. */
-    ALEdgeLeft = NSLayoutAttributeLeft,
-    /** The <span class="built_in">right</span> edge of the view. */
-    ALEdgeRight = NSLayoutAttributeRight,
-    /** The top edge of the view. */
-    ALEdgeTop = NSLayoutAttributeTop,
-    /** The bottom edge of the view. */
-    ALEdgeBottom = NSLayoutAttributeBottom,
-    /** The leading edge of the view (<span class="built_in">left</span> edge <span class="keyword">for</span> <span class="built_in">left</span>-<span class="keyword">to</span>-<span class="built_in">right</span> languages like English, <span class="built_in">right</span> edge <span class="keyword">for</span> <span class="built_in">right</span>-<span class="keyword">to</span>-<span class="built_in">left</span> languages like Arabic). */
-    ALEdgeLeading = NSLayoutAttributeLeading,
-    /** The trailing edge of the view (<span class="built_in">right</span> edge <span class="keyword">for</span> <span class="built_in">left</span>-<span class="keyword">to</span>-<span class="built_in">right</span> languages like English, <span class="built_in">left</span> edge <span class="keyword">for</span> <span class="built_in">right</span>-<span class="keyword">to</span>-<span class="built_in">left</span> languages like Arabic). */
-    ALEdgeTrailing = NSLayoutAttributeTrailing
-};
-</code></pre><p>上述这段代码，就是将传统的UIKit中的NSLayoutAttribute的枚举类型全部转换成对应的PureLayout中的定义，如ALEdgeRight对应到NSLayoutAttributeRight。</p>
-<p><strong>LayoutMargins</strong><br>在这里补充一点题外知识，在iOS8中，苹果为Autolayout引入了LayoutMargins这一概念。这个概念乍一听可能都不了解，但是大家回忆下，比如在Storyboard中，我们拖拽一个UIView到ViewController的view并设置边距的时候，上边距和下边距对应的限制都是layout guide，如下图所示：</p>
-<p><img src="http://7lrzqz.com1.z0.glb.clouddn.com/%E5%B1%8F%E5%B9%95%E5%BF%AB%E7%85%A7%202016-01-26%20%E4%B8%8B%E5%8D%882.55.37.png" alt=""></p>
-<p><img src="http://7lrzqz.com1.z0.glb.clouddn.com/%E5%B1%8F%E5%B9%95%E5%BF%AB%E7%85%A7%202016-01-26%20%E4%B8%8B%E5%8D%882.56.23.png" alt=""><br><img src="http://7lrzqz.com1.z0.glb.clouddn.com/%E5%B1%8F%E5%B9%95%E5%BF%AB%E7%85%A7%202016-01-26%20%E4%B8%8B%E5%8D%882.56.13.png" alt=""></p>
-<p><strong>简单来说，在iOS7上就已经存在了LayoutMargin了，当时的作用是用来限制view的真实内容不会被UINavigationBar（上部）以及UIToolbar（下部）所遮盖</strong>。而从iOS8中开始，苹果将这一技术引入到了任意一个UIView中。</p>
-<h4 id="ALView_+_Purelayout">ALView + Purelayout</h4><p><strong>ALView实际上是UIView或者NSView的别名，通过添加ALView的分类，可以通过Define在编译期进行替换，避免为NSView和UIView各创建一份重复的代码</strong>。这个类中的API过多，因此我们以轴对齐为典型的例子来分解下源码：</p>
-<ol>
-<li>轴对齐<br>在PureLayout中，包括<code>Vertical</code>, <code>Horizontal</code>, <code>Baseline</code>等几种轴对齐方式，其中Baseline指的是View中潜在包含文字的Baseline。</li>
-</ol>
-<p>好，我们来看看相关的API</p>
-<pre><code><span class="comment">/** Aligns an axis of the view to the same axis of another view. */</span>
-<span class="tag">-</span> (<span class="tag">NSLayoutConstraint</span> *)<span class="rule"><span class="attribute">autoAlignAxis</span>:<span class="value">(ALAxis)axis toSameAxisOfView:(ALView *)otherView</span></span>;
-</code></pre><p>从该API的名称，我们可以直观的感觉出其作用是用于将两个View按照同一个轴对齐。这个API是一个<strong>Convenience Init</strong>，其层层传递</p>
-<pre><code>- (NSLayoutConstraint *)<span class="string">autoAlignAxis:</span>(ALAxis)axis <span class="string">toSameAxisOfView:</span>(ALView *)otherView
-{
-    <span class="keyword">return</span> [self <span class="string">autoAlignAxis:</span>axis <span class="string">toSameAxisOfView:</span>otherView <span class="string">withOffset:</span><span class="number">0.0</span>];
-}
-
-- (NSLayoutConstraint *)<span class="string">autoAlignAxis:</span>(ALAxis)axis <span class="string">toSameAxisOfView:</span>(ALView *)otherView <span class="string">withOffset:</span>(CGFloat)offset
-{
-    <span class="keyword">return</span> [self <span class="string">autoConstrainAttribute:</span>(ALAttribute)axis <span class="string">toAttribute:</span>(ALAttribute)axis <span class="string">ofView:</span>otherView <span class="string">withOffset:</span>offset];
-}
-</code></pre><p>最后调用了</p>
-<pre><code><span class="pp">- <span class="params">(<span class="variable">NSLayoutConstraint</span> *)</span>autoConstrainAttribute:<span class="params">(<span class="variable">ALAttribute</span>)</span>attribute toAttribute:<span class="params">(<span class="variable">ALAttribute</span>)</span>toAttribute ofView:<span class="params">(<span class="variable">ALView</span> *)</span>otherView withOffset:<span class="params">(<span class="variable">CGFloat</span>)</span>offset`</span>
-</code></pre><p>好，那就让我们来看看这个上述这个函数的实现，如下所示：</p>
-<pre><code><span class="comment">//1.</span>
-self.translatesAutoresizingMaskIntoConstraints = NO;
-
-<span class="comment">//2.</span>
-NSLayoutAttribute layoutAttribute = [NSLayoutConstraint <span class="string">al_layoutAttributeForAttribute:</span>attribute];
-NSLayoutAttribute toLayoutAttribute = [NSLayoutConstraint <span class="string">al_layoutAttributeForAttribute:</span>toAttribute];
-
-<span class="comment">//3.</span>
-NSLayoutConstraint *constraint = [NSLayoutConstraint <span class="string">constraintWithItem:</span>self <span class="string">attribute:</span>layoutAttribute <span class="string">relatedBy:</span>relation <span class="string">toItem:</span>otherView <span class="string">attribute:</span>toLayoutAttribute <span class="string">multiplier:</span><span class="number">1.0</span> <span class="string">constant:</span>offset];
-
-<span class="comment">//4.</span>
-[constraint autoInstall];
-<span class="keyword">return</span> constraint;
-</code></pre><ul>
-<li>1.首先将translatesAutoresizingMaskIntoConstraints设置为false，对于要使用autolayout的UIView，必须设置为false，也就是不将传统frame布局中的Autoresizing Mask转换成约束。</li>
-<li>2.根据传入的<strong>PureLayout属性</strong>转换成对应的NSLayoutAttribute</li>
-<li>3.调用冗长恶心的Autolayout API构建约束</li>
-<li>4.添加约束</li>
-</ul>
-<p>在这里，我们需要注意一下这个<code>[constraint autoInstall]</code>，让我们来探一探实现：</p>
-<pre><code>- (<span class="keyword">void</span>)autoInstall
-{
-<span class="comment">// 1. iOS8+</span>
-<span class="preprocessor">#if __PureLayout_MinBaseSDK_iOS_8_0 || __PureLayout_MinBaseSDK_OSX_10_10</span>
-    <span class="keyword">if</span> ([<span class="keyword">self</span> respondsToSelector:<span class="keyword">@selector</span>(setActive:)]) {
-        [<span class="built_in">NSLayoutConstraint</span> al_applyGlobalStateToConstraint:<span class="keyword">self</span>];
-        <span class="comment">// 1.1</span>
-        <span class="keyword">if</span> ([<span class="built_in">NSLayoutConstraint</span> al_preventAutomaticConstraintInstallation]) {         
-            [[<span class="built_in">NSLayoutConstraint</span> al_currentArrayOfCreatedConstraints] addObject:<span class="keyword">self</span>];
-        } <span class="keyword">else</span> {
-        <span class="comment">// 1.2 </span>
-            <span class="keyword">self</span><span class="variable">.active</span> = <span class="literal">YES</span>;
-        }
-        <span class="keyword">return</span>;
-    }
-<span class="preprocessor">#endif /* __PureLayout_MinBaseSDK_iOS_8_0 || __PureLayout_MinBaseSDK_OSX_10_10 */</span>
-
-<span class="comment">// 2. iOS 7</span>
-    <span class="built_in">NSAssert</span>(<span class="keyword">self</span><span class="variable">.firstItem</span> || <span class="keyword">self</span><span class="variable">.secondItem</span>, <span class="string">@"Can't install a constraint with nil firstItem and secondItem."</span>);
-    <span class="keyword">if</span> (<span class="keyword">self</span><span class="variable">.firstItem</span>) {
-        <span class="keyword">if</span> (<span class="keyword">self</span><span class="variable">.secondItem</span>) {
-            <span class="built_in">NSAssert</span>([<span class="keyword">self</span><span class="variable">.firstItem</span> isKindOfClass:[ALView class]] &amp;&amp; [<span class="keyword">self</span><span class="variable">.secondItem</span> isKindOfClass:[ALView class]], <span class="string">@"Can only automatically install a constraint if both items are views."</span>);
-            ALView *commonSuperview = [<span class="keyword">self</span><span class="variable">.firstItem</span> al_commonSuperviewWithView:<span class="keyword">self</span><span class="variable">.secondItem</span>];
-            [commonSuperview al_addConstraint:<span class="keyword">self</span>];
-        } <span class="keyword">else</span> {
-            <span class="built_in">NSAssert</span>([<span class="keyword">self</span><span class="variable">.firstItem</span> isKindOfClass:[ALView class]], <span class="string">@"Can only automatically install a constraint if the item is a view."</span>);
-            [<span class="keyword">self</span><span class="variable">.firstItem</span> al_addConstraint:<span class="keyword">self</span>];
-        }
-    } <span class="keyword">else</span> {
-        <span class="built_in">NSAssert</span>([<span class="keyword">self</span><span class="variable">.secondItem</span> isKindOfClass:[ALView class]], <span class="string">@"Can only automatically install a constraint if the item is a view."</span>);
-        [<span class="keyword">self</span><span class="variable">.secondItem</span> al_addConstraint:<span class="keyword">self</span>];
-    }
-}
-</code></pre><p>整个实现的部分被一分为二，上半部分专门针对iOS8+的，下半部分针对iOS7（<strong>事实上在整个PureLayout的设计中，大部分地方的处理方式都一分为二了</strong>）</p>
-<p>我们暂时也不管<code>al_applyGlobalStateToConstraint:self</code> 以及 <code>al_preventAutomaticConstraintInstallation</code>的作用，我们从1.2看起。</p>
-<ul>
-<li>在iOS8上，启用或者禁用一个AutoLayout的Constraint变得更加容易了，仅仅需要设置active即可</li>
-<li>在iOS7上，需要手动的addConstraint或者removeConstraint</li>
-<li>在处理iOS7的逻辑当中，需要判断当前这个Constraint是否是针对两个Item的，如果是，找到他们的公共父View，在父View在添加约束，比如添加View A和View B之间的间距；而如果是单一一个View，比如是设置高度或者宽度的，直接在当前View添加即可。</li>
-<li>通过调用<code>al_addConstraint</code>进行约束实际的添加。</li>
-</ul>
-<p>而<strong>al_addConstraint</strong>的实现则如下所示：</p>
-<pre><code><span class="attr_selector">[NSLayoutConstraint al_applyGlobalStateToConstraint:constraint]</span>;
-<span class="tag">if</span> ([NSLayoutConstraint al_preventAutomaticConstraintInstallation]) {
-    <span class="attr_selector">[[NSLayoutConstraint al_currentArrayOfCreatedConstraints]</span> <span class="tag">addObject</span><span class="pseudo">:constraint</span>];
-} <span class="tag">else</span> {
-    <span class="attr_selector">[self addConstraint:constraint]</span>;
-}
-</code></pre><p>这里又出现了<code>al_applyGlobalStateToConstraint:constraint</code>以及<code>al_preventAutomaticConstraintInstallation</code>了，这次我们可不能再躲着它了，赶紧瞧一瞧。</p>
-<p>首先是<code>al_applyGlobalStateToConstraint:constraint</code>，这个参数对应的是一个全局静态变量，用于判断：</p>
-<pre><code><span class="keyword">if</span> ([<span class="built_in">NSLayoutConstraint</span> al_isExecutingPriorityConstraintsBlock]) {
-    constraint<span class="variable">.priority</span> = [<span class="built_in">NSLayoutConstraint</span> al_currentGlobalConstraintPriority];
-}
-</code></pre><p>而这个<code>al_isExecutingPriorityConstraintsBlock</code>则是用于如下这个函数：</p>
-<pre><code>+ (void)autoSetPriority:(ALLayoutPriority)priority forConstraints:(ALConstraintsBlock)<span class="keyword">block
-</span>{
-    NSAssert(<span class="keyword">block, </span><span class="comment">@"The constraints block cannot be nil.");</span>
-    <span class="preprocessor">if</span> (<span class="keyword">block) </span>{
-        [[<span class="keyword">self </span>al_globalConstraintPriorities] <span class="keyword">addObject:@(priority)];
-</span>        <span class="keyword">block();
-</span>        [[<span class="keyword">self </span>al_globalConstraintPriorities] removeLastObject]<span class="comment">;</span>
-    }
-}
-</code></pre><p>这里可能大家有点晦涩，主要在于PureLayout对于给Constraint设置Priority定义了一个Block-based的方法，也就是<code>autoSetPriority</code>。在回调的Block中，可以对多个Constraint设置同一个大小的Priority。（<strong>其实我也不是很理解这个集体加Priority设计的目的</strong>）</p>
-<p><strong>不过需要有一点可以肯定的是，设置Constraint的Priority的时机一定要在<code>addConstraint</code>或者<code>active = true</code>之前</strong></p>
-<p>而对于<code>al_preventAutomaticConstraintInstallation</code>这个变量，作者在API中描述了如下一段话：</p>
-<blockquote>Creates all of the constraints in the block, then installs (activates) them all at once.<br> All constraints created from calls to the PureLayout API in the block are returned in a single array.<br> This may be more efficient than installing (activating) each constraint one-by-one.</blockquote>
-
-<p>简而言之，一次性添加所有约束（实际上调用了UIKit的API<code>activateConstraints</code>），比一个个添加要有效率。<strong>然而，Purelayout的这个特性对于iOS7来说，用不上，只能通过<code>addConstraint</code>一个个装，哈哈，么么哒</strong></p>
-<h4 id="NSArray_+_Purelayout">NSArray + Purelayout</h4><p>说完了ALView的layout，我们接下来说说另外的NSArray + Purelayout。顾名思义，该分类的主要目的就是给一个NSArray中的所有UIView添加约束。</p>
-<p>比如这个API：</p>
-<pre><code>- <span class="list">(<span class="keyword">__NSArray_of</span><span class="list">(<span class="keyword">NSLayoutConstraint</span> <span class="variable">*) *</span>)</span>autoDistributeViewsAlongAxis:<span class="list">(<span class="keyword">ALAxis</span>)</span>axis
-                                                           alignedTo:<span class="list">(<span class="keyword">ALAttribute</span>)</span>alignment
-                                                    withFixedSpacing:<span class="list">(<span class="keyword">CGFloat</span>)</span>spacing
-                                                        insetSpacing:<span class="list">(<span class="keyword">BOOL</span>)</span>shouldSpaceInsets
-                                                        matchedSizes:<span class="list">(<span class="keyword">BOOL</span>)</span>shouldMatchSizes</span>
-</code></pre><p>其实现如下：</p>
-<pre><code><span class="built_in">NSAssert</span>([<span class="keyword">self</span> al_containsMinimumNumberOfViews:<span class="number">1</span>], <span class="string">@"This array must contain at least 1 view to distribute."</span>);
-
-<span class="comment">//1. 第一部分</span>
-    ALDimension matchedDimension;
-    ALEdge firstEdge, lastEdge;
-    <span class="keyword">switch</span> (axis) {
-        <span class="keyword">case</span> ALAxisHorizontal:
-        <span class="keyword">case</span> ALAxisBaseline: <span class="comment">// same value as ALAxisLastBaseline</span>
-<span class="preprocessor">#if __PureLayout_MinBaseSDK_iOS_8_0</span>
-        <span class="keyword">case</span> ALAxisFirstBaseline:
-<span class="preprocessor">#endif /* __PureLayout_MinBaseSDK_iOS_8_0 */</span>
-            matchedDimension = ALDimensionWidth;
-            firstEdge = ALEdgeLeading;
-            lastEdge = ALEdgeTrailing;
-            <span class="keyword">break</span>;
-        <span class="keyword">case</span> ALAxisVertical:
-            matchedDimension = ALDimensionHeight;
-            firstEdge = ALEdgeTop;
-            lastEdge = ALEdgeBottom;
-            <span class="keyword">break</span>;
-        <span class="keyword">default</span>:
-            <span class="built_in">NSAssert</span>(<span class="literal">nil</span>, <span class="string">@"Not a valid ALAxis."</span>);
-            <span class="keyword">return</span> <span class="literal">nil</span>;
-    }
-    <span class="built_in">CGFloat</span> leadingSpacing = shouldSpaceInsets ? spacing : <span class="number">0.0</span>;
-    <span class="built_in">CGFloat</span> trailingSpacing = shouldSpaceInsets ? spacing : <span class="number">0.0</span>;
-
-<span class="comment">//2. 第二部分  </span>
-    __<span class="built_in">NSMutableArray_of</span>(<span class="built_in">NSLayoutConstraint</span> *) *constraints = [<span class="built_in">NSMutableArray</span> new];
-    ALView *previousView = <span class="literal">nil</span>;
-    <span class="keyword">for</span> (<span class="keyword">id</span> object <span class="keyword">in</span> <span class="keyword">self</span>) {
-        <span class="keyword">if</span> ([object isKindOfClass:[ALView class]]) {
-            ALView *view = (ALView *)object;
-            view<span class="variable">.translatesAutoresizingMaskIntoConstraints</span> = <span class="literal">NO</span>;
-            <span class="keyword">if</span> (previousView) {
-                <span class="comment">// Second, Third, ... View</span>
-                [constraints addObject:[view autoPinEdge:firstEdge toEdge:lastEdge ofView:previousView withOffset:spacing]];
-                <span class="keyword">if</span> (shouldMatchSizes) {
-                    [constraints addObject:[view autoMatchDimension:matchedDimension toDimension:matchedDimension ofView:previousView]];
-                }
-                [constraints addObject:[view al_alignAttribute:alignment toView:previousView forAxis:axis]];
-            }
-            <span class="keyword">else</span> {
-                <span class="comment">// First view</span>
-                [constraints addObject:[view autoPinEdgeToSuperviewEdge:firstEdge withInset:leadingSpacing]];
-            }
-            previousView = view;
-        }
-    }
-    <span class="keyword">if</span> (previousView) {
-        <span class="comment">// Last View</span>
-        [constraints addObject:[previousView autoPinEdgeToSuperviewEdge:lastEdge withInset:trailingSpacing]];
-    }
-    <span class="keyword">return</span> constraints;            
-</code></pre><ol>
-<li>这个API的目的是将一组UIView按照Spacing间距进行均分，同时每个UIView的宽度或者高度保持一致。</li>
-<li>第一部分是根据传入的轴，进行判断，是在竖直方向均分还是水平方向均分，同时影响的还有是宽度一致还是高度一致。</li>
-<li>第二部分是根据传入的轴（比如水平方向），将前一个View的右边距和后一个View的左边距添加间距，循环添加，直至最后一个View的右边距和父View的右边距添加完成约束。  </li>
-</ol>
-<p>其他方面，这个分类的作用基本和<code>ALView + PureLayout一致</code>，也就不再重复解释了。<br>至此，PureLayout的源码解析基本上差不多了，其余类似于边对齐的API，如：</p>
-<pre><code><span class="pp">- <span class="params">(<span class="variable">NSLayoutConstraint</span> *)</span>autoPinEdge:<span class="params">(<span class="variable">ALEdge</span>)</span>edge toEdge:<span class="params">(<span class="variable">ALEdge</span>)</span>toEdge ofView:<span class="params">(<span class="variable">ALView</span> *)</span>otherView;</span>
-</code></pre><p>又或者是约束尺寸的，如：</p>
-<pre><code>- <span class="list">(<span class="keyword">__NSArray_of</span><span class="list">(<span class="keyword">NSLayoutConstraint</span> <span class="variable">*) *</span>)</span>autoSetDimensionsToSize:<span class="list">(<span class="keyword">CGSize</span>)</span>size<span class="comment">;</span></span>
-</code></pre><p>都大同小异，在此就不一一赘述了。</p>
-<p>最后，<strong>强调一点</strong>：</p>
-<ol>
-<li>PureLayout必须在主线程使用，其本身实现非常依赖于静态的全局变量。</li>
-</ol>
-
-      
-    </div>
-    <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/02/05/PureLayout/" data-id="cjceu91vy001wm6i1v3pmk8sf" class="article-share-link">Share</a>
-      
-        <a href="http://satanwoo.github.io/2016/02/05/PureLayout/#disqus_thread" class="article-comment-link">Comments</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
@@ -7015,7 +6983,7 @@ s.setAttribute('data-timestamp', +new Date());
   <div class="widget-wrap">
     <h3 class="widget-title">Tags</h3>
     <div class="widget">
-      <ul class="tag-list"><li class="tag-list-item"><a class="tag-list-link" href="/tags/Android/">Android</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/C/">C</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Growth/">Growth</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/JavaScript/">JavaScript</a><span class="tag-list-count">3</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Math/">Math</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Performance/">Performance</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/R/">R</a><span class="tag-list-count">2</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Reverse-Engineering/">Reverse Engineering</a><span class="tag-list-count">6</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Swift/">Swift</a><span class="tag-list-count">6</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/XNU/">XNU</a><span class="tag-list-count">2</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/iOS/">iOS</a><span class="tag-list-count">33</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/shell/">shell</a><span class="tag-list-count">1</span></li></ul>
+      <ul class="tag-list"><li class="tag-list-item"><a class="tag-list-link" href="/tags/Android/">Android</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/C/">C</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Growth/">Growth</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/JavaScript/">JavaScript</a><span class="tag-list-count">3</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Math/">Math</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Performance/">Performance</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/R/">R</a><span class="tag-list-count">2</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Reverse-Engineering/">Reverse Engineering</a><span class="tag-list-count">6</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Swift/">Swift</a><span class="tag-list-count">6</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/XNU/">XNU</a><span class="tag-list-count">2</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/iOS/">iOS</a><span class="tag-list-count">34</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/shell/">shell</a><span class="tag-list-count">1</span></li></ul>
     </div>
   </div>
 
@@ -7033,7 +7001,7 @@ s.setAttribute('data-timestamp', +new Date());
   <div class="widget-wrap">
     <h3 class="widget-title">Archives</h3>
     <div class="widget">
-      <ul class="archive-list"><li class="archive-list-item"><a class="archive-list-link" href="/archives/2018/01/">January 2018</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/11/">November 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/10/">October 2017</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/09/">September 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/08/">August 2017</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/07/">July 2017</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/06/">June 2017</a><span class="archive-list-count">3</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/04/">April 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/01/">January 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/10/">October 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/09/">September 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/07/">July 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/05/">May 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/04/">April 2016</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/03/">March 2016</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/02/">February 2016</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/12/">December 2015</a><span class="archive-list-count">6</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/11/">November 2015</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/10/">October 2015</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/09/">September 2015</a><span class="archive-list-count">4</span></li></ul>
+      <ul class="archive-list"><li class="archive-list-item"><a class="archive-list-link" href="/archives/2018/02/">February 2018</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2018/01/">January 2018</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/11/">November 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/10/">October 2017</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/09/">September 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/08/">August 2017</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/07/">July 2017</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/06/">June 2017</a><span class="archive-list-count">3</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/04/">April 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/01/">January 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/10/">October 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/09/">September 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/07/">July 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/05/">May 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/04/">April 2016</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/03/">March 2016</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/02/">February 2016</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/12/">December 2015</a><span class="archive-list-count">6</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/11/">November 2015</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/10/">October 2015</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/09/">September 2015</a><span class="archive-list-count">4</span></li></ul>
     </div>
   </div>
 
@@ -7043,6 +7011,10 @@ s.setAttribute('data-timestamp', +new Date());
     <h3 class="widget-title">Recents</h3>
     <div class="widget">
       <ul>
+        
+          <li>
+            <a href="/2018/02/04/iOS-iVar/">谈谈ivar的直接访问</a>
+          </li>
         
           <li>
             <a href="/2018/01/14/iOS-virtual/">XNU之四：iOS虚拟内存限制（一）</a>
@@ -7058,10 +7030,6 @@ s.setAttribute('data-timestamp', +new Date());
         
           <li>
             <a href="/2017/10/18/abort/">iOS内存abort(Jetsam) 原理探究</a>
-          </li>
-        
-          <li>
-            <a href="/2017/09/24/mainthreadchecker1/">基于桥的全量方法Hook方案 - 探究苹果主线程检查实现</a>
           </li>
         
       </ul>

@@ -4,7 +4,7 @@
   
   <link href="/atom.xml" rel="self"/>
   <link href="http://satanwoo.github.io/"/>
-  <updated>2018-01-14T13:51:47.000Z</updated>
+  <updated>2018-02-04T15:15:33.000Z</updated>
   <id>http://satanwoo.github.io/</id>
   
   <author>
@@ -13,6 +13,210 @@
   </author>
   
   <generator uri="http://hexo.io/">Hexo</generator>
+  
+  <entry>
+    <title><![CDATA[谈谈ivar的直接访问]]></title>
+    <link href="http://satanwoo.github.io/2018/02/04/iOS-iVar/"/>
+    <id>http://satanwoo.github.io/2018/02/04/iOS-iVar/</id>
+    <published>2018-02-04T15:14:33.000Z</published>
+    <updated>2018-02-04T15:15:33.000Z</updated>
+    <content type="html"><![CDATA[<blockquote>
+<p>大水文一篇<br>大水文一篇<br>大水文一篇  </p>
+</blockquote>
+<h3 id="起因">起因</h3><p>最近对<code>Block</code>的一些实现细节又进行了一次复习，主要涉及的是捕捉变量的部分。有一个点我之前一直没太关注：对<code>ivar</code>变量的直接访问为啥会产生循环引用。</p>
+<p>在我原先的理解中，之所以会产生循环引用，绝大多数场景都是由于<code>block</code>里面涉及了<strong>self</strong>关键字，比如<code>[self doSomething]</code>（同理，对于<code>property</code>的访问本质也是一堆方法），但是为啥对<code>ivar</code>的访问也会导致循环引用呢？</p>
+<p>不是直接采用 <code>*(void *)address = xxx</code>这样的直接对编译好的静态地址赋值就好了？</p>
+<blockquote>
+<p>当时傻逼了，写完本文后想想就算编译成地址了，基地址从哪算还是要依赖<code>self</code>变量。</p>
+</blockquote>
+<h3 id="谈谈ivar的访问是啥形式">谈谈ivar的访问是啥形式</h3><p>还是回到runtime来看看吧，万变不离其宗，从<code>objc_class</code>结构体看起：</p>
+<pre><code>struct objc<span class="number">_</span><span class="keyword">class</span> : objc<span class="number">_</span><span class="keyword">object</span> {
+    <span class="comment">// Class ISA; // 8byte</span>
+    Class superclass; <span class="comment">// 8byte</span>
+    cache<span class="number">_</span>t cache;             <span class="comment">// formerly cache pointer and vtable // 4 + 4 + 8</span>
+    <span class="keyword">class</span><span class="number">_</span>data<span class="number">_</span>bits<span class="number">_</span>t bits;    <span class="comment">// class_rw_t * plus custom rr/alloc flags</span>
+
+    <span class="keyword">class</span><span class="number">_</span>rw<span class="number">_</span>t *data() { 
+        <span class="keyword">return</span> bits.data();
+    }
+</code></pre><p>主要的运行时数据都是<code>class_rw_t</code>表示，继续瞅瞅：</p>
+<pre><code><span class="keyword">struct</span> <span class="keyword">class_rw_t</span> {
+    <span class="comment">// Be warned that Symbolication knows the layout of this structure.</span>
+    <span class="keyword">uint32_t</span> flags;
+    <span class="keyword">uint32_t</span> version;
+
+    <span class="keyword">const</span> <span class="keyword">class_ro_t</span> *ro;
+</code></pre><p>其中<code>class_ro_t</code>基本上是从二进制产物中读取的“副本”数据，我们看看：</p>
+<pre><code><span class="keyword">struct</span> <span class="keyword">class_ro_t</span> {
+    <span class="keyword">uint32_t</span> flags;
+    <span class="keyword">uint32_t</span> instanceStart;
+    <span class="keyword">uint32_t</span> instanceSize;
+<span class="preprocessor">#<span class="keyword">ifdef</span> __LP64__</span>
+    <span class="keyword">uint32_t</span> reserved;
+<span class="preprocessor">#<span class="keyword">endif</span></span>
+
+    <span class="keyword">const</span> <span class="keyword">uint8_t</span> * ivarLayout;
+
+    <span class="keyword">const</span> <span class="keyword">char</span> * name;
+    <span class="keyword">method_list_t</span> * baseMethodList;
+    <span class="keyword">protocol_list_t</span> * baseProtocols;
+    <span class="keyword">const</span> <span class="keyword">ivar_list_t</span> * ivars;
+</code></pre><p>看起来<code>ivar_list_t</code>就是存放<code>ivar</code>的列表，他的实现是一个模版类，看看具体结构表示：</p>
+<pre><code><span class="title">struct</span> entsize_list_tt {
+    <span class="title">uint32_t</span> entsizeAndFlags;
+    <span class="title">uint32_t</span> count;
+    <span class="title">Element</span> first;
+</code></pre><p>具体对应<code>ivar</code>，替换掉模版就是：</p>
+<pre><code><span class="keyword">struct</span> <span class="keyword">ivar_list_t</span> {
+    <span class="keyword">uint32_t</span> entsizeAndFlags;
+    <span class="keyword">uint32_t</span> count;
+    <span class="keyword">ivar_t</span> first;
+</code></pre><p>其中，<code>ivar_t</code>表征的就是我们每个<code>ivar</code>，</p>
+<pre><code><span class="keyword">int32_t</span> *offset;
+<span class="keyword">const</span> <span class="keyword">char</span> *name;
+<span class="keyword">const</span> <span class="keyword">char</span> *type;
+</code></pre><p>嗯，从这里开始<code>offset</code>是用一个<code>int32_t *</code>的指针来表示，就开始有意思了。<strong>这里我们先暂时忽略</strong></p>
+<p>看起来，如果按照这种方式访问<code>ivar</code>，整个流程要经过好多次指针转移：</p>
+<pre><code>class -&gt; class<span class="class">.rw_data</span> -&gt; class<span class="class">.rw_data</span><span class="class">.ro_data</span> -&gt; class<span class="class">.rw_data</span><span class="class">.ro_data</span><span class="class">.ivars</span> -&gt; 
+-&gt; class<span class="class">.rw_data</span><span class="class">.ro_data</span><span class="class">.ivars</span><span class="class">.first</span>[n]
+</code></pre><p>如果是这样，大量使用<code>ivar</code>肯定很耗时。那么，对于<code>ivar</code>的访问究竟是怎么玩的呢？</p>
+<h3 id="全局变量">全局变量</h3><p>我们用如下这个非常简单的例子来瞅瞅：</p>
+<pre><code><span class="keyword">typedef</span> <span class="keyword">void</span>(^MyBlock)(<span class="keyword">void</span>);
+
+<span class="class"><span class="keyword">@interface</span> <span class="title">MyObject</span> : <span class="title">NSObject</span></span>
+<span class="keyword">@property</span> (<span class="keyword">nonatomic</span>) <span class="built_in">NSUInteger</span> haha;
+<span class="keyword">@property</span> (<span class="keyword">nonatomic</span>, <span class="keyword">copy</span>) MyBlock block;
+
+- (<span class="keyword">void</span>)inits;
+
+<span class="keyword">@end</span>
+
+<span class="class"><span class="keyword">@implementation</span> <span class="title">MyObject</span></span>
+- (<span class="keyword">void</span>)inits
+{
+    <span class="keyword">self</span><span class="variable">.block</span> = ^{
+        _haha = <span class="number">5</span>;
+    };
+}
+<span class="keyword">@end</span>
+
+<span class="keyword">int</span> main(<span class="keyword">int</span> argc, <span class="keyword">char</span> * argv[]) {
+    MyObject *object = [MyObject new];
+    [object inits];
+}
+</code></pre><p>重写一把，基本转化成如下的形式：</p>
+<pre><code><span class="keyword">typedef</span> <span class="keyword">void</span>(*MyBlock)(<span class="keyword">void</span>);
+
+
+<span class="preprocessor">#ifndef _REWRITER_typedef_MyObject</span>
+<span class="preprocessor">#define _REWRITER_typedef_MyObject</span>
+<span class="keyword">typedef</span> <span class="keyword">struct</span> objc_object MyObject;
+<span class="keyword">typedef</span> <span class="keyword">struct</span> {} _objc_exc_MyObject;
+<span class="preprocessor">#endif</span>
+
+<span class="comment">// 注意点1!!!!!!!!!!!!!!!!!!!!</span>
+<span class="keyword">extern</span> <span class="string">"C"</span> <span class="keyword">unsigned</span> <span class="keyword">long</span> OBJC_IVAR_$_MyObject$_haha;
+<span class="keyword">extern</span> <span class="string">"C"</span> <span class="keyword">unsigned</span> <span class="keyword">long</span> OBJC_IVAR_$_MyObject$_block;
+<span class="keyword">struct</span> MyObject_I<span class="built_in">MPL</span> {
+    <span class="keyword">struct</span> <span class="built_in">NSObject_IMPL</span> <span class="built_in">NSObject_IVARS</span>;
+    <span class="built_in">NSUInteger</span> _haha;
+    MyBlock _block;
+};
+
+<span class="comment">// @property (nonatomic) NSUInteger haha;</span>
+<span class="comment">// @property (nonatomic, copy) MyBlock block;</span>
+
+<span class="comment">// - (void)inits;</span>
+
+<span class="comment">/* @end */</span>
+
+
+<span class="comment">// @implementation MyObject</span>
+
+<span class="keyword">struct</span> __MyObject__inits_block_impl_0 {
+  <span class="keyword">struct</span> __block_impl impl;
+  <span class="keyword">struct</span> __MyObject__inits_block_desc_0* Desc;
+  MyObject *<span class="keyword">self</span>;
+
+  <span class="comment">// 注意点2！！！！！！！！！！！！！！！</span>
+  __MyObject__inits_block_impl_0(<span class="keyword">void</span> *fp, <span class="keyword">struct</span> __MyObject__inits_block_desc_0 *desc, MyObject *_<span class="keyword">self</span>, <span class="keyword">int</span> flags=<span class="number">0</span>) : <span class="keyword">self</span>(_<span class="keyword">self</span>) {
+    impl<span class="variable">.isa</span> = &amp;_<span class="built_in">NSConcreteStackBlock</span>;
+    impl<span class="variable">.Flags</span> = flags;
+    impl<span class="variable">.FuncPtr</span> = fp;
+    Desc = desc;
+  }
+};
+
+／／ 注意点<span class="number">3</span>！！！！！！！！！！！！
+<span class="keyword">static</span> <span class="keyword">void</span> __MyObject__inits_block_func_0(<span class="keyword">struct</span> __MyObject__inits_block_impl_0 *__cself) {
+  MyObject *<span class="keyword">self</span> = __cself-&gt;<span class="keyword">self</span>; <span class="comment">// bound by copy</span>
+
+        (*(<span class="built_in">NSUInteger</span> *)((<span class="keyword">char</span> *)<span class="keyword">self</span> + OBJC_IVAR_$_MyObject$_haha)) = <span class="number">5</span>;
+    }
+<span class="keyword">static</span> <span class="keyword">void</span> __MyObject__inits_block_copy_0(<span class="keyword">struct</span> __MyObject__inits_block_impl_0*dst, <span class="keyword">struct</span> __MyObject__inits_block_impl_0*src) {_Block_object_assign((<span class="keyword">void</span>*)&amp;dst-&gt;<span class="keyword">self</span>, (<span class="keyword">void</span>*)src-&gt;<span class="keyword">self</span>, <span class="number">3</span><span class="comment">/*BLOCK_FIELD_IS_OBJECT*/</span>);}
+
+<span class="keyword">static</span> <span class="keyword">void</span> __MyObject__inits_block_dispose_0(<span class="keyword">struct</span> __MyObject__inits_block_impl_0*src) {_Block_object_dispose((<span class="keyword">void</span>*)src-&gt;<span class="keyword">self</span>, <span class="number">3</span><span class="comment">/*BLOCK_FIELD_IS_OBJECT*/</span>);}
+
+<span class="keyword">static</span> <span class="keyword">struct</span> __MyObject__inits_block_desc_0 {
+  size_t reserved;
+  size_t Block_size;
+  <span class="keyword">void</span> (*<span class="keyword">copy</span>)(<span class="keyword">struct</span> __MyObject__inits_block_impl_0*, <span class="keyword">struct</span> __MyObject__inits_block_impl_0*);
+  <span class="keyword">void</span> (*dispose)(<span class="keyword">struct</span> __MyObject__inits_block_impl_0*);
+} __MyObject__inits_block_desc_0_DATA = { <span class="number">0</span>, <span class="keyword">sizeof</span>(<span class="keyword">struct</span> __MyObject__inits_block_impl_0), __MyObject__inits_block_copy_0, __MyObject__inits_block_dispose_0};
+
+<span class="keyword">static</span> <span class="keyword">void</span> _I_MyObject_inits(MyObject * <span class="keyword">self</span>, SEL _cmd) {
+    ((<span class="keyword">void</span> (*)(<span class="keyword">id</span>, SEL, MyBlock))(<span class="keyword">void</span> *)objc_msgSend)((<span class="keyword">id</span>)<span class="keyword">self</span>, sel_registerName(<span class="string">"setBlock:"</span>), ((<span class="keyword">void</span> (*)())&amp;__MyObject__inits_block_impl_0((<span class="keyword">void</span> *)__MyObject__inits_block_func_0, &amp;__MyObject__inits_block_desc_0_DATA, <span class="keyword">self</span>, <span class="number">570425344</span>)));
+}
+
+<span class="keyword">static</span> <span class="built_in">NSUInteger</span> _I_MyObject_haha(MyObject * <span class="keyword">self</span>, SEL _cmd) { <span class="keyword">return</span> (*(<span class="built_in">NSUInteger</span> *)((<span class="keyword">char</span> *)<span class="keyword">self</span> + OBJC_IVAR_$_MyObject$_haha)); }
+<span class="keyword">static</span> <span class="keyword">void</span> _I_MyObject_setHaha_(MyObject * <span class="keyword">self</span>, SEL _cmd, <span class="built_in">NSUInteger</span> haha) { (*(<span class="built_in">NSUInteger</span> *)((<span class="keyword">char</span> *)<span class="keyword">self</span> + OBJC_IVAR_$_MyObject$_haha)) = haha; }
+
+<span class="keyword">static</span> <span class="keyword">void</span>(* _I_MyObject_block(MyObject * <span class="keyword">self</span>, SEL _cmd) )(){ <span class="keyword">return</span> (*(MyBlock *)((<span class="keyword">char</span> *)<span class="keyword">self</span> + OBJC_IVAR_$_MyObject$_block)); }
+<span class="keyword">extern</span> <span class="string">"C"</span> __declspec(dllimport) <span class="keyword">void</span> objc_setProperty (<span class="keyword">id</span>, SEL, <span class="keyword">long</span>, <span class="keyword">id</span>, <span class="keyword">bool</span>, <span class="keyword">bool</span>);
+
+<span class="keyword">static</span> <span class="keyword">void</span> _I_MyObject_setBlock_(MyObject * <span class="keyword">self</span>, SEL _cmd, MyBlock block) { objc_setProperty (<span class="keyword">self</span>, _cmd, __OFFSETOFIVAR__(<span class="keyword">struct</span> MyObject, _block), (<span class="keyword">id</span>)block, <span class="number">0</span>, <span class="number">1</span>); }
+<span class="comment">// @end</span>
+
+<span class="keyword">int</span> main(<span class="keyword">int</span> argc, <span class="keyword">char</span> * argv[]) {
+    MyObject *object = ((MyObject *(*)(<span class="keyword">id</span>, SEL))(<span class="keyword">void</span> *)objc_msgSend)((<span class="keyword">id</span>)objc_getClass(<span class="string">"MyObject"</span>), sel_registerName(<span class="string">"new"</span>));
+    ((<span class="keyword">void</span> (*)(<span class="keyword">id</span>, SEL))(<span class="keyword">void</span> *)objc_msgSend)((<span class="keyword">id</span>)object, sel_registerName(<span class="string">"inits"</span>));
+}
+</code></pre><p>一大堆东西，没啥特别的地方，我们只要关注几个地方：</p>
+<ul>
+<li><p>对于每个<code>ivar</code>，都有对应的全局变量</p>
+<pre><code><span class="keyword">extern</span> <span class="string">"C"</span> <span class="keyword">unsigned</span> <span class="keyword">long</span> OBJC_IVAR_$_MyObject$_haha;
+<span class="keyword">extern</span> <span class="string">"C"</span> <span class="keyword">unsigned</span> <span class="keyword">long</span> OBJC_IVAR_$_MyObject$_block;
+</code></pre></li>
+<li><p>block_invoke对应的实现是通过对象自身作为基地址，全局变量作为偏移去对<code>haha</code>这个<code>ivar</code>进行赋值。</p>
+<pre><code><span class="keyword">static</span> <span class="keyword">void</span> __MyObject__inits_block_func_0(<span class="keyword">struct</span> __MyObject__inits_block_impl_0 *__cself) {
+  MyObject *<span class="keyword">self</span> = __cself-&gt;<span class="keyword">self</span>; <span class="comment">// bound by copy</span>
+
+        (*(<span class="built_in">NSUInteger</span> *)((<span class="keyword">char</span> *)<span class="keyword">self</span> + OBJC_IVAR_$_MyObject$_haha)) = <span class="number">5</span>;
+    }
+</code></pre></li>
+<li><p>block的构造函数，确实捕捉了<code>self</code></p>
+<pre><code>__MyObject__inits_block_impl_0(void *fp, <span class="keyword">struct</span> __MyObject__inits_block_desc_0 *desc, MyObject *_<span class="keyword">self</span>, <span class="keyword">int</span> flags=<span class="number">0</span>) : <span class="keyword">self</span>(_<span class="keyword">self</span>) {
+    <span class="keyword">impl</span>.isa = &amp;_NSConcreteStackBlock;
+    <span class="keyword">impl</span>.Flags = flags;
+    <span class="keyword">impl</span>.FuncPtr = fp;
+    Desc = desc;
+  }
+</code></pre></li>
+</ul>
+<p>由于全局变量的地址是在编译期就确定了，所以这里也就不难解释<code>ivar_t</code>里面为什么要保存<code>int32_t *</code>，保存的就是对应的全局变量地址。而全局变量的值则是对应的动态偏移。</p>
+<h3 id="结语">结语</h3><p>水完了，其实虽然runtime的结构体设计的比较绕，但是最后对于变量的访问和很多静态语言设计一样，也不会损失很多性能。</p>
+<p><b style="color:red">从另外一个角度看，如果声明了巨多的<code>ivar</code>，看来也会对包大小产生不可忽视的影响。</b></p>
+]]></content>
+    <summary type="html">
+    <![CDATA[<blockquote>
+<p>大水文一篇<br>大水文一篇<br>大水文一篇  </p>
+</blockquote>
+<h3 id="起因">起因</h3><p>最近对<code>Block</code>的一些实现细节又进行了一次复习，主要涉及的是捕捉变量的部分。有一个点我之前]]>
+    </summary>
+    
+      <category term="iOS" scheme="http://satanwoo.github.io/tags/iOS/"/>
+    
+  </entry>
   
   <entry>
     <title><![CDATA[XNU之四：iOS虚拟内存限制（一）]]></title>
@@ -4216,90 +4420,6 @@ OSSpinUnlock(&amp;_lock)<span class="comment">;</span>
     </summary>
     
       <category term="Growth" scheme="http://satanwoo.github.io/tags/Growth/"/>
-    
-  </entry>
-  
-  <entry>
-    <title><![CDATA[HTML中的“空白符”，你真的懂了吗？]]></title>
-    <link href="http://satanwoo.github.io/2016/04/26/blank-space-in-html/"/>
-    <id>http://satanwoo.github.io/2016/04/26/blank-space-in-html/</id>
-    <published>2016-04-26T15:21:22.000Z</published>
-    <updated>2016-04-26T16:03:25.000Z</updated>
-    <content type="html"><![CDATA[<p>这几天由于某项任务，暂时转型了成为了前端码农（实际上就是个写初级CSS的屌丝）。在这期间，我有一个需求大致是这样的：</p>
-<p>我有一个父类容器，比如<strong>div</strong>，这个<strong>div</strong>的宽度是固定的。我现在要在这个<strong>div</strong>中插入5个<strong>img</strong>，这5个<strong>img</strong>等宽。同时伴随这5个<strong>img</strong>的当然还有四个间隙，这四个间隙也是等宽的。</p>
-<p><strong>当然</strong>，需要根据百分比宽度进行简单适配。<br>是不是觉得很简单呢？呵呵，别说专业的前端工程师，我这种半吊子都觉得简单。<br>根据PSD效果图，我量出了对应的百分比尺寸，于是写出来如下的<strong>HTML</strong>和<strong>CSS</strong>代码：</p>
-<pre><code><span class="comment">// HTML 文件</span>
-&lt;div <span class="keyword">class</span>=<span class="string">"parent"</span>&gt;
-    &lt;img <span class="keyword">class</span>=<span class="string">"element"</span> src=<span class="string">"http://xxxxxxx.com/shshshshs.png"</span> /&gt;
-    &lt;img <span class="keyword">class</span>=<span class="string">"element"</span> src=<span class="string">"http://xxxxxxx.com/shshshshs.png"</span> /&gt;
-    &lt;img <span class="keyword">class</span>=<span class="string">"element"</span> src=<span class="string">"http://xxxxxxx.com/shshshshs.png"</span> /&gt;
-    &lt;img <span class="keyword">class</span>=<span class="string">"element"</span> src=<span class="string">"http://xxxxxxx.com/shshshshs.png"</span> /&gt;
-    &lt;img <span class="keyword">class</span>=<span class="string">"element"</span> src=<span class="string">"http://xxxxxxx.com/shshshshs.png"</span> /&gt;
-&lt;/div&gt;
-
-<span class="comment">// css 文件</span>
-.parent {
-    width:x%;
-}
-
-.parent img {
-    width:y%;
-    height:auto;
-    margin-left:k%;
-}
-
-.parent img:first-child {
-    margin-left:<span class="number">0</span>;
-}
-</code></pre><p>这段代码相当简洁明了吧，我通过量好的百分比，对各个图片和之间的间距进行了控制，基本上业界大多数也是这么做的吧。</p>
-<p>按理说事情到这基本就结束了，毕竟img是个<strong>行内可替换元素</strong>，会自动布局在一行之内，<strong>当然前提是父容器宽度足够的前提下</strong>。不过既然我都身体力行的量过了，那自然不应该出现问题。</p>
-<p>但是，卧槽，你越担心的事就越会发生。整个界面出现了非常奇葩的现象：</p>
-<pre><code>这是正常情况：
-[图<span class="tag">&lt;<span class="title">-</span>&gt;</span>图<span class="tag">&lt;<span class="title">-</span>&gt;</span>图<span class="tag">&lt;<span class="title">-</span>&gt;</span>图<span class="tag">&lt;<span class="title">-</span>&gt;</span>图] 
-
-这是实际情况：
-[图<span class="tag">&lt;<span class="title">-</span>&gt;</span>图<span class="tag">&lt;<span class="title">-</span>&gt;</span>图<span class="tag">&lt;<span class="title">-</span>&gt;</span>图<span class="tag">&lt;<span class="title">-</span>&gt;</span>］
-图]
-</code></pre><p>卧槽，竟然宽度不够，换行了。尝试了很长时间，后来发现，将<code>.parent img</code>中添加<code>float:left</code>就可以完美解决，但这什么原因呢?</p>
-<h3 id="原因">原因</h3><p>经过一番探索研究，我发现，这是由于<strong>空白符</strong>对<strong>inline</strong>类型的元素造成的影响。</p>
-<ul>
-<li>首先，<strong>img</strong>元素是一种行内可替代元素，效果基本可以理解为<strong>inline-block</strong>。</li>
-<li><p>第二，我们在HTML的时候，为了在编辑器内写的美观，常常会使用回车，而回车在HTML中会被识别为空白符。</p>
-<pre><code>比如
-&lt;<span class="tag">img</span> src = <span class="string">"xxxx"</span> /&gt;（空白符）
-&lt;<span class="tag">img</span> src = <span class="string">"xxxx"</span> /&gt;
-</code></pre></li>
-<li><p>第三，空白符具备宽度（和font-size有关），不具备高度。</p>
-</li>
-</ul>
-<p><strong>所以，表面上我们根据设计好的图片进行了</strong>精准<strong>的测量，构造了完全匹配父类宽度的元素和间距，但是实际上却由于空白符所具备的宽度而产生了偏差。</strong></p>
-<p>用一张图来表示拥有空白符后的效果：</p>
-<pre><code><span class="list">[<span class="keyword">图</span><span class="list">(<span class="keyword">空白</span>)</span>&lt;-&gt;图<span class="list">(<span class="keyword">空白</span>)</span>&lt;-&gt;图<span class="list">(<span class="keyword">空白</span>)</span>&lt;-&gt;
-图&lt;-&gt;］</span>
-</code></pre><h3 id="为什么float可以解决这个问题">为什么float可以解决这个问题</h3><blockquote>
-<p>A floated box is shifted to the left or right until its outer edge touches the containing block edge or the outer edge of another float</p>
-</blockquote>
-<p>看到这个关于float的定义了吗？<strong>float要么依赖前一个（或者后一个）float元素的边界，要么就依赖于父元素的边界。而一个空白符，既不是包含块（父容器）的边界，也不是另一个float元素，因此不受影响，也不会对其余float元素有影响。</strong></p>
-<p>所以，当你对<code>.parent img</code>启用<code>float:left</code>之后，效果就成了下图所示：</p>
-<pre><code>[<span class="built_in">float</span>&lt;-&gt;<span class="built_in">float</span>&lt;-&gt;<span class="built_in">float</span>&lt;-&gt;<span class="built_in">float</span>&lt;-&gt;<span class="built_in">float</span>]
-[空白符]
-</code></pre><p>这次我们测量的宽度正好匹配完全，所以将空白符自然而然的挤到了下一行。还记得我们前面说过空白符不具备高度吗？因此，这个空白符压根没起作用！</p>
-<blockquote>
-<p>文中的 [] 代表父容器，&lt;-&gt; 代表间隔。</p>
-</blockquote>
-<h3 id="其余方案">其余方案</h3><ol>
-<li>将父容器的<code>font-size</code>设置为<strong>0</strong>。</li>
-<li>避免换行，写出<img src=""><img src=""><img src=""><img src=""> 这样的代码。</li>
-<li>启用HTML压缩。</li>
-</ol>
-<p>最后：<strong>感谢美团大神FTR和淘宝大神YWJ对本菜比的指导。</strong></p>
-]]></content>
-    <summary type="html">
-    <![CDATA[<p>这几天由于某项任务，暂时转型了成为了前端码农（实际上就是个写初级CSS的屌丝）。在这期间，我有一个需求大致是这样的：</p>
-<p>我有一个父类容器，比如<strong>div</strong>，这个<strong>div</strong>的宽度是固定的。我现在要在这个<s]]>
-    </summary>
-    
-      <category term="JavaScript" scheme="http://satanwoo.github.io/tags/JavaScript/"/>
     
   </entry>
   

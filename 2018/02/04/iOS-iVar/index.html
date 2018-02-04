@@ -1,0 +1,446 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  
+  <title>谈谈ivar的直接访问 | Hexo</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+  <meta name="description" content="大水文一篇大水文一篇大水文一篇  
+
+起因最近对Block的一些实现细节又进行了一次复习，主要涉及的是捕捉变量的部分。有一个点我之前一直没太关注：对ivar变量的直接访问为啥会产生循环引用。
+在我原先的理解中，之所以会产生循环引用，绝大多数场景都是由于block里面涉及了self关键字，比如[self doSomething]（同理，对于property的访问本质也是一堆方法），但是为啥对ivar">
+<meta property="og:type" content="article">
+<meta property="og:title" content="谈谈ivar的直接访问">
+<meta property="og:url" content="http://satanwoo.github.io/2018/02/04/iOS-iVar/index.html">
+<meta property="og:site_name" content="Hexo">
+<meta property="og:description" content="大水文一篇大水文一篇大水文一篇  
+
+起因最近对Block的一些实现细节又进行了一次复习，主要涉及的是捕捉变量的部分。有一个点我之前一直没太关注：对ivar变量的直接访问为啥会产生循环引用。
+在我原先的理解中，之所以会产生循环引用，绝大多数场景都是由于block里面涉及了self关键字，比如[self doSomething]（同理，对于property的访问本质也是一堆方法），但是为啥对ivar">
+<meta property="og:updated_time" content="2018-02-04T15:15:33.000Z">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="谈谈ivar的直接访问">
+<meta name="twitter:description" content="大水文一篇大水文一篇大水文一篇  
+
+起因最近对Block的一些实现细节又进行了一次复习，主要涉及的是捕捉变量的部分。有一个点我之前一直没太关注：对ivar变量的直接访问为啥会产生循环引用。
+在我原先的理解中，之所以会产生循环引用，绝大多数场景都是由于block里面涉及了self关键字，比如[self doSomething]（同理，对于property的访问本质也是一堆方法），但是为啥对ivar">
+  
+    <link rel="alternative" href="/atom.xml" title="Hexo" type="application/atom+xml">
+  
+  
+    <link rel="icon" href="/favicon.png">
+  
+  <link rel="stylesheet" href="/css/style.css" type="text/css">
+  
+
+</head>
+<body>
+  <div id="container">
+    <div id="wrap">
+      <header id="header">
+  <div id="banner"></div>
+  <div id="header-outer" class="outer">
+    <div id="header-title" class="inner">
+      <h1 id="logo-wrap">
+        <a href="/" id="logo">Hexo</a>
+      </h1>
+      
+    </div>
+    <div id="header-inner" class="inner">
+      <nav id="main-nav">
+        <a id="main-nav-toggle" class="nav-icon"></a>
+        
+          <a class="main-nav-link" href="/">Home</a>
+        
+          <a class="main-nav-link" href="/archives">Archives</a>
+        
+          <a class="main-nav-link" href="/sitemap.xml">map</a>
+        
+      </nav>
+      <nav id="sub-nav">
+        
+          <a id="nav-rss-link" class="nav-icon" href="/atom.xml" title="RSS Feed"></a>
+        
+        <a id="nav-search-btn" class="nav-icon" title="Search"></a>
+      </nav>
+      <div id="search-form-wrap">
+        <form action="//google.com/search" method="get" accept-charset="UTF-8" class="search-form"><input type="search" name="q" results="0" class="search-form-input" placeholder="Search"><button type="submit" class="search-form-submit">&#xF002;</button><input type="hidden" name="sitesearch" value="http://satanwoo.github.io"></form>
+      </div>
+    </div>
+  </div>
+</header>
+      <div class="outer">
+        <section id="main"><article id="post-iOS-iVar" class="article article-type-post" itemscope itemprop="blogPost">
+  <div class="article-meta">
+    <a href="/2018/02/04/iOS-iVar/" class="article-date">
+  <time datetime="2018-02-04T15:14:33.000Z" itemprop="datePublished">2018-02-04</time>
+</a>
+    
+  </div>
+  <div class="article-inner">
+    
+    
+      <header class="article-header">
+        
+  
+    <h1 class="article-title" itemprop="name">
+      谈谈ivar的直接访问
+    </h1>
+  
+
+      </header>
+    
+    <div class="article-entry" itemprop="articleBody">
+      
+        <blockquote>
+<p>大水文一篇<br>大水文一篇<br>大水文一篇  </p>
+</blockquote>
+<h3 id="起因">起因</h3><p>最近对<code>Block</code>的一些实现细节又进行了一次复习，主要涉及的是捕捉变量的部分。有一个点我之前一直没太关注：对<code>ivar</code>变量的直接访问为啥会产生循环引用。</p>
+<p>在我原先的理解中，之所以会产生循环引用，绝大多数场景都是由于<code>block</code>里面涉及了<strong>self</strong>关键字，比如<code>[self doSomething]</code>（同理，对于<code>property</code>的访问本质也是一堆方法），但是为啥对<code>ivar</code>的访问也会导致循环引用呢？</p>
+<p>不是直接采用 <code>*(void *)address = xxx</code>这样的直接对编译好的静态地址赋值就好了？</p>
+<blockquote>
+<p>当时傻逼了，写完本文后想想就算编译成地址了，基地址从哪算还是要依赖<code>self</code>变量。</p>
+</blockquote>
+<h3 id="谈谈ivar的访问是啥形式">谈谈ivar的访问是啥形式</h3><p>还是回到runtime来看看吧，万变不离其宗，从<code>objc_class</code>结构体看起：</p>
+<pre><code>struct objc<span class="number">_</span><span class="keyword">class</span> : objc<span class="number">_</span><span class="keyword">object</span> {
+    <span class="comment">// Class ISA; // 8byte</span>
+    Class superclass; <span class="comment">// 8byte</span>
+    cache<span class="number">_</span>t cache;             <span class="comment">// formerly cache pointer and vtable // 4 + 4 + 8</span>
+    <span class="keyword">class</span><span class="number">_</span>data<span class="number">_</span>bits<span class="number">_</span>t bits;    <span class="comment">// class_rw_t * plus custom rr/alloc flags</span>
+
+    <span class="keyword">class</span><span class="number">_</span>rw<span class="number">_</span>t *data() { 
+        <span class="keyword">return</span> bits.data();
+    }
+</code></pre><p>主要的运行时数据都是<code>class_rw_t</code>表示，继续瞅瞅：</p>
+<pre><code><span class="keyword">struct</span> <span class="keyword">class_rw_t</span> {
+    <span class="comment">// Be warned that Symbolication knows the layout of this structure.</span>
+    <span class="keyword">uint32_t</span> flags;
+    <span class="keyword">uint32_t</span> version;
+
+    <span class="keyword">const</span> <span class="keyword">class_ro_t</span> *ro;
+</code></pre><p>其中<code>class_ro_t</code>基本上是从二进制产物中读取的“副本”数据，我们看看：</p>
+<pre><code><span class="keyword">struct</span> <span class="keyword">class_ro_t</span> {
+    <span class="keyword">uint32_t</span> flags;
+    <span class="keyword">uint32_t</span> instanceStart;
+    <span class="keyword">uint32_t</span> instanceSize;
+<span class="preprocessor">#<span class="keyword">ifdef</span> __LP64__</span>
+    <span class="keyword">uint32_t</span> reserved;
+<span class="preprocessor">#<span class="keyword">endif</span></span>
+
+    <span class="keyword">const</span> <span class="keyword">uint8_t</span> * ivarLayout;
+
+    <span class="keyword">const</span> <span class="keyword">char</span> * name;
+    <span class="keyword">method_list_t</span> * baseMethodList;
+    <span class="keyword">protocol_list_t</span> * baseProtocols;
+    <span class="keyword">const</span> <span class="keyword">ivar_list_t</span> * ivars;
+</code></pre><p>看起来<code>ivar_list_t</code>就是存放<code>ivar</code>的列表，他的实现是一个模版类，看看具体结构表示：</p>
+<pre><code><span class="title">struct</span> entsize_list_tt {
+    <span class="title">uint32_t</span> entsizeAndFlags;
+    <span class="title">uint32_t</span> count;
+    <span class="title">Element</span> first;
+</code></pre><p>具体对应<code>ivar</code>，替换掉模版就是：</p>
+<pre><code><span class="keyword">struct</span> <span class="keyword">ivar_list_t</span> {
+    <span class="keyword">uint32_t</span> entsizeAndFlags;
+    <span class="keyword">uint32_t</span> count;
+    <span class="keyword">ivar_t</span> first;
+</code></pre><p>其中，<code>ivar_t</code>表征的就是我们每个<code>ivar</code>，</p>
+<pre><code><span class="keyword">int32_t</span> *offset;
+<span class="keyword">const</span> <span class="keyword">char</span> *name;
+<span class="keyword">const</span> <span class="keyword">char</span> *type;
+</code></pre><p>嗯，从这里开始<code>offset</code>是用一个<code>int32_t *</code>的指针来表示，就开始有意思了。<strong>这里我们先暂时忽略</strong></p>
+<p>看起来，如果按照这种方式访问<code>ivar</code>，整个流程要经过好多次指针转移：</p>
+<pre><code>class -&gt; class<span class="class">.rw_data</span> -&gt; class<span class="class">.rw_data</span><span class="class">.ro_data</span> -&gt; class<span class="class">.rw_data</span><span class="class">.ro_data</span><span class="class">.ivars</span> -&gt; 
+-&gt; class<span class="class">.rw_data</span><span class="class">.ro_data</span><span class="class">.ivars</span><span class="class">.first</span>[n]
+</code></pre><p>如果是这样，大量使用<code>ivar</code>肯定很耗时。那么，对于<code>ivar</code>的访问究竟是怎么玩的呢？</p>
+<h3 id="全局变量">全局变量</h3><p>我们用如下这个非常简单的例子来瞅瞅：</p>
+<pre><code><span class="keyword">typedef</span> <span class="keyword">void</span>(^MyBlock)(<span class="keyword">void</span>);
+
+<span class="class"><span class="keyword">@interface</span> <span class="title">MyObject</span> : <span class="title">NSObject</span></span>
+<span class="keyword">@property</span> (<span class="keyword">nonatomic</span>) <span class="built_in">NSUInteger</span> haha;
+<span class="keyword">@property</span> (<span class="keyword">nonatomic</span>, <span class="keyword">copy</span>) MyBlock block;
+
+- (<span class="keyword">void</span>)inits;
+
+<span class="keyword">@end</span>
+
+<span class="class"><span class="keyword">@implementation</span> <span class="title">MyObject</span></span>
+- (<span class="keyword">void</span>)inits
+{
+    <span class="keyword">self</span><span class="variable">.block</span> = ^{
+        _haha = <span class="number">5</span>;
+    };
+}
+<span class="keyword">@end</span>
+
+<span class="keyword">int</span> main(<span class="keyword">int</span> argc, <span class="keyword">char</span> * argv[]) {
+    MyObject *object = [MyObject new];
+    [object inits];
+}
+</code></pre><p>重写一把，基本转化成如下的形式：</p>
+<pre><code><span class="keyword">typedef</span> <span class="keyword">void</span>(*MyBlock)(<span class="keyword">void</span>);
+
+
+<span class="preprocessor">#ifndef _REWRITER_typedef_MyObject</span>
+<span class="preprocessor">#define _REWRITER_typedef_MyObject</span>
+<span class="keyword">typedef</span> <span class="keyword">struct</span> objc_object MyObject;
+<span class="keyword">typedef</span> <span class="keyword">struct</span> {} _objc_exc_MyObject;
+<span class="preprocessor">#endif</span>
+
+<span class="comment">// 注意点1!!!!!!!!!!!!!!!!!!!!</span>
+<span class="keyword">extern</span> <span class="string">"C"</span> <span class="keyword">unsigned</span> <span class="keyword">long</span> OBJC_IVAR_$_MyObject$_haha;
+<span class="keyword">extern</span> <span class="string">"C"</span> <span class="keyword">unsigned</span> <span class="keyword">long</span> OBJC_IVAR_$_MyObject$_block;
+<span class="keyword">struct</span> MyObject_I<span class="built_in">MPL</span> {
+    <span class="keyword">struct</span> <span class="built_in">NSObject_IMPL</span> <span class="built_in">NSObject_IVARS</span>;
+    <span class="built_in">NSUInteger</span> _haha;
+    MyBlock _block;
+};
+
+<span class="comment">// @property (nonatomic) NSUInteger haha;</span>
+<span class="comment">// @property (nonatomic, copy) MyBlock block;</span>
+
+<span class="comment">// - (void)inits;</span>
+
+<span class="comment">/* @end */</span>
+
+
+<span class="comment">// @implementation MyObject</span>
+
+<span class="keyword">struct</span> __MyObject__inits_block_impl_0 {
+  <span class="keyword">struct</span> __block_impl impl;
+  <span class="keyword">struct</span> __MyObject__inits_block_desc_0* Desc;
+  MyObject *<span class="keyword">self</span>;
+
+  <span class="comment">// 注意点2！！！！！！！！！！！！！！！</span>
+  __MyObject__inits_block_impl_0(<span class="keyword">void</span> *fp, <span class="keyword">struct</span> __MyObject__inits_block_desc_0 *desc, MyObject *_<span class="keyword">self</span>, <span class="keyword">int</span> flags=<span class="number">0</span>) : <span class="keyword">self</span>(_<span class="keyword">self</span>) {
+    impl<span class="variable">.isa</span> = &amp;_<span class="built_in">NSConcreteStackBlock</span>;
+    impl<span class="variable">.Flags</span> = flags;
+    impl<span class="variable">.FuncPtr</span> = fp;
+    Desc = desc;
+  }
+};
+
+／／ 注意点<span class="number">3</span>！！！！！！！！！！！！
+<span class="keyword">static</span> <span class="keyword">void</span> __MyObject__inits_block_func_0(<span class="keyword">struct</span> __MyObject__inits_block_impl_0 *__cself) {
+  MyObject *<span class="keyword">self</span> = __cself-&gt;<span class="keyword">self</span>; <span class="comment">// bound by copy</span>
+
+        (*(<span class="built_in">NSUInteger</span> *)((<span class="keyword">char</span> *)<span class="keyword">self</span> + OBJC_IVAR_$_MyObject$_haha)) = <span class="number">5</span>;
+    }
+<span class="keyword">static</span> <span class="keyword">void</span> __MyObject__inits_block_copy_0(<span class="keyword">struct</span> __MyObject__inits_block_impl_0*dst, <span class="keyword">struct</span> __MyObject__inits_block_impl_0*src) {_Block_object_assign((<span class="keyword">void</span>*)&amp;dst-&gt;<span class="keyword">self</span>, (<span class="keyword">void</span>*)src-&gt;<span class="keyword">self</span>, <span class="number">3</span><span class="comment">/*BLOCK_FIELD_IS_OBJECT*/</span>);}
+
+<span class="keyword">static</span> <span class="keyword">void</span> __MyObject__inits_block_dispose_0(<span class="keyword">struct</span> __MyObject__inits_block_impl_0*src) {_Block_object_dispose((<span class="keyword">void</span>*)src-&gt;<span class="keyword">self</span>, <span class="number">3</span><span class="comment">/*BLOCK_FIELD_IS_OBJECT*/</span>);}
+
+<span class="keyword">static</span> <span class="keyword">struct</span> __MyObject__inits_block_desc_0 {
+  size_t reserved;
+  size_t Block_size;
+  <span class="keyword">void</span> (*<span class="keyword">copy</span>)(<span class="keyword">struct</span> __MyObject__inits_block_impl_0*, <span class="keyword">struct</span> __MyObject__inits_block_impl_0*);
+  <span class="keyword">void</span> (*dispose)(<span class="keyword">struct</span> __MyObject__inits_block_impl_0*);
+} __MyObject__inits_block_desc_0_DATA = { <span class="number">0</span>, <span class="keyword">sizeof</span>(<span class="keyword">struct</span> __MyObject__inits_block_impl_0), __MyObject__inits_block_copy_0, __MyObject__inits_block_dispose_0};
+
+<span class="keyword">static</span> <span class="keyword">void</span> _I_MyObject_inits(MyObject * <span class="keyword">self</span>, SEL _cmd) {
+    ((<span class="keyword">void</span> (*)(<span class="keyword">id</span>, SEL, MyBlock))(<span class="keyword">void</span> *)objc_msgSend)((<span class="keyword">id</span>)<span class="keyword">self</span>, sel_registerName(<span class="string">"setBlock:"</span>), ((<span class="keyword">void</span> (*)())&amp;__MyObject__inits_block_impl_0((<span class="keyword">void</span> *)__MyObject__inits_block_func_0, &amp;__MyObject__inits_block_desc_0_DATA, <span class="keyword">self</span>, <span class="number">570425344</span>)));
+}
+
+<span class="keyword">static</span> <span class="built_in">NSUInteger</span> _I_MyObject_haha(MyObject * <span class="keyword">self</span>, SEL _cmd) { <span class="keyword">return</span> (*(<span class="built_in">NSUInteger</span> *)((<span class="keyword">char</span> *)<span class="keyword">self</span> + OBJC_IVAR_$_MyObject$_haha)); }
+<span class="keyword">static</span> <span class="keyword">void</span> _I_MyObject_setHaha_(MyObject * <span class="keyword">self</span>, SEL _cmd, <span class="built_in">NSUInteger</span> haha) { (*(<span class="built_in">NSUInteger</span> *)((<span class="keyword">char</span> *)<span class="keyword">self</span> + OBJC_IVAR_$_MyObject$_haha)) = haha; }
+
+<span class="keyword">static</span> <span class="keyword">void</span>(* _I_MyObject_block(MyObject * <span class="keyword">self</span>, SEL _cmd) )(){ <span class="keyword">return</span> (*(MyBlock *)((<span class="keyword">char</span> *)<span class="keyword">self</span> + OBJC_IVAR_$_MyObject$_block)); }
+<span class="keyword">extern</span> <span class="string">"C"</span> __declspec(dllimport) <span class="keyword">void</span> objc_setProperty (<span class="keyword">id</span>, SEL, <span class="keyword">long</span>, <span class="keyword">id</span>, <span class="keyword">bool</span>, <span class="keyword">bool</span>);
+
+<span class="keyword">static</span> <span class="keyword">void</span> _I_MyObject_setBlock_(MyObject * <span class="keyword">self</span>, SEL _cmd, MyBlock block) { objc_setProperty (<span class="keyword">self</span>, _cmd, __OFFSETOFIVAR__(<span class="keyword">struct</span> MyObject, _block), (<span class="keyword">id</span>)block, <span class="number">0</span>, <span class="number">1</span>); }
+<span class="comment">// @end</span>
+
+<span class="keyword">int</span> main(<span class="keyword">int</span> argc, <span class="keyword">char</span> * argv[]) {
+    MyObject *object = ((MyObject *(*)(<span class="keyword">id</span>, SEL))(<span class="keyword">void</span> *)objc_msgSend)((<span class="keyword">id</span>)objc_getClass(<span class="string">"MyObject"</span>), sel_registerName(<span class="string">"new"</span>));
+    ((<span class="keyword">void</span> (*)(<span class="keyword">id</span>, SEL))(<span class="keyword">void</span> *)objc_msgSend)((<span class="keyword">id</span>)object, sel_registerName(<span class="string">"inits"</span>));
+}
+</code></pre><p>一大堆东西，没啥特别的地方，我们只要关注几个地方：</p>
+<ul>
+<li><p>对于每个<code>ivar</code>，都有对应的全局变量</p>
+<pre><code><span class="keyword">extern</span> <span class="string">"C"</span> <span class="keyword">unsigned</span> <span class="keyword">long</span> OBJC_IVAR_$_MyObject$_haha;
+<span class="keyword">extern</span> <span class="string">"C"</span> <span class="keyword">unsigned</span> <span class="keyword">long</span> OBJC_IVAR_$_MyObject$_block;
+</code></pre></li>
+<li><p>block_invoke对应的实现是通过对象自身作为基地址，全局变量作为偏移去对<code>haha</code>这个<code>ivar</code>进行赋值。</p>
+<pre><code><span class="keyword">static</span> <span class="keyword">void</span> __MyObject__inits_block_func_0(<span class="keyword">struct</span> __MyObject__inits_block_impl_0 *__cself) {
+  MyObject *<span class="keyword">self</span> = __cself-&gt;<span class="keyword">self</span>; <span class="comment">// bound by copy</span>
+
+        (*(<span class="built_in">NSUInteger</span> *)((<span class="keyword">char</span> *)<span class="keyword">self</span> + OBJC_IVAR_$_MyObject$_haha)) = <span class="number">5</span>;
+    }
+</code></pre></li>
+<li><p>block的构造函数，确实捕捉了<code>self</code></p>
+<pre><code>__MyObject__inits_block_impl_0(void *fp, <span class="keyword">struct</span> __MyObject__inits_block_desc_0 *desc, MyObject *_<span class="keyword">self</span>, <span class="keyword">int</span> flags=<span class="number">0</span>) : <span class="keyword">self</span>(_<span class="keyword">self</span>) {
+    <span class="keyword">impl</span>.isa = &amp;_NSConcreteStackBlock;
+    <span class="keyword">impl</span>.Flags = flags;
+    <span class="keyword">impl</span>.FuncPtr = fp;
+    Desc = desc;
+  }
+</code></pre></li>
+</ul>
+<p>由于全局变量的地址是在编译期就确定了，所以这里也就不难解释<code>ivar_t</code>里面为什么要保存<code>int32_t *</code>，保存的就是对应的全局变量地址。而全局变量的值则是对应的动态偏移。</p>
+<h3 id="结语">结语</h3><p>水完了，其实虽然runtime的结构体设计的比较绕，但是最后对于变量的访问和很多静态语言设计一样，也不会损失很多性能。</p>
+<p><b style="color:red">从另外一个角度看，如果声明了巨多的<code>ivar</code>，看来也会对包大小产生不可忽视的影响。</b></p>
+
+      
+    </div>
+    <footer class="article-footer">
+      <a data-url="http://satanwoo.github.io/2018/02/04/iOS-iVar/" data-id="cjd8xk1c3000p0fi1sjp1h9om" class="article-share-link">Share</a>
+      
+        <a href="http://satanwoo.github.io/2018/02/04/iOS-iVar/#disqus_thread" class="article-comment-link">Comments</a>
+      
+      
+  <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
+
+    </footer>
+  </div>
+  
+    
+<nav id="article-nav">
+  
+  
+    <a href="/2018/01/14/iOS-virtual/" id="article-nav-older" class="article-nav-link-wrap">
+      <strong class="article-nav-caption">Older</strong>
+      <div class="article-nav-title">XNU之四：iOS虚拟内存限制（一）</div>
+    </a>
+  
+</nav>
+
+  
+</article>
+
+<div id="disqus_thread"></div>
+<script>
+
+/**
+*  RECOMMENDED CONFIGURATION VARIABLES: EDIT AND UNCOMMENT THE SECTION BELOW TO INSERT DYNAMIC VALUES FROM YOUR PLATFORM OR CMS.
+*  LEARN WHY DEFINING THESE VARIABLES IS IMPORTANT: https://disqus.com/admin/universalcode/#configuration-variables*/
+/*
+var disqus_config = function () {
+this.page.url = PAGE_URL;  // Replace PAGE_URL with your page's canonical URL variable
+this.page.identifier = PAGE_IDENTIFIER; // Replace PAGE_IDENTIFIER with your page's unique identifier variable
+};
+*/
+(function() { // DON'T EDIT BELOW THIS LINE
+var d = document, s = d.createElement('script');
+s.src = 'https://satanwoo-2.disqus.com/embed.js';
+s.setAttribute('data-timestamp', +new Date());
+(d.head || d.body).appendChild(s);
+})();
+</script>
+<noscript>Please enable JavaScript to view the <a href="https://disqus.com/?ref_noscript">comments powered by Disqus.</a></noscript>
+                                
+  <section id="comments">
+    <div id="disqus_thread">
+      <noscript>Please enable JavaScript to view the <a href="//disqus.com/?ref_noscript">comments powered by Disqus.</a></noscript>
+    </div>
+  </section>
+</section>
+        
+          <aside id="sidebar">
+  
+    
+  
+    
+  <div class="widget-wrap">
+    <h3 class="widget-title">Tags</h3>
+    <div class="widget">
+      <ul class="tag-list"><li class="tag-list-item"><a class="tag-list-link" href="/tags/Android/">Android</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/C/">C</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Growth/">Growth</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/JavaScript/">JavaScript</a><span class="tag-list-count">3</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Math/">Math</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Performance/">Performance</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/R/">R</a><span class="tag-list-count">2</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Reverse-Engineering/">Reverse Engineering</a><span class="tag-list-count">6</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Swift/">Swift</a><span class="tag-list-count">6</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/XNU/">XNU</a><span class="tag-list-count">2</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/iOS/">iOS</a><span class="tag-list-count">34</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/shell/">shell</a><span class="tag-list-count">1</span></li></ul>
+    </div>
+  </div>
+
+  
+    
+  <div class="widget-wrap">
+    <h3 class="widget-title">Tag Cloud</h3>
+    <div class="widget tagcloud">
+      <a href="/tags/Android/" style="font-size: 10px;">Android</a> <a href="/tags/C/" style="font-size: 10px;">C</a> <a href="/tags/Growth/" style="font-size: 10px;">Growth</a> <a href="/tags/JavaScript/" style="font-size: 15px;">JavaScript</a> <a href="/tags/Math/" style="font-size: 10px;">Math</a> <a href="/tags/Performance/" style="font-size: 10px;">Performance</a> <a href="/tags/R/" style="font-size: 12.5px;">R</a> <a href="/tags/Reverse-Engineering/" style="font-size: 17.5px;">Reverse Engineering</a> <a href="/tags/Swift/" style="font-size: 17.5px;">Swift</a> <a href="/tags/XNU/" style="font-size: 12.5px;">XNU</a> <a href="/tags/iOS/" style="font-size: 20px;">iOS</a> <a href="/tags/shell/" style="font-size: 10px;">shell</a>
+    </div>
+  </div>
+
+  
+    
+  <div class="widget-wrap">
+    <h3 class="widget-title">Archives</h3>
+    <div class="widget">
+      <ul class="archive-list"><li class="archive-list-item"><a class="archive-list-link" href="/archives/2018/02/">February 2018</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2018/01/">January 2018</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/11/">November 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/10/">October 2017</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/09/">September 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/08/">August 2017</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/07/">July 2017</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/06/">June 2017</a><span class="archive-list-count">3</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/04/">April 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/01/">January 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/10/">October 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/09/">September 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/07/">July 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/05/">May 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/04/">April 2016</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/03/">March 2016</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/02/">February 2016</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/12/">December 2015</a><span class="archive-list-count">6</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/11/">November 2015</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/10/">October 2015</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/09/">September 2015</a><span class="archive-list-count">4</span></li></ul>
+    </div>
+  </div>
+
+  
+    
+  <div class="widget-wrap">
+    <h3 class="widget-title">Recents</h3>
+    <div class="widget">
+      <ul>
+        
+          <li>
+            <a href="/2018/02/04/iOS-iVar/">谈谈ivar的直接访问</a>
+          </li>
+        
+          <li>
+            <a href="/2018/01/14/iOS-virtual/">XNU之四：iOS虚拟内存限制（一）</a>
+          </li>
+        
+          <li>
+            <a href="/2017/11/27/KVO-Swizzle/">一种基于KVO的页面加载，渲染耗时监控方法</a>
+          </li>
+        
+          <li>
+            <a href="/2017/11/02/load-twice/">注意系统库的坑之load函数调用多次</a>
+          </li>
+        
+          <li>
+            <a href="/2017/10/18/abort/">iOS内存abort(Jetsam) 原理探究</a>
+          </li>
+        
+      </ul>
+    </div>
+  </div>
+
+  
+</aside>
+        
+      </div>
+      <footer id="footer">
+  
+  <div class="outer">
+    <div id="footer-info" class="inner">
+      &copy; 2018 John Doe<br>
+      Powered by <a href="http://hexo.io/" target="_blank">Hexo</a>
+    </div>
+  </div>
+</footer>
+    </div>
+    <nav id="mobile-nav">
+  
+    <a href="/" class="mobile-nav-link">Home</a>
+  
+    <a href="/archives" class="mobile-nav-link">Archives</a>
+  
+    <a href="/sitemap.xml" class="mobile-nav-link">map</a>
+  
+</nav>
+    
+<script>
+  var disqus_shortname = 'satanwoo-2';
+  
+  var disqus_url = 'http://satanwoo.github.io/2018/02/04/iOS-iVar/';
+  
+  (function(){
+    var dsq = document.createElement('script');
+    dsq.type = 'text/javascript';
+    dsq.async = true;
+    dsq.src = '//' + disqus_shortname + '.disqus.com/embed.js';
+    (document.getElementsByTagName('head')[0] || document.getElementsByTagName('body')[0]).appendChild(dsq);
+  })();
+</script>
+
+
+
+  <link rel="stylesheet" href="/fancybox/jquery.fancybox.css" type="text/css">
+  <script src="/fancybox/jquery.fancybox.pack.js" type="text/javascript"></script>
+
+
+<script src="/js/script.js" type="text/javascript"></script>
+
+  </div>
+</body>
+</html>
