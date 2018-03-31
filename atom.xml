@@ -4,7 +4,7 @@
   
   <link href="/atom.xml" rel="self"/>
   <link href="http://satanwoo.github.io/"/>
-  <updated>2018-02-04T15:15:33.000Z</updated>
+  <updated>2018-03-31T16:32:17.000Z</updated>
   <id>http://satanwoo.github.io/</id>
   
   <author>
@@ -13,6 +13,182 @@
   </author>
   
   <generator uri="http://hexo.io/">Hexo</generator>
+  
+  <entry>
+    <title><![CDATA[动手制作一个简易的iOS动态执行器]]></title>
+    <link href="http://satanwoo.github.io/2018/04/01/jsengine/"/>
+    <id>http://satanwoo.github.io/2018/04/01/jsengine/</id>
+    <published>2018-03-31T16:26:55.000Z</published>
+    <updated>2018-03-31T16:32:17.000Z</updated>
+    <content type="html"><![CDATA[<p>之前听说滴滴的<code>DynamicCocoa</code>是基于JavaScriptCore搞得，一直期待看到他们的真正实现，不过可能后来由于公司机密，应该不能再开源了。</p>
+<p>借着最近开始研究JavaScriptCore的契机，我决定利用这一两天所学的JavaScript知识，在业余时间做一个简单的iOS动态执行器玩具。</p>
+<blockquote>
+<p>题外话1：听说滴滴基于LLVM backend搞了一套中间语言解释器，不知道最后用了哪个？不过LLVM IR解释器的话，包大小需要针对性的裁剪。</p>
+<p>题外话2：我研究这个并不是想在公司做iOS动态化，因为那个对我来说已经没太大难度及价值了。我只是纯粹想看看JavaScriptCore的一些实现而已。</p>
+</blockquote>
+<h3 id="效果">效果</h3><p>一张Gif图想必能最佳得展示我做的玩具，请各位大佬过目：</p>
+<p><img src="https://github.com/SatanWoo/BeeHive/blob/master/jstester.gif?raw=true" alt=""></p>
+<h3 id="前置知识点">前置知识点</h3><p>在实现我们的执行器前，我们还是要稍微要了解一下一些前置的知识点。</p>
+<h4 id="JSWrapper_Object">JSWrapper Object</h4><p>大家都知道，Objective-C中的诸多类型在JavaScript的环境里是不能直接用的，需要通过JSValue进行一层包装，具体的类型转换如下图展示：</p>
+<p><img src="http://upload-images.jianshu.io/upload_images/762048-c669c91024c9308b.png?imageMogr2/auto-orient/strip%7CimageView2/2/w/1240" alt=""></p>
+<p>基本上图上的转换都很容易理解，唯一需要我们注意的是<code>Wrapper Object</code>。什么是<code>Wrapper Object</code>呢？</p>
+<p>举个例子：</p>
+<pre><code><span class="built_in">self</span><span class="built_in">.</span>context<span class="preprocessor">[</span>@<span class="string">"a"</span><span class="preprocessor">]</span><span class="markup"> = </span><span class="preprocessor">[</span>CustomObject <span class="literal">new</span><span class="preprocessor">]</span><span class="markup"></span>
+</code></pre><p>上述代码将我们一个自定义类型<code>CustomObject</code>的实例以变量名<code>a</code>的方式注入到了JavaScript的运行环境里。但是她是怎么知道我们的定义呢，又是如何知道我们是否能调用特定的方法？</p>
+<p>从默认的角度看，JS运行环境只会把OC中<code>init</code>初始化方法以及类的继承关系给同步到JS环境中（如果有JSExport我们下文说），然后这个对象会包装给一个JSWrapperValue用于JS环境中使用。而当JS环境调用OC并且涉及到这个对象的时候，JavaScriptCore会自动将其解包还原成原始的OC对象类型。</p>
+<pre><code>- <span class="list">(<span class="keyword">JSValue</span> <span class="variable">*)jsWrapperForObject:(id)object
+{
+    JSC::JSObject*</span> jsWrapper = m_cachedJSWrappers.get<span class="list">(<span class="keyword">object</span>)</span><span class="comment">;</span>
+    if <span class="list">(<span class="keyword">jsWrapper</span>)</span>
+        return [JSValue valueWithJSValueRef<span class="keyword">:toRef</span><span class="list">(<span class="keyword">jsWrapper</span>)</span> inContext<span class="keyword">:m_context</span>]<span class="comment">;</span>
+
+     // 注意点!!!!!!!!!!!!!!!!!!
+    JSValue <span class="variable">*wrapper;
+    if (class_isMetaClass(object_getClass(object)))
+        wrapper = [[self classInfoForClass:(Class)object] constructor];
+    else {
+        JSObjCClassInfo*</span> classInfo = [self classInfoForClass:[object class]]<span class="comment">;</span>
+        wrapper = [classInfo wrapperForObject<span class="keyword">:object</span>]<span class="comment">;</span>
+    }
+
+    JSC:<span class="keyword">:ExecState*</span> exec = toJS<span class="list">([m_context JSGlobalContextRef])</span><span class="comment">;</span>
+    jsWrapper = toJS<span class="list">(<span class="keyword">exec</span>, valueInternalValue<span class="list">(<span class="keyword">wrapper</span>)</span>)</span>.toObject<span class="list">(<span class="keyword">exec</span>)</span><span class="comment">;</span>
+    m_cachedJSWrappers.set<span class="list">(<span class="keyword">object</span>, jsWrapper)</span><span class="comment">;</span>
+    return wrapper<span class="comment">;</span>
+}</span>
+</code></pre><ul>
+<li>整体分析下，就是基于一个缓存来判断是否对特定的对象或类型已经构建果<code>Wrapper Object</code>，没有的话就进行构建，构建过程如下：</li>
+</ul>
+<figure class="highlight dns"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br></pre></td><td class="code"><pre><span class="line">JSClassDefinition definition<span class="comment">;</span></span><br><span class="line"></span><br><span class="line">definition = kJSClassDefinitionEmpty<span class="comment">;</span></span><br><span class="line">definition.className = className<span class="comment">;</span></span><br><span class="line">m_classRef = JSClassCreate(&amp;definition)<span class="comment">;</span></span><br><span class="line"></span><br><span class="line">[self allocateConstructorAndPrototypeWithSuperClassInfo:superClassInfo]<span class="comment">;</span></span><br></pre></td></tr></table></figure>
+<ul>
+<li>没啥特别的，就是OC对象创建对应的JS对象，类型对类型。</li>
+<li>OC类型的继承关系在JS里面通过设置Constructor和Prototype进行构建，其实就是简单的JavaScript原型链继承。</li>
+</ul>
+<h4 id="JSExport协议_&amp;_JSExportAs">JSExport协议 &amp; JSExportAs</h4><p><code>JSExport</code>协议本质上只是个<code>Protocol</code>标记，用于让JavaScriptCore加载那些打上这个特殊标记的类，用于特定方式的注册及初始化。</p>
+<p>上文我们提过，默认情况下，JavaScriptCore会对象创建一个默认的<code>Wrapper Object</code>，但是这个对象除了简单继承关系外，也就一个按照特殊格式命令的<code>Constructor</code>而已：</p>
+<p><code>[NSString stringWithFormat:@&quot;%sConstructor&quot;, className]</code></p>
+<p>那如果我们需要将OC环境中的方法注入到JS环境中，就需要用到<code>JSExport</code>协议了，这个协议在运行时会按照如下逻辑进行处理，将方法和属性进行诸如注入：</p>
+<figure class="highlight nimrod"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br><span class="line">34</span><br><span class="line">35</span><br><span class="line">36</span><br><span class="line">37</span><br><span class="line">38</span><br><span class="line">39</span><br><span class="line">40</span><br><span class="line">41</span><br><span class="line">42</span><br><span class="line">43</span><br><span class="line">44</span><br><span class="line">45</span><br></pre></td><td class="code"><pre><span class="line">检查init方法簇的方法，并根据这么合法提供合理的</span><br><span class="line"></span><br><span class="line">__block <span class="type">HashMap</span>&lt;<span class="type">String</span>, <span class="type">Protocol</span> *&gt; initTable;</span><br><span class="line">    <span class="type">Protocol</span> *exportProtocol = getJSExportProtocol();</span><br><span class="line">    <span class="keyword">for</span> (<span class="type">Class</span> currentClass = cls; currentClass; currentClass = class_getSuperclass(currentClass)) &#123;</span><br><span class="line">        forEachProtocolImplementingProtocol(currentClass, exportProtocol, ^(<span class="type">Protocol</span> *protocol) &#123;</span><br><span class="line">            forEachMethodInProtocol(protocol, <span class="type">YES</span>, <span class="type">YES</span>, ^(<span class="type">SEL</span> selector, <span class="keyword">const</span> <span class="type">char</span>*) &#123;</span><br><span class="line">                <span class="keyword">const</span> <span class="type">char</span>* name = sel_getName(selector);</span><br><span class="line">                <span class="keyword">if</span> (!isInitFamilyMethod(@(name)))</span><br><span class="line">                    <span class="keyword">return</span>;</span><br><span class="line">                initTable.<span class="type">set</span>(name, protocol);</span><br><span class="line">            &#125;);</span><br><span class="line">        &#125;);</span><br><span class="line">    &#125;</span><br><span class="line"></span><br><span class="line">    <span class="keyword">for</span> (<span class="type">Class</span> currentClass = cls; currentClass; currentClass = class_getSuperclass(currentClass)) &#123;</span><br><span class="line">        __block unsigned numberOfInitsFound = <span class="number">0</span>;</span><br><span class="line">        __block <span class="type">SEL</span> initMethod = <span class="number">0</span>;</span><br><span class="line">        __block <span class="type">Protocol</span> *initProtocol = <span class="number">0</span>;</span><br><span class="line">        __block <span class="keyword">const</span> <span class="type">char</span>* types = <span class="number">0</span>;</span><br><span class="line">        forEachMethodInClass(currentClass, ^(<span class="type">Method</span> <span class="keyword">method</span>) &#123;</span><br><span class="line">            <span class="type">SEL</span> selector = method_getName(<span class="keyword">method</span>);</span><br><span class="line">            <span class="keyword">const</span> <span class="type">char</span>* name = sel_getName(selector);</span><br><span class="line">            <span class="type">auto</span> iter = initTable.find(name);</span><br><span class="line"></span><br><span class="line">            <span class="keyword">if</span> (iter == initTable.<span class="keyword">end</span>())</span><br><span class="line">                <span class="keyword">return</span>;</span><br><span class="line"></span><br><span class="line">            numberOfInitsFound++;</span><br><span class="line">            initMethod = selector;</span><br><span class="line">            initProtocol = iter-&gt;value;</span><br><span class="line">            types = method_getTypeEncoding(<span class="keyword">method</span>);</span><br><span class="line">        &#125;);</span><br><span class="line"></span><br><span class="line">        <span class="keyword">if</span> (!numberOfInitsFound)</span><br><span class="line">            <span class="keyword">continue</span>;</span><br><span class="line"></span><br><span class="line">        <span class="keyword">if</span> (numberOfInitsFound &gt; <span class="number">1</span>) &#123;</span><br><span class="line">            <span class="type">NSLog</span>(@<span class="string">"ERROR: Class %@ exported more than one init family method via JSExport. Class %@ will not have a callable JavaScript constructor function."</span>, cls, cls);</span><br><span class="line">            <span class="keyword">break</span>;</span><br><span class="line">        &#125;</span><br><span class="line"></span><br><span class="line">        <span class="type">JSObjectRef</span> <span class="keyword">method</span> = objCCallbackFunctionForInit(context, cls, initProtocol, initMethod, types);</span><br><span class="line">        <span class="keyword">return</span> [<span class="type">JSValue</span> valueWithJSValueRef:<span class="keyword">method</span> inContext:context];</span><br><span class="line">    &#125;</span><br></pre></td></tr></table></figure>
+<figure class="highlight dns"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br></pre></td><td class="code"><pre><span class="line">注入方法和属性</span><br><span class="line">Protocol *exportProtocol = getJSExportProtocol()<span class="comment">;</span></span><br><span class="line">forEachProtocolImplementingProtocol(m_class, exportProtocol, ^(Protocol *protocol)&#123;</span><br><span class="line">  copyPrototypeProperties(m_context, m_class, protocol, prototype)<span class="comment">;</span></span><br><span class="line">  copyMethodsToObject(m_context, m_class, protocol, NO, constructor)<span class="comment">;</span></span><br><span class="line">&#125;)<span class="comment">;</span></span><br></pre></td></tr></table></figure>
+<p>而至于<code>JSExportAs</code>，就是做了个简单的名称映射而已，毕竟JS函数传参和OC有很大的区别：</p>
+<pre><code><span class="keyword">static</span> <span class="built_in">NSMutableDictionary</span> *createRenameMap(Protocol *protocol, <span class="built_in">BOOL</span> isInstanceMethod)
+{
+    <span class="built_in">NSMutableDictionary</span> *renameMap = [[<span class="built_in">NSMutableDictionary</span> alloc] init];
+
+    forEachMethodInProtocol(protocol, <span class="literal">NO</span>, isInstanceMethod, ^(SEL sel, <span class="keyword">const</span> <span class="keyword">char</span>*){
+        <span class="built_in">NSString</span> *rename = @(sel_getName(sel));
+        <span class="built_in">NSRange</span> range = [rename rangeOfString:<span class="string">@"__JS_EXPORT_AS__"</span>];
+        <span class="keyword">if</span> (range<span class="variable">.location</span> == <span class="built_in">NSNotFound</span>)
+            <span class="keyword">return</span>;
+        <span class="built_in">NSString</span> *selector = [rename substringToIndex:range<span class="variable">.location</span>];
+        <span class="built_in">NSUInteger</span> begin = range<span class="variable">.location</span> + range<span class="variable">.length</span>;
+        <span class="built_in">NSUInteger</span> length = [rename length] - begin - <span class="number">1</span>;
+        <span class="built_in">NSString</span> *name = [rename substringWithRange:(<span class="built_in">NSRange</span>){ begin, length }];
+        renameMap[selector] = name;
+    });
+
+    <span class="keyword">return</span> renameMap;
+}
+</code></pre><h3 id="实现过程">实现过程</h3><p><b style="color:red">说了那么多基础原理，下面让我们来看看具体实现流程：</b></p>
+<h4 id="类、实例和方法">类、实例和方法</h4><p>在我看来，要实现一个动态化的执行环境，有三要素是必不可少的：</p>
+<p><b style="color:red">类（包括元类）、实例对象以及方法。</b></p>
+<p>基于我们上文对于<code>Wrapper Object</code>的分析，我们可以构建特殊类型的Wrapper Object：</p>
+<ul>
+<li>WZJSClassRef，用于包装<code>Class</code>，比如<code>[NSObject class]</code>的返回值</li>
+<li>WZJSInstanceRef，用于包装<code>instance</code>，比如<code>[NSObject new]</code>的返回值</li>
+<li>WZJSMethodRef，用于包装<code>SEL</code>。比如<code>-[NSObject alloc]</code>。</li>
+</ul>
+<p>除了上述三要素，我们还需要定义一个全局变量，<code>WZGloablObject</code>（大家可以理解为浏览器的window对象），用于拦截顶层的属性访问。</p>
+<p><b style="color:red">按照这个设计，大家可以自行思考下，如果是你做，你会如何继续下面的工作，文章下周随着代码一起发布吧。</b></p>
+<h4 id="Choose_调试">Choose 调试</h4><p>搞过逆向用过<strong>Cycript</strong>的朋友都知道，<strong>Cycript</strong>在调试时候有个非常方便的调试功能：<code>Choose</code>。该功能可以快速的帮助我们根据类名在堆上的对象全部查询返回。</p>
+<p>这么实用的功能必须提供，我基本上直接照搬了Cycript的实现。代码很清晰，基本能够自解释其逻辑。核心基本上就是遍历每个<code>malloc_zone</code>，然后根据获取的<code>vmaddress_range</code>判断获取到的<strong>数据</strong>其类型是不是我们要的。</p>
+<pre><code>// 遍历zone
+<span class="keyword">for</span> (unsigned i = <span class="number">0</span>; i != size; ++i) {
+    <span class="keyword">const</span> malloc_zone_t * zone = reinterpret_cast&lt;<span class="keyword">const</span> malloc_zone_t *&gt;(zones[i]);
+    <span class="keyword">if</span> (zone == <span class="type">NULL</span> || zone-&gt;introspect == <span class="type">NULL</span>)
+        <span class="keyword">continue</span>;
+    zone-&gt;introspect-&gt;enumerator(mach_task_self(), &amp;choice, <span class="type">MALLOC_PTR_IN_USE_RANGE_TYPE</span>, zones[i], &amp;read_memory, &amp;choose_);
+}
+
+// 检查对象
+<span class="keyword">for</span> (unsigned i = <span class="number">0</span>; i &lt; count; ++i) {
+   vm_range_t &amp;<span class="type">range</span> = ranges[i];
+   <span class="type">void</span> * data = reinterpret_cast&lt;<span class="type">void</span> *&gt;(<span class="type">range</span>.address);
+   size_t size = <span class="type">range</span>.size;
+
+   <span class="keyword">if</span> (size &lt; sizeof(<span class="type">ObjectStruct</span>))
+       <span class="keyword">continue</span>;
+
+   uintptr_t * pointers = reinterpret_cast&lt;uintptr_t *&gt;(data);
+<span class="comment">#ifdef __arm64__</span>
+   <span class="type">Class</span> isa = (__bridge <span class="type">Class</span>)((<span class="type">void</span> *)(pointers[<span class="number">0</span>] &amp; <span class="number">0x1fffffff8</span>));
+<span class="comment">#else</span>
+   <span class="type">Class</span> isa = reinterpret_cast&lt;<span class="type">Class</span>&gt;(pointers[<span class="number">0</span>]);
+<span class="comment">#endif</span>
+   std::<span class="type">set</span>&lt;<span class="type">Class</span>&gt;::const_iterator <span class="literal">result</span>(choice-&gt;query_.find(isa));
+   <span class="keyword">if</span> (<span class="literal">result</span> == choice-&gt;query_.<span class="keyword">end</span>())
+       <span class="keyword">continue</span>;
+
+   size_t needed = class_getInstanceSize(*<span class="literal">result</span>);
+   size_t boundary = <span class="number">496</span>;
+<span class="comment">#ifdef __LP64__</span>
+   boundary *= <span class="number">2</span>;
+<span class="comment">#endif</span>
+   <span class="keyword">if</span> ((needed &lt;= boundary &amp;&amp; (needed + <span class="number">15</span>) / <span class="number">16</span> * <span class="number">16</span> != size) || (needed &gt; boundary &amp;&amp; (needed + <span class="number">511</span>) / <span class="number">512</span> * <span class="number">512</span> != size))
+       <span class="keyword">continue</span>;
+   choice-&gt;result_.insert((__bridge id)(data));
+}
+</code></pre><p><b style="color:red">不过这里一大堆的511、512的数字构成的公式，实话说我不是很懂，有了解的大佬麻烦告知我一下。</b></p>
+<h4 id="类型转换">类型转换</h4><p>首先我们需要记住，JavaScript的基础类型如下：</p>
+<pre><code>-<span class="ruby"> 字符串、
+</span>-<span class="ruby"> 数字、
+</span>-<span class="ruby"> 布尔、
+</span>-<span class="ruby"> 数组、
+</span>-<span class="ruby"> 对象、
+</span>-<span class="ruby"> <span class="constant">Null</span>、
+</span>-<span class="ruby"> <span class="constant">Undefined</span></span>
+</code></pre><p>所以我们只要根据对应的进行转换就可以，如下所示：</p>
+<ul>
+<li>JS字符串 &lt;-&gt; NSString</li>
+<li>数字 &lt;-&gt; NSNumber</li>
+<li>数组 &lt;-&gt; NSArray</li>
+<li>Null &lt;-&gt; NSNull</li>
+<li>Undefined &lt;-&gt; Void (仅当返回值的时候处理，否则直接抛出异常)</li>
+</ul>
+<blockquote>
+<p>题外话，JavaScript里面没有什么整数和浮点数类型区分一说，所以我们可以无脑将其通过double的方式构建<code>NSNumber</code></p>
+</blockquote>
+<p>最后再来说下对对象类型的处理：</p>
+<p>在JavaScript，任何对象都可以简单理解为包含了属性（方法）的一个包装体，如下所示:</p>
+<pre><code>var a = {x:<span class="number">10</span>, y:<span class="number">100</span>};
+</code></pre><p>因此，我们在对类型进行转换的时候，要特别注意以下几点：</p>
+<ul>
+<li>这个对象是不是我们刚刚上文提过的<b style="color:red">类、实例、方法</b>，是的话在其进入到Objective-C执行上下文的之前从JSWrapperObject中取出来。</li>
+<li>这个对象是不是特定类型的结构体，是的话我们将其转换成结构体，比如<code>CGRect</code>之类的，是的话需要特别转换</li>
+<li>是不是可以直接转换成特定类型的对象，比如<code>Date &lt;-&gt; NSDate</code>的转换。</li>
+<li>最后，将其可遍历的属性和对应的属性值，转换到<code>NSDictionary</code>之中。</li>
+<li><strong>当然，别忘了，需要注意递归处理</strong>。</li>
+</ul>
+<h4 id="Calling_Convention">Calling Convention</h4><p>关于<code>Calling Convention</code>，本文就不再赘述，有兴趣的读者可以参考我和同事一起写的知乎专栏<a href="https://zhuanlan.zhihu.com/c_142064221" target="_blank" rel="external">iOS调试进阶</a></p>
+<p>简单来重新描述下就是：</p>
+<p>一个函数的调用过程中，函数的参数既可以使用栈传递，也可以使用寄存器传递，参数压栈的顺序可以从左到右也可以从右到左，函数调用后参数从栈弹出这个工作可以由函数调用方完成，也可以由被调用方完成。如果函数的调用方和被调用方(函数本身)不遵循统一的约定，有这么多分歧这个函数调用就没法完成。这个双方必须遵守的统一约定就叫做调用惯例(Calling Convention)，调用惯例规定了参数的传递的顺序和方式，以及栈的维护方式。</p>
+<p>由于业界已经有知名大佬写的<code>libffi</code>，所以我们不需要重复发明轮子，直接使用即可。如果真的要了解具体原理，也可以参考<a href="http://satanwoo.github.io/2017/06/29/Macho-2/">我的文章</a>，具体分析<code>objc_msgSend</code>的实现流程。</p>
+<h3 id="其他">其他</h3><p>为了偷懒，我直接用JavaScript实现了这些的效果。其实理论上，如果我完整的实现编译前端，构建抽象语法树分析执行上下文，将Objective-C的代码转换成JavaScript，那么就能实现动态执行Objective-C代码了。(当然本质上还是障眼法)</p>
+<blockquote>
+<p>其实更快的方式，且不能保证完全正确的方式，就是调用一下<code>JSPatchConvertor</code>就好了，哈哈哈。</p>
+</blockquote>
+<h3 id="结语">结语</h3><p>每篇文章的最后，请允许我按照惯例吟诗一首致敬我的偶像，<strong>杨萧玉</strong>。</p>
+<p>杨萧玉，腾讯星，90后中属第一。<br>人低调，还谦虚，iOS技术无人敌。<br>搞逆向，他在行，微信破解太容易。<br>论深度，特服气，深入汇编来分析。<br>动态化，不用提，想发patch就patch。<br>论收入，没得比，一年交税几个亿。  </p>
+<p>我的偶像杨萧玉，为何你竟如此牛逼？</p>
+]]></content>
+    <summary type="html">
+    <![CDATA[<p>之前听说滴滴的<code>DynamicCocoa</code>是基于JavaScriptCore搞得，一直期待看到他们的真正实现，不过可能后来由于公司机密，应该不能再开源了。</p>
+<p>借着最近开始研究JavaScriptCore的契机，我决定利用这一两天所学的Jav]]>
+    </summary>
+    
+      <category term="iOS" scheme="http://satanwoo.github.io/tags/iOS/"/>
+    
+  </entry>
   
   <entry>
     <title><![CDATA[谈谈ivar的直接访问]]></title>
@@ -4340,86 +4516,6 @@ OSSpinUnlock(&amp;_lock)<span class="comment">;</span>
     </summary>
     
       <category term="iOS" scheme="http://satanwoo.github.io/tags/iOS/"/>
-    
-  </entry>
-  
-  <entry>
-    <title><![CDATA[为什么Spotify的付费用户转化率惊人的高？]]></title>
-    <link href="http://satanwoo.github.io/2016/05/02/Spotify/"/>
-    <id>http://satanwoo.github.io/2016/05/02/Spotify/</id>
-    <published>2016-05-02T08:34:03.000Z</published>
-    <updated>2016-05-02T08:38:04.000Z</updated>
-    <content type="html"><![CDATA[<p><strong>本文由本人独自翻译，同步发表在稀土上</strong></p>
-<p>在 2015 年的时候，The Fader <a href="http://www.thefader.com/2015/06/10/new-spotify-statistics" target="_blank" rel="external">报道</a>了一则关于 Spotify 的重磅新闻：在其 7500 万月活跃用户中，有 2000 万左右是付费用户。</p>
-<p>26.6% 的转化率对于免费增值产品来说是令人难以置信的。正如 Jason Chen <a href="http://blog.asmartbear.com/freemium.html" target="_blank" rel="external">所说</a></p>
-<blockquote>
-<p>“如果说免费用户到收费用户的转化率可以达到 4%，那就已经可以说是很不错了，比如 DropBox。但是通常来说，转化率一般都处于 1% 上下浮动，这还是用户十分活跃的情况下才会达到。”</p>
-</blockquote>
-<p>如果说 1% 是普遍的水准，然后 <a href="https://www.process.st/dropbox-vs-google-drive/" target="_blank" rel="external">DropBox</a> 4% 的转化率是非常不错的话，那26.6%绝对可以称的上是令人匪夷所思了。</p>
-<p><img src="http://7lrzqz.com1.z0.glb.clouddn.com/1.jpg" alt=""></p>
-<p>至于用户留存率，<a href="http://expandedramblings.com/index.php/spotify-statistics/" target="_blank" rel="external">80%</a>的用户（包括免费用户和付费用户）每周都会多次使用 Spotify。</p>
-<p>我写这篇文章的原因在于我在使用 Spotify 仅仅 11 天后，就成为了它的付费用户（似乎我当时还经历了一个 7 天 A/B 测试的试用阶段）。所以，我想从产品、<a href="https://medium.com/@benjbrandall/astonishment-expectations-and-reality-in-user-experience-decb6cc18e28" target="_blank" rel="external">用户体验</a>和市场运营的视角来真正探究一下其中深层次的原因，究竟是什么导致了 Spotify 有如此大的魔力让用户乐意为其付费。</p>
-<p>所以，出于这次研究的目的，我又重新注册了一个账号。</p>
-<p>我用了一个新账号并且从一个新用户的视角来使用 Spotify，一个个去剖析那些容易激发用户付费的诱因，并调查这些诱因是如何保证如此高的转化率以及用户留存率。</p>
-<p><em>在我们开始前，我们需要留意一点:</em> <a href="https://www.process.st/slack-review/" target="_blank" rel="external">Slack</a> 也因为它那令人咋舌的用户转化率而出名，<a href="http://www.nirandfar.com/2014/11/slack.html" target="_blank" rel="external">最新的数据</a>显示它们的转化率达到了 30% 左右。但要注意的是，Slack 是一个 B2B 软件，它的用户群体相对来说是付费能力和意愿比较强的高端用户。但是Spotify 有超过 <a href="http://www.statista.com/statistics/475821/spotify-users-age-usa/" target="_blank" rel="external">20%</a>的用户是处于 13 到 18 岁年龄段。与企业精英不惜代价寻找一种合适的解决方案相比，这个年龄段的用户一般能成为付费用户的可能性很低的…所以，Spotify 真的很令人难以置信。</p>
-<h2 id="步骤_1：减少使用障碍，通过_Facebook_注册来形成病毒式营销">步骤 1：减少使用障碍，通过 Facebook 注册来形成病毒式营销</h2><p>Spotfiy 通过 Facebook 获取信息的注册方法是令人称道的。对于那些已经在手机上登录 Facebook 的用户来说，这种注册方式可以直接从 Facebook 获取你的用户数据，意味着你就不用再笨拙地输入你的邮件地址和密码。这无疑会减少用户注册账号的抵触心理。</p>
-<p><img src="http://7lrzqz.com1.z0.glb.clouddn.com/2.png" alt=""></p>
-<p>只要仅仅一次点击，允许数据导入，你就注册成功了。</p>
-<p>除了作为一种注册方式以外，导入 Facebook 的数据还完成了其余两件事：</p>
-<ul>
-<li>将用户的喜好展示给他们的朋友</li>
-<li>可以让你的朋友了解 Spotify，并吸引他们也来注册使用 Spotify</li>
-</ul>
-<p>正如 Helpshift <a href="https://www.helpshift.com/blog/app-retention-20000-mau/" target="_blank" rel="external">所说</a></p>
-<blockquote>
-<p>80% 的手机用户拥有 Facebook 账户。所以，当一个应用的注册只需要轻轻点击蓝色按钮的时候，用户的转化率瞬间就能有 20% 的提升。</p>
-</blockquote>
-<p>所以使用 Facebook 进行注册，对于 Spotify 的营销来说是起了一个非常关键的作用。正如报道中所说的那样，<strong><a href="https://www.digitalmusicnews.com/2015/06/16/for-every-paying-subscriber-spotify-adds-5-free-accounts/" target="_blank" rel="external">每一个付费用户都带来了3个免费用户</a></strong></p>
-<h2 id="步骤_2：精挑细选的播放列表可以满足特定的需求">步骤 2：精挑细选的播放列表可以满足特定的需求</h2><p>Spotify 的目的就是帮助用户发现音乐。它在你初次使用的时候会鼓励你使用它“精心调配”的播放列表。</p>
-<p>通过选择一个包含你熟悉歌曲的播放列表，或者一个和你品味相契合的主题，Spotify 会循环播放这些歌，并在其中穿插播放一些你所不了解的歌。</p>
-<p>对于一首喜爱却又不了解的歌，人们通常的反应是会去寻找这首歌的歌手、所属专辑或者其他具有相似特征的播放列表。这种寻找的流程在 Spotify 的应用中被设计的极其简单，并且会被推荐到你看到的第一屏当中。</p>
-<p><img src="http://7lrzqz.com1.z0.glb.clouddn.com/3.png" alt=""></p>
-<p>但这里有个需要注意的点：<strong>如果你是一个免费用户，那么你就无法在任意时刻切换到你想听的歌。</strong>即使你已经制作了你自己的播放列表，歌曲也会是随机出现的。</p>
-<p>所以对于我来说，我成为付费用户的一个主要原因就在于：在 Spotify 那不可思议却又十分“对味”的推荐算法指引下，我就很自然而然的养成了一种新的并在不断改进的听歌风格。在这个过程中，许许多多的歌曲都会被加入到你的听歌列表中。但一旦加入，随机播放列表就再也不会将其剔除。因此，其中有部分可能是你不怎么想要再听到的歌曲。比如我就不再想听到任何 Brain Food 里的歌。我想要的是可以自由自在的挑选歌曲、对它们进行排序，并对我自己的歌曲列表有绝对的控制权。如果我不是付费用户的话，即使我特别想听 Stars Wars Headspace 专辑中的几首歌，但是我所能做的仅仅是不断地随机跳过我不喜欢的歌曲，直到从 Spotify 听到我想听的歌。</p>
-<p>人们会尝试去“挑战”这个系统来听到他们想要听的歌，但是 Spotify 让这种想法近乎不可能。一般来说，在一个随机播放的列表中，你可能需要跳过8首歌才能听到你想要的歌。</p>
-<p><img src="http://7lrzqz.com1.z0.glb.clouddn.com/4.png" alt=""></p>
-<h2 id="步骤3：Spotify_会强调歌曲和你息息相关的">步骤3：Spotify 会强调歌曲和你息息相关的</h2><p>首页下面是根据心情情况和流派推荐的播放列表。作为一名有音乐文化背景的研究生，我了解到人们听音乐的根本原因在于音乐能够加强情感共鸣。最好的音乐作曲家，如 <a href="https://en.wikipedia.org/wiki/Lester_Bangs" target="_blank" rel="external">Lester Bangs</a>，就曾写到这样的乐评:音乐就像一剂猛药，伴随并强化着你的听音乐体验。</p>
-<p>Spotify 通过一些描述性的分类，并在其中播放与描述非常贴切的音乐来引发共鸣，让听众产生一种“音乐就是我人生不可分割的轨迹”、或“这就是我现在的感受”的心境。</p>
-<p>比如在 Chill 心情分类中可以找到一些让你冷静下来的歌曲，每首歌曲又会与地点、’亚情绪’及个人听歌品味相契合。</p>
-<p><img src="http://7lrzqz.com1.z0.glb.clouddn.com/5.png" alt=""></p>
-<p>歌曲列表包含艺术、排版以及<a href="http://blog.tryadhawk.com/content-marketing/headline-checklist/" target="_blank" rel="external">文案</a>。这些东西对于拥有不同审美的用户来说充满诱惑力。因此对用户来说，很容易就会忽略掉那些不重要的。然后立刻识别出那些诉诸于你的音乐。</p>
-<p>通过鼓励你多使用播放列表，并将其和你平时的生活习惯紧紧联系到一起，Spotify 就会变得越来越智能：成为一个能够生成适应任何场景的音乐播放器。<strong>构建一个能融入用户日常生活习惯的产品是一个非常有效<a href="https://www.process.st/customer-retention-strategies/" target="_blank" rel="external">提升用户留存率</a>的方法。</strong>而 Spotify 又采用了非常人性化的手段来达成这个目的：通过理解你听音乐时候的场景和心情。比如你聚会时听得音乐；抑或是跑步、学习时听的音乐。一旦你因为这些目的使用过一次播放列表，当失去它的时候你就会非常想念它。</p>
-<h2 id="步骤4：你把应用“培养”得迎合你的喜好，就相当于做了一笔投资。">步骤4：你把应用“培养”得迎合你的喜好，就相当于做了一笔投资。</h2><p>我之前看过一篇关于<a href="http://usabilitygeek.com/first-time-use-how-to-reduce-initial-friction-of-app-usage/" target="_blank" rel="external"> Flipboard 的入职流程</a>的分析，让用户将应用“培养”<br>成迎合他们自身的喜好是一个久经考验能够提升用户留存率的办法。因为在这个过程中，用户相当于在应用内做了一笔“投资”：如果他们不升级成付费用户，就意味着他们之前所耗费的精力和时间都白白浪费了。</p>
-<p>Spotify 也采用了这个策略。他们的做法是允许用户将音乐存储到自己的账户中、建立自己的音乐合集、通过 Facebook 以及Spotify 自己的社交网络和朋友进行分享。</p>
-<p><strong>当然，这种投资并是金钱投资，因此你不会感到是被强制消费了。（事实上，现在如果还采用收费合同来绑定用户的行为是不能被容忍的）。但是这种投资对于个人来说，却显得更为重要，因为这是一种跟时间相关的投资，每个人都很珍惜时间，不是吗?</strong></p>
-<p>将 Spotify 和 Facebook 打通又是另外一种投资。在不同的应用之间建立依赖关系意味着你需要承担更多的责任。比如，你的朋友喜欢你的播放列表、喜欢听你喜欢的歌。这就意味着你在你的朋友圈中成为了一个传播品味的大师，可以给朋友宣传最新最酷的潮流。我想，你肯定不会因为不想成为付费用户就失去这得之不易的品味大师的头衔吧！</p>
-<p>Spotify 并不会强求你选择一个你喜欢的音乐类型，也不会给你许多听歌的建议，它所做的只是让你自行探索音乐。因为自行探索出来的音乐会让你更加感同身受，而且和别人分享这些音乐的时候，也会让你更有成就感。</p>
-<p><img src="http://7lrzqz.com1.z0.glb.clouddn.com/6.png" alt="Spotify Personalization"></p>
-<p>当你在你自己的设备上使用 Spotify 的时候，除了生成个性化的播放列表，Spotify 并不会耗费你大量的精力。事实上，它根本就不需要。Spotify 的推荐算法已经足够强大，能够理解你的需求。而且多半时候，推荐出来的东西都正是你想要的。所以，你只需要在培养属于你自己喜好的 Spotify 的时候耗费一点精力而已。<strong>_你的_Spotify其实比你自己更懂你的喜好</strong></p>
-<h2 id="这些要求你进行付费的广告并不会让人感到特别烦扰，但是却巧妙的破坏了听音乐时候的代入感">这些要求你进行付费的广告并不会让人感到特别烦扰，但是却巧妙的破坏了听音乐时候的代入感</h2><p>另一个能让 Spotify 的付费策略成功伪装成是不激进的原因的是（实际上是非常激进的）你没有意识到你究竟会被一些负面因素激怒到何种程度。</p>
-<p><img src="http://i.imgur.com/CIKcZnV.jpg" alt=""></p>
-<p>音乐一个非常关键的作用就是它给人带来的代入感。在 Spotify 上，有一些非常流行的播放列表来帮助用户专注于工作，比如学习、<a href="https://www.process.st/writing-process/" target="_blank" rel="external">写作</a>或者要求注意力非常集中的情形。</p>
-<p>_你听了15分钟的 chill Brian Eno soundscape。突然，一个刺耳的、极不匹配的流行音乐开始播放。紧跟着出现了一个广告，一个人告诉了你一个你现在毫不关心的东西。然后又过了 30 秒，这些乱七八糟的东西终于结束了，你终于可以听你想要的音乐了。如果是你，你是什么感受？。</p>
-<p>对我来说，摆脱广告的烦扰并不是一个足够有说服力可以让我进行付费的理由。我并不把它们当成是对听音乐有着巨大负面影响的因素。因为只要等广告结束了，我就能继续听我想听的音乐。</p>
-<p>而且和 <strong>Spotify 会让你跳过 8 首歌才能听过你想要的歌曲</strong>相比，广告是微不足道的，更何况它出现的频率也很低，低到很容易被忽略。但尽管如此，广告对于转化率也有着很大的作用。</p>
-<h2 id="允许用户在30天的试用期下载离线音乐是极其明智的">允许用户在30天的试用期下载离线音乐是极其明智的</h2><p>没有什么可以比把你曾经拥有的东西强行夺走更会让你抓狂。</p>
-<p>通过允许用户下载歌曲离线使用，又在一段时间后限制他们只能听在线音乐，<strong>这 30 天试用期带来的自由绝对你产生巨大的落差感</strong>。</p>
-<p>一个月的试用期对于用户来说完全足够在这段时间内建立起一个音乐合集。更何况 Spotify 大大减少了探索音乐需要耗费的时间：它每天给用户推荐 20 张专辑，而且还会根据你当前的品味和习惯变化。所以 Spotify 通过试用期，给用户画了很大的一个“饼”：如果你们升级成付费用户的话，你们就能享受到多么棒听歌的特权啊。</p>
-<p>一旦获得了离线听歌的特权，用户就会囤积尽可能多的歌曲。用他们的话来说，这是<em>属于你的音乐</em>。但囤积的越多，就会让你陷得越深，你再也不会愿意变回免费用户了。</p>
-<h2 id="无论用户如何使用_Spotify,_最后都会被引导向升级付费">无论用户如何使用 Spotify, 最后都会被引导向升级付费</h2><p>在用户的使用过程中，有时候 Spotify 会明确的要求用户升级为会员，或者提示这个功能仅仅开放给付费用户。</p>
-<p>其中，明确的要求你升级（或者说强迫式的推荐）出现在<strong>一些看似可用的功能实质上仅仅开放给付费用户</strong></p>
-<p><img src="http://7lrzqz.com1.z0.glb.clouddn.com/8.jpg" alt=""></p>
-<p>而在如下几种情况当中，Spotify 会采用暗示的方式提示你如果升级到付费用户，使用体验会更好：</p>
-<p><img src="http://7lrzqz.com1.z0.glb.clouddn.com/9.jpg" alt=""></p>
-<p>所以即使 Spofity 有着巨大基数的免费用户，也很容易就能说明为什么它的付费转化率如此之高。</p>
-<p><strong>只要你是音乐的发烧友、渴望发现那些令你狂热的音乐、存储音乐并想要打造出专属你品味的 Spotify。那么，是时候升级成付费用户了。（当然，你也可以选择不升级）</strong></p>
-]]></content>
-    <summary type="html">
-    <![CDATA[<p><strong>本文由本人独自翻译，同步发表在稀土上</strong></p>
-<p>在 2015 年的时候，The Fader <a href="http://www.thefader.com/2015/06/10/new-spotify-statistics" targ]]>
-    </summary>
-    
-      <category term="Growth" scheme="http://satanwoo.github.io/tags/Growth/"/>
     
   </entry>
   
