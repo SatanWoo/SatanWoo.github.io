@@ -19,7 +19,7 @@
 题外话1：听说滴滴基于LLVM backend搞了一套中间语言解释器，不知道最后用了哪个？不过LL">
 <meta property="og:image" content="https://github.com/SatanWoo/BeeHive/blob/master/jstester.gif?raw=true">
 <meta property="og:image" content="http://upload-images.jianshu.io/upload_images/762048-c669c91024c9308b.png?imageMogr2/auto-orient/strip%7CimageView2/2/w/1240">
-<meta property="og:updated_time" content="2018-03-31T16:37:37.000Z">
+<meta property="og:updated_time" content="2018-03-31T16:59:45.000Z">
 <meta name="twitter:card" content="summary">
 <meta name="twitter:title" content="动手制作一个简易的iOS动态执行器">
 <meta name="twitter:description" content="之前听说滴滴的DynamicCocoa是基于JavaScriptCore搞得，一直期待看到他们的真正实现，不过可能后来由于公司机密，应该不能再开源了。
@@ -166,12 +166,7 @@
 </code></pre><h3 id="实现过程">实现过程</h3><p><b style="color:red">说了那么多基础原理，下面让我们来看看具体实现流程：</b></p>
 <h4 id="类、实例和方法">类、实例和方法</h4><p>在我看来，要实现一个动态化的执行环境，有三要素是必不可少的：</p>
 <p><b style="color:red">类（包括元类）、实例对象以及方法。</b></p>
-<p>基于我们上文对于<code>Wrapper Object</code>的分析，我们可以构建特殊类型的Wrapper Object：</p>
-<ul>
-<li>WZJSClassRef，用于包装<code>Class</code>，比如<code>[NSObject class]</code>的返回值</li>
-<li>WZJSInstanceRef，用于包装<code>instance</code>，比如<code>[NSObject new]</code>的返回值</li>
-<li>WZJSMethodRef，用于包装<code>SEL</code>。比如<code>-[NSObject alloc]</code>。</li>
-</ul>
+<p>基于我们上文对于<code>Wrapper Object</code>的分析，我们可以构建特殊类型的Wrapper Object对这三个元素进行包装，具体就不说了，还是建议大家自行思考，基本上类似我上文分析<code>JSWrapperObject</code>的步骤。</p>
 <p>除了上述三要素，我们还需要定义一个全局变量，<code>WZGloablObject</code>（大家可以理解为浏览器的window对象），用于拦截顶层的属性访问。</p>
 <p><b style="color:red">按照这个设计，大家可以自行思考下，如果是你做，你会如何继续下面的工作，文章下周随着代码一起发布吧。</b></p>
 <h4 id="Choose_调试">Choose 调试</h4><p>搞过逆向用过<strong>Cycript</strong>的朋友都知道，<strong>Cycript</strong>在调试时候有个非常方便的调试功能：<code>Choose</code>。该功能可以快速的帮助我们根据类名在堆上的对象全部查询返回。</p>
@@ -258,7 +253,7 @@
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2018/04/01/jsengine/" data-id="cjffloiy9000j39i1j6gbevn6" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2018/04/01/jsengine/" data-id="cjffmh2e0000jf6i1otqwo5ci" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2018/04/01/jsengine/#disqus_thread" class="article-comment-link">Comments</a>
       

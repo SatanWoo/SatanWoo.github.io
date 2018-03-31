@@ -4,7 +4,7 @@
   
   <link href="/atom.xml" rel="self"/>
   <link href="http://satanwoo.github.io/"/>
-  <updated>2018-03-31T16:37:37.000Z</updated>
+  <updated>2018-03-31T16:59:45.000Z</updated>
   <id>http://satanwoo.github.io/</id>
   
   <author>
@@ -19,7 +19,7 @@
     <link href="http://satanwoo.github.io/2018/04/01/jsengine/"/>
     <id>http://satanwoo.github.io/2018/04/01/jsengine/</id>
     <published>2018-03-31T16:26:55.000Z</published>
-    <updated>2018-03-31T16:37:37.000Z</updated>
+    <updated>2018-03-31T16:59:45.000Z</updated>
     <content type="html"><![CDATA[<p>之前听说滴滴的<code>DynamicCocoa</code>是基于JavaScriptCore搞得，一直期待看到他们的真正实现，不过可能后来由于公司机密，应该不能再开源了。</p>
 <p>借着最近开始研究JavaScriptCore的契机，我决定利用这一两天所学的JavaScript知识，在业余时间做一个简单的iOS动态执行器玩具。</p>
 <blockquote>
@@ -92,12 +92,7 @@
 </code></pre><h3 id="实现过程">实现过程</h3><p><b style="color:red">说了那么多基础原理，下面让我们来看看具体实现流程：</b></p>
 <h4 id="类、实例和方法">类、实例和方法</h4><p>在我看来，要实现一个动态化的执行环境，有三要素是必不可少的：</p>
 <p><b style="color:red">类（包括元类）、实例对象以及方法。</b></p>
-<p>基于我们上文对于<code>Wrapper Object</code>的分析，我们可以构建特殊类型的Wrapper Object：</p>
-<ul>
-<li>WZJSClassRef，用于包装<code>Class</code>，比如<code>[NSObject class]</code>的返回值</li>
-<li>WZJSInstanceRef，用于包装<code>instance</code>，比如<code>[NSObject new]</code>的返回值</li>
-<li>WZJSMethodRef，用于包装<code>SEL</code>。比如<code>-[NSObject alloc]</code>。</li>
-</ul>
+<p>基于我们上文对于<code>Wrapper Object</code>的分析，我们可以构建特殊类型的Wrapper Object对这三个元素进行包装，具体就不说了，还是建议大家自行思考，基本上类似我上文分析<code>JSWrapperObject</code>的步骤。</p>
 <p>除了上述三要素，我们还需要定义一个全局变量，<code>WZGloablObject</code>（大家可以理解为浏览器的window对象），用于拦截顶层的属性访问。</p>
 <p><b style="color:red">按照这个设计，大家可以自行思考下，如果是你做，你会如何继续下面的工作，文章下周随着代码一起发布吧。</b></p>
 <h4 id="Choose_调试">Choose 调试</h4><p>搞过逆向用过<strong>Cycript</strong>的朋友都知道，<strong>Cycript</strong>在调试时候有个非常方便的调试功能：<code>Choose</code>。该功能可以快速的帮助我们根据类名在堆上的对象全部查询返回。</p>
