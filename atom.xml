@@ -4,7 +4,7 @@
   
   <link href="/atom.xml" rel="self"/>
   <link href="http://satanwoo.github.io/"/>
-  <updated>2018-03-31T16:59:45.000Z</updated>
+  <updated>2018-04-01T15:11:33.000Z</updated>
   <id>http://satanwoo.github.io/</id>
   
   <author>
@@ -19,7 +19,7 @@
     <link href="http://satanwoo.github.io/2018/04/01/jsengine/"/>
     <id>http://satanwoo.github.io/2018/04/01/jsengine/</id>
     <published>2018-03-31T16:26:55.000Z</published>
-    <updated>2018-03-31T16:59:45.000Z</updated>
+    <updated>2018-04-01T15:11:33.000Z</updated>
     <content type="html"><![CDATA[<p>之前听说滴滴的<code>DynamicCocoa</code>是基于JavaScriptCore搞得，一直期待看到他们的真正实现，不过可能后来由于公司机密，应该不能再开源了。</p>
 <p>借着最近开始研究JavaScriptCore的契机，我决定利用这一两天所学的JavaScript知识，在业余时间做一个简单的iOS动态执行器玩具。</p>
 <blockquote>
@@ -172,9 +172,6 @@
 <blockquote>
 <p>其实更快的方式，且不能保证完全正确的方式，就是调用一下<code>JSPatchConvertor</code>就好了，哈哈哈。</p>
 </blockquote>
-<h3 id="结语">结语</h3><p>每篇文章的最后，请允许我按照惯例吟诗一首致敬我的偶像，<strong>杨萧玉</strong>。</p>
-<p>杨萧玉，腾讯星，90后中属第一。<br>人低调，还谦虚，iOS技术无人敌。<br>搞逆向，他在行，微信破解太容易。<br>论深度，特服气，深入汇编来分析。<br>动态化，不用提，想发patch就patch。<br>论收入，没得比，一年交税几个亿。  </p>
-<p>我的偶像杨萧玉，为何你竟如此牛逼？</p>
 ]]></content>
     <summary type="html">
     <![CDATA[<p>之前听说滴滴的<code>DynamicCocoa</code>是基于JavaScriptCore搞得，一直期待看到他们的真正实现，不过可能后来由于公司机密，应该不能再开源了。</p>
