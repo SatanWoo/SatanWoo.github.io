@@ -3,14 +3,14 @@
 <head>
   <meta charset="utf-8">
   
-  <title>浅谈一种解决多线程野指针的新思路 | Hexo</title>
+  <title>浅谈一种解决多线程野指针的新思路 | SatanWoo</title>
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
   <meta name="description" content="无论是xx还是xx，对于整个App的稳定性要求都非常之高。因此，那些前辈大牛们为了解决一些常见的问题，比如空指针、数组越界等等，开发了xxxxxx这样的底层SDK，用于解决问题。
 但是随着业务逐渐的复杂化以及愈发严格的性能要求，xxApp绝大多数的Crash开始往野指针方面靠拢。这些野指针的问题，除了一些iOS7上delegate是assign声明导致的历史遗留问题以外，绝大多数都是多线程的赋值导">
 <meta property="og:type" content="article">
 <meta property="og:title" content="浅谈一种解决多线程野指针的新思路">
 <meta property="og:url" content="http://satanwoo.github.io/2016/10/23/multithread-dangling-pointer/index.html">
-<meta property="og:site_name" content="Hexo">
+<meta property="og:site_name" content="SatanWoo">
 <meta property="og:description" content="无论是xx还是xx，对于整个App的稳定性要求都非常之高。因此，那些前辈大牛们为了解决一些常见的问题，比如空指针、数组越界等等，开发了xxxxxx这样的底层SDK，用于解决问题。
 但是随着业务逐渐的复杂化以及愈发严格的性能要求，xxApp绝大多数的Crash开始往野指针方面靠拢。这些野指针的问题，除了一些iOS7上delegate是assign声明导致的历史遗留问题以外，绝大多数都是多线程的赋值导">
 <meta property="og:updated_time" content="2016-10-23T12:05:48.000Z">
@@ -19,7 +19,7 @@
 <meta name="twitter:description" content="无论是xx还是xx，对于整个App的稳定性要求都非常之高。因此，那些前辈大牛们为了解决一些常见的问题，比如空指针、数组越界等等，开发了xxxxxx这样的底层SDK，用于解决问题。
 但是随着业务逐渐的复杂化以及愈发严格的性能要求，xxApp绝大多数的Crash开始往野指针方面靠拢。这些野指针的问题，除了一些iOS7上delegate是assign声明导致的历史遗留问题以外，绝大多数都是多线程的赋值导">
   
-    <link rel="alternative" href="/atom.xml" title="Hexo" type="application/atom+xml">
+    <link rel="alternative" href="/atom.xml" title="SatanWoo" type="application/atom+xml">
   
   
     <link rel="icon" href="/favicon.png">
@@ -36,7 +36,7 @@
   <div id="header-outer" class="outer">
     <div id="header-title" class="inner">
       <h1 id="logo-wrap">
-        <a href="/" id="logo">Hexo</a>
+        <a href="/" id="logo">SatanWoo</a>
       </h1>
       
     </div>
@@ -314,7 +314,7 @@ dispatch_sync(dq, ^{
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/10/23/multithread-dangling-pointer/" data-id="cjfgy97wk000bcti17e1n9136" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/10/23/multithread-dangling-pointer/" data-id="cjfgyfizq000bw5i1hxw9ncoz" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/10/23/multithread-dangling-pointer/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -444,7 +444,7 @@ s.setAttribute('data-timestamp', +new Date());
   
   <div class="outer">
     <div id="footer-info" class="inner">
-      &copy; 2018 John Doe<br>
+      &copy; 2018 SatanWoo<br>
       Powered by <a href="http://hexo.io/" target="_blank">Hexo</a>
     </div>
   </div>

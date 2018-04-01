@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   
-  <title>iOS内存abort(Jetsam) 原理探究 | Hexo</title>
+  <title>iOS内存abort(Jetsam) 原理探究 | SatanWoo</title>
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
   <meta name="description" content="招人手淘架构组招人 iOS／Android 皆可，地点杭州，有兴趣的请联系我！！
 iOS内存abort(Jetsam) 原理探究苹果最近开源了iOS系统上的XNU内核代码，加上最近又开始负责手淘/猫客的稳定性及性能相关的工作，所以赶紧拜读下苹果的大作。今天主要开始想分析跟abort相关的内存Jetsam原理。
@@ -11,7 +11,7 @@ iOS内存abort(Jetsam) 原理探究苹果最近开源了iOS系统上的XNU内核
 <meta property="og:type" content="article">
 <meta property="og:title" content="iOS内存abort(Jetsam) 原理探究">
 <meta property="og:url" content="http://satanwoo.github.io/2017/10/18/abort/index.html">
-<meta property="og:site_name" content="Hexo">
+<meta property="og:site_name" content="SatanWoo">
 <meta property="og:description" content="招人手淘架构组招人 iOS／Android 皆可，地点杭州，有兴趣的请联系我！！
 iOS内存abort(Jetsam) 原理探究苹果最近开源了iOS系统上的XNU内核代码，加上最近又开始负责手淘/猫客的稳定性及性能相关的工作，所以赶紧拜读下苹果的大作。今天主要开始想分析跟abort相关的内存Jetsam原理。
 什么是Jetsam关于Jetsam，可能有些人还不是很理解。我们可以从手机设置-&amp;gt;">
@@ -22,7 +22,7 @@ iOS内存abort(Jetsam) 原理探究苹果最近开源了iOS系统上的XNU内核
 iOS内存abort(Jetsam) 原理探究苹果最近开源了iOS系统上的XNU内核代码，加上最近又开始负责手淘/猫客的稳定性及性能相关的工作，所以赶紧拜读下苹果的大作。今天主要开始想分析跟abort相关的内存Jetsam原理。
 什么是Jetsam关于Jetsam，可能有些人还不是很理解。我们可以从手机设置-&amp;gt;">
   
-    <link rel="alternative" href="/atom.xml" title="Hexo" type="application/atom+xml">
+    <link rel="alternative" href="/atom.xml" title="SatanWoo" type="application/atom+xml">
   
   
     <link rel="icon" href="/favicon.png">
@@ -39,7 +39,7 @@ iOS内存abort(Jetsam) 原理探究苹果最近开源了iOS系统上的XNU内核
   <div id="header-outer" class="outer">
     <div id="header-title" class="inner">
       <h1 id="logo-wrap">
-        <a href="/" id="logo">Hexo</a>
+        <a href="/" id="logo">SatanWoo</a>
       </h1>
       
     </div>
@@ -434,7 +434,7 @@ NSDate* bootTime = [NSDate dateWithTimeIntervalSince1970:timestamp];
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2017/10/18/abort/" data-id="cjfgy97xp0018cti187guml4h" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2017/10/18/abort/" data-id="cjfgyfj0p0018w5i1j6s0abzl" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2017/10/18/abort/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -564,7 +564,7 @@ s.setAttribute('data-timestamp', +new Date());
   
   <div class="outer">
     <div id="footer-info" class="inner">
-      &copy; 2018 John Doe<br>
+      &copy; 2018 SatanWoo<br>
       Powered by <a href="http://hexo.io/" target="_blank">Hexo</a>
     </div>
   </div>

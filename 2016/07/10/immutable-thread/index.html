@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   
-  <title>从Immutable来谈谈对于线程安全的理解误区 | Hexo</title>
+  <title>从Immutable来谈谈对于线程安全的理解误区 | SatanWoo</title>
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
   <meta name="description" content="毫不夸张的说，80%的程序员对于多线程的理解都是浅陋和错误的。就拿我从事的iOS行业来说，虽然很多程序员可以对异步、GCD等等与线程相关的概念说的天花乱坠。但是实质上深挖本质的话，大多数人并不能很好的区分Race Condition，Atomic，Immutable对象在线程安全中真正起到的作用。
 所以今天就以这篇文章来谈谈我所理解的线程安全。
@@ -11,7 +11,7 @@
 <meta property="og:type" content="article">
 <meta property="og:title" content="从Immutable来谈谈对于线程安全的理解误区">
 <meta property="og:url" content="http://satanwoo.github.io/2016/07/10/immutable-thread/index.html">
-<meta property="og:site_name" content="Hexo">
+<meta property="og:site_name" content="SatanWoo">
 <meta property="og:description" content="毫不夸张的说，80%的程序员对于多线程的理解都是浅陋和错误的。就拿我从事的iOS行业来说，虽然很多程序员可以对异步、GCD等等与线程相关的概念说的天花乱坠。但是实质上深挖本质的话，大多数人并不能很好的区分Race Condition，Atomic，Immutable对象在线程安全中真正起到的作用。
 所以今天就以这篇文章来谈谈我所理解的线程安全。
 首先就允许我从Immutable来开始整篇话题吧。">
@@ -22,7 +22,7 @@
 所以今天就以这篇文章来谈谈我所理解的线程安全。
 首先就允许我从Immutable来开始整篇话题吧。">
   
-    <link rel="alternative" href="/atom.xml" title="Hexo" type="application/atom+xml">
+    <link rel="alternative" href="/atom.xml" title="SatanWoo" type="application/atom+xml">
   
   
     <link rel="icon" href="/favicon.png">
@@ -39,7 +39,7 @@
   <div id="header-outer" class="outer">
     <div id="header-title" class="inner">
       <h1 id="logo-wrap">
-        <a href="/" id="logo">Hexo</a>
+        <a href="/" id="logo">SatanWoo</a>
       </h1>
       
     </div>
@@ -193,7 +193,7 @@ OSSpinUnlock(&amp;_lock)<span class="comment">;</span>
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/07/10/immutable-thread/" data-id="cjfgy97wu000lcti1u1obbwv7" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/07/10/immutable-thread/" data-id="cjfgyfizz000lw5i1og4teccd" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/07/10/immutable-thread/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -323,7 +323,7 @@ s.setAttribute('data-timestamp', +new Date());
   
   <div class="outer">
     <div id="footer-info" class="inner">
-      &copy; 2018 John Doe<br>
+      &copy; 2018 SatanWoo<br>
       Powered by <a href="http://hexo.io/" target="_blank">Hexo</a>
     </div>
   </div>

@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   
-  <title>注意系统库的坑之load函数调用多次 | Hexo</title>
+  <title>注意系统库的坑之load函数调用多次 | SatanWoo</title>
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
   <meta name="description" content="水文一篇
 
@@ -12,7 +12,7 @@
 <meta property="og:type" content="article">
 <meta property="og:title" content="注意系统库的坑之load函数调用多次">
 <meta property="og:url" content="http://satanwoo.github.io/2017/11/02/load-twice/index.html">
-<meta property="og:site_name" content="Hexo">
+<meta property="og:site_name" content="SatanWoo">
 <meta property="og:description" content="水文一篇
 
 今天在群友逆向企业微信的时候，发现了一个比较有意思的现象了，发现对于NSObject添加的load的方法执行了两次，导致原本意图的Swizzle出现了问题。
@@ -27,7 +27,7 @@
 今天在群友逆向企业微信的时候，发现了一个比较有意思的现象了，发现对于NSObject添加的load的方法执行了两次，导致原本意图的Swizzle出现了问题。
 之前在个人的理解中，load和initialize函数有所不同，load是在加载二进制程序的时候，将这些二进制程序中的类中包含的load方法进行一一调用，调用过程中不会有调用父类的情况。而initialize则不同，是在类第一次使">
   
-    <link rel="alternative" href="/atom.xml" title="Hexo" type="application/atom+xml">
+    <link rel="alternative" href="/atom.xml" title="SatanWoo" type="application/atom+xml">
   
   
     <link rel="icon" href="/favicon.png">
@@ -44,7 +44,7 @@
   <div id="header-outer" class="outer">
     <div id="header-title" class="inner">
       <h1 id="logo-wrap">
-        <a href="/" id="logo">Hexo</a>
+        <a href="/" id="logo">SatanWoo</a>
       </h1>
       
     </div>
@@ -200,7 +200,7 @@ frame <span class="preprocessor">#<span class="number">14</span>: <span class="n
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2017/11/02/load-twice/" data-id="cjfgy97wq000hcti1gd0scj4q" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2017/11/02/load-twice/" data-id="cjfgyfizv000hw5i1icsn36wc" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2017/11/02/load-twice/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -330,7 +330,7 @@ s.setAttribute('data-timestamp', +new Date());
   
   <div class="outer">
     <div id="footer-info" class="inner">
-      &copy; 2018 John Doe<br>
+      &copy; 2018 SatanWoo<br>
       Powered by <a href="http://hexo.io/" target="_blank">Hexo</a>
     </div>
   </div>

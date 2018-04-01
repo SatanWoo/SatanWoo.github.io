@@ -3,14 +3,14 @@
 <head>
   <meta charset="utf-8">
   
-  <title>JSONRPCKit源码解析 | Hexo</title>
+  <title>JSONRPCKit源码解析 | SatanWoo</title>
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
   <meta name="description" content="最近公司参与开源项目BeeHive的开发（第一版的代码是由前辈们写的，已经开源在了GitHub上的Alibaba项目里）。在参与开发的过程中，我一直在思考一个问题：基于Protocol的服务调用真的是最合理的方式吗？这种方式从某种方式来说还是一种强依赖（至少需要引入相对应的整个Protocol的头文件），能否有更通用的方式来进行呢？而且，从目前的实现进度来看，也无法做到对方法级的解耦。
 C/S架构">
 <meta property="og:type" content="article">
 <meta property="og:title" content="JSONRPCKit源码解析">
 <meta property="og:url" content="http://satanwoo.github.io/2017/01/07/JSONRPCKit/index.html">
-<meta property="og:site_name" content="Hexo">
+<meta property="og:site_name" content="SatanWoo">
 <meta property="og:description" content="最近公司参与开源项目BeeHive的开发（第一版的代码是由前辈们写的，已经开源在了GitHub上的Alibaba项目里）。在参与开发的过程中，我一直在思考一个问题：基于Protocol的服务调用真的是最合理的方式吗？这种方式从某种方式来说还是一种强依赖（至少需要引入相对应的整个Protocol的头文件），能否有更通用的方式来进行呢？而且，从目前的实现进度来看，也无法做到对方法级的解耦。
 C/S架构">
 <meta property="og:updated_time" content="2017-01-07T13:41:53.000Z">
@@ -19,7 +19,7 @@ C/S架构">
 <meta name="twitter:description" content="最近公司参与开源项目BeeHive的开发（第一版的代码是由前辈们写的，已经开源在了GitHub上的Alibaba项目里）。在参与开发的过程中，我一直在思考一个问题：基于Protocol的服务调用真的是最合理的方式吗？这种方式从某种方式来说还是一种强依赖（至少需要引入相对应的整个Protocol的头文件），能否有更通用的方式来进行呢？而且，从目前的实现进度来看，也无法做到对方法级的解耦。
 C/S架构">
   
-    <link rel="alternative" href="/atom.xml" title="Hexo" type="application/atom+xml">
+    <link rel="alternative" href="/atom.xml" title="SatanWoo" type="application/atom+xml">
   
   
     <link rel="icon" href="/favicon.png">
@@ -36,7 +36,7 @@ C/S架构">
   <div id="header-outer" class="outer">
     <div id="header-title" class="inner">
       <h1 id="logo-wrap">
-        <a href="/" id="logo">Hexo</a>
+        <a href="/" id="logo">SatanWoo</a>
       </h1>
       
     </div>
@@ -278,7 +278,7 @@ func <span class="function"><span class="title">resultFromBatchObjects</span><sp
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2017/01/07/JSONRPCKit/" data-id="cjfgy97zt002ncti1628y6t0m" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2017/01/07/JSONRPCKit/" data-id="cjfgyfj2e002nw5i1fyoby9cc" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2017/01/07/JSONRPCKit/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -408,7 +408,7 @@ s.setAttribute('data-timestamp', +new Date());
   
   <div class="outer">
     <div id="footer-info" class="inner">
-      &copy; 2018 John Doe<br>
+      &copy; 2018 SatanWoo<br>
       Powered by <a href="http://hexo.io/" target="_blank">Hexo</a>
     </div>
   </div>

@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <feed xmlns="http://www.w3.org/2005/Atom">
-  <title><![CDATA[Hexo]]></title>
+  <title><![CDATA[SatanWoo]]></title>
   
   <link href="/atom.xml" rel="self"/>
   <link href="http://satanwoo.github.io/"/>
@@ -8,7 +8,7 @@
   <id>http://satanwoo.github.io/</id>
   
   <author>
-    <name><![CDATA[John Doe]]></name>
+    <name><![CDATA[SatanWoo]]></name>
     
   </author>
   

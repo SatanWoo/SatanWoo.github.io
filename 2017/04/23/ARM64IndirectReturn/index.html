@@ -3,14 +3,14 @@
 <head>
   <meta charset="utf-8">
   
-  <title>ARM64下Indirect Result Location摸索 | Hexo</title>
+  <title>ARM64下Indirect Result Location摸索 | SatanWoo</title>
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
   <meta name="description" content="ARM64下Indirect Result Location摸索之前学习汇编的时候，大概了解了一些ARM64下寄存器的用途，比如x0 - x7作为函数传递使用。同时，x0也可以作为函数返回值时候的寄存器。
 但是，今天在研究一些跟返回结构体相关的时候，发现返回值并不是放在X0寄存器中。上网搜索了一下资料，发现在ARM64下，当一个Callee函数返回的内容大于16bytes的时候，该内容会被存到一个">
 <meta property="og:type" content="article">
 <meta property="og:title" content="ARM64下Indirect Result Location摸索">
 <meta property="og:url" content="http://satanwoo.github.io/2017/04/23/ARM64IndirectReturn/index.html">
-<meta property="og:site_name" content="Hexo">
+<meta property="og:site_name" content="SatanWoo">
 <meta property="og:description" content="ARM64下Indirect Result Location摸索之前学习汇编的时候，大概了解了一些ARM64下寄存器的用途，比如x0 - x7作为函数传递使用。同时，x0也可以作为函数返回值时候的寄存器。
 但是，今天在研究一些跟返回结构体相关的时候，发现返回值并不是放在X0寄存器中。上网搜索了一下资料，发现在ARM64下，当一个Callee函数返回的内容大于16bytes的时候，该内容会被存到一个">
 <meta property="og:image" content="https://github.com/SatanWoo/WZRecyclePhotoStackView/blob/master/%E5%B1%8F%E5%B9%95%E5%BF%AB%E7%85%A7%202017-04-23%20%E4%B8%8A%E5%8D%882.48.35.png?raw=true">
@@ -22,7 +22,7 @@
 <meta name="twitter:description" content="ARM64下Indirect Result Location摸索之前学习汇编的时候，大概了解了一些ARM64下寄存器的用途，比如x0 - x7作为函数传递使用。同时，x0也可以作为函数返回值时候的寄存器。
 但是，今天在研究一些跟返回结构体相关的时候，发现返回值并不是放在X0寄存器中。上网搜索了一下资料，发现在ARM64下，当一个Callee函数返回的内容大于16bytes的时候，该内容会被存到一个">
   
-    <link rel="alternative" href="/atom.xml" title="Hexo" type="application/atom+xml">
+    <link rel="alternative" href="/atom.xml" title="SatanWoo" type="application/atom+xml">
   
   
     <link rel="icon" href="/favicon.png">
@@ -39,7 +39,7 @@
   <div id="header-outer" class="outer">
     <div id="header-title" class="inner">
       <h1 id="logo-wrap">
-        <a href="/" id="logo">Hexo</a>
+        <a href="/" id="logo">SatanWoo</a>
       </h1>
       
     </div>
@@ -173,7 +173,7 @@ foo(&amp;s, <span class="number">1</span>, <span class="number">2</span>);
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2017/04/23/ARM64IndirectReturn/" data-id="cjfgy980u003ccti1n11blmer" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2017/04/23/ARM64IndirectReturn/" data-id="cjfgyfj3c003cw5i18969fijp" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2017/04/23/ARM64IndirectReturn/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -303,7 +303,7 @@ s.setAttribute('data-timestamp', +new Date());
   
   <div class="outer">
     <div id="footer-info" class="inner">
-      &copy; 2018 John Doe<br>
+      &copy; 2018 SatanWoo<br>
       Powered by <a href="http://hexo.io/" target="_blank">Hexo</a>
     </div>
   </div>

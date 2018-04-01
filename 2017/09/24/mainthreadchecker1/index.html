@@ -3,14 +3,14 @@
 <head>
   <meta charset="utf-8">
   
-  <title>基于桥的全量方法Hook方案 - 探究苹果主线程检查实现 | Hexo</title>
+  <title>基于桥的全量方法Hook方案 - 探究苹果主线程检查实现 | SatanWoo</title>
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
   <meta name="description" content="最近随着iOS11的正式发布，手淘／天猫也开始逐步用Xcode 9开始编译。在调试过程中，很多同事发现经常报许多API会报线程使用错误的问题。摸索了下，发现是Xcode 9里面带上了一个叫libMainThreadChecker.dylib的动态库，在运行时提供了主线程检查的功能，今天就从探究苹果的实现开始讲起。
 0x1 苹果的实现把苹果的动态库拖入hopper里面看看，基本上扫一眼以后，比较可疑">
 <meta property="og:type" content="article">
 <meta property="og:title" content="基于桥的全量方法Hook方案 - 探究苹果主线程检查实现">
 <meta property="og:url" content="http://satanwoo.github.io/2017/09/24/mainthreadchecker1/index.html">
-<meta property="og:site_name" content="Hexo">
+<meta property="og:site_name" content="SatanWoo">
 <meta property="og:description" content="最近随着iOS11的正式发布，手淘／天猫也开始逐步用Xcode 9开始编译。在调试过程中，很多同事发现经常报许多API会报线程使用错误的问题。摸索了下，发现是Xcode 9里面带上了一个叫libMainThreadChecker.dylib的动态库，在运行时提供了主线程检查的功能，今天就从探究苹果的实现开始讲起。
 0x1 苹果的实现把苹果的动态库拖入hopper里面看看，基本上扫一眼以后，比较可疑">
 <meta property="og:image" content="https://github.com/SatanWoo/BeeHive/blob/master/tram_1.png?raw=true">
@@ -22,7 +22,7 @@
 <meta name="twitter:description" content="最近随着iOS11的正式发布，手淘／天猫也开始逐步用Xcode 9开始编译。在调试过程中，很多同事发现经常报许多API会报线程使用错误的问题。摸索了下，发现是Xcode 9里面带上了一个叫libMainThreadChecker.dylib的动态库，在运行时提供了主线程检查的功能，今天就从探究苹果的实现开始讲起。
 0x1 苹果的实现把苹果的动态库拖入hopper里面看看，基本上扫一眼以后，比较可疑">
   
-    <link rel="alternative" href="/atom.xml" title="Hexo" type="application/atom+xml">
+    <link rel="alternative" href="/atom.xml" title="SatanWoo" type="application/atom+xml">
   
   
     <link rel="icon" href="/favicon.png">
@@ -39,7 +39,7 @@
   <div id="header-outer" class="outer">
     <div id="header-title" class="inner">
       <h1 id="logo-wrap">
-        <a href="/" id="logo">Hexo</a>
+        <a href="/" id="logo">SatanWoo</a>
       </h1>
       
     </div>
@@ -419,7 +419,7 @@ WKContentExtensionStore
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2017/09/24/mainthreadchecker1/" data-id="cjfgy97wn000dcti1uqok1n7o" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2017/09/24/mainthreadchecker1/" data-id="cjfgyfizt000dw5i1avutllf8" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2017/09/24/mainthreadchecker1/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -549,7 +549,7 @@ s.setAttribute('data-timestamp', +new Date());
   
   <div class="outer">
     <div id="footer-info" class="inner">
-      &copy; 2018 John Doe<br>
+      &copy; 2018 SatanWoo<br>
       Powered by <a href="http://hexo.io/" target="_blank">Hexo</a>
     </div>
   </div>
