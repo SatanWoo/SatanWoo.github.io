@@ -1,0 +1,345 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  
+  <title>C++实现一个识别MNIST数字的卷积神经网络 | SatanWoo</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+  <meta name="description" content="新的一个财年加入了新的组，从事机器学习相关的工作。由于之前做的一直是iOS（略微底层）方面的事情，初来乍到，对很多东西不熟悉，在超级大神ZB的建议下，用C++实现一个多层前馈神经网络，来识别MNIST数据中的各种手写图片。
+素材寻找
+感谢这位不知名的大佬提供的MNIST数据集，可以直接下载纯图片数据集
+搜索下载已经调整好的weight和bias模型。（下文会介绍）
+
+实现过程关于实现多层前馈神经网">
+<meta property="og:type" content="article">
+<meta property="og:title" content="C++实现一个识别MNIST数字的卷积神经网络">
+<meta property="og:url" content="http://satanwoo.github.io/2018/05/09/MNIST/index.html">
+<meta property="og:site_name" content="SatanWoo">
+<meta property="og:description" content="新的一个财年加入了新的组，从事机器学习相关的工作。由于之前做的一直是iOS（略微底层）方面的事情，初来乍到，对很多东西不熟悉，在超级大神ZB的建议下，用C++实现一个多层前馈神经网络，来识别MNIST数据中的各种手写图片。
+素材寻找
+感谢这位不知名的大佬提供的MNIST数据集，可以直接下载纯图片数据集
+搜索下载已经调整好的weight和bias模型。（下文会介绍）
+
+实现过程关于实现多层前馈神经网">
+<meta property="og:image" content="https://github.com/SatanWoo/BeeHive/blob/master/mnist1.png?raw=true">
+<meta property="og:image" content="https://github.com/SatanWoo/BeeHive/blob/master/mnist2.png?raw=true">
+<meta property="og:image" content="https://github.com/SatanWoo/BeeHive/blob/master/mnist3.png?raw=true">
+<meta property="og:updated_time" content="2018-05-08T17:49:15.000Z">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="C++实现一个识别MNIST数字的卷积神经网络">
+<meta name="twitter:description" content="新的一个财年加入了新的组，从事机器学习相关的工作。由于之前做的一直是iOS（略微底层）方面的事情，初来乍到，对很多东西不熟悉，在超级大神ZB的建议下，用C++实现一个多层前馈神经网络，来识别MNIST数据中的各种手写图片。
+素材寻找
+感谢这位不知名的大佬提供的MNIST数据集，可以直接下载纯图片数据集
+搜索下载已经调整好的weight和bias模型。（下文会介绍）
+
+实现过程关于实现多层前馈神经网">
+  
+    <link rel="alternative" href="/atom.xml" title="SatanWoo" type="application/atom+xml">
+  
+  
+    <link rel="icon" href="/favicon.png">
+  
+  <link rel="stylesheet" href="/css/style.css" type="text/css">
+  
+
+</head>
+<body>
+  <div id="container">
+    <div id="wrap">
+      <header id="header">
+  <div id="banner"></div>
+  <div id="header-outer" class="outer">
+    <div id="header-title" class="inner">
+      <h1 id="logo-wrap">
+        <a href="/" id="logo">SatanWoo</a>
+      </h1>
+      
+    </div>
+    <div id="header-inner" class="inner">
+      <nav id="main-nav">
+        <a id="main-nav-toggle" class="nav-icon"></a>
+        
+          <a class="main-nav-link" href="/">Home</a>
+        
+          <a class="main-nav-link" href="/archives">Archives</a>
+        
+          <a class="main-nav-link" href="/sitemap.xml">map</a>
+        
+      </nav>
+      <nav id="sub-nav">
+        
+          <a id="nav-rss-link" class="nav-icon" href="/atom.xml" title="RSS Feed"></a>
+        
+        <a id="nav-search-btn" class="nav-icon" title="Search"></a>
+      </nav>
+      <div id="search-form-wrap">
+        <form action="//google.com/search" method="get" accept-charset="UTF-8" class="search-form"><input type="search" name="q" results="0" class="search-form-input" placeholder="Search"><button type="submit" class="search-form-submit">&#xF002;</button><input type="hidden" name="sitesearch" value="http://satanwoo.github.io"></form>
+      </div>
+    </div>
+  </div>
+</header>
+      <div class="outer">
+        <section id="main"><article id="post-MNIST" class="article article-type-post" itemscope itemprop="blogPost">
+  <div class="article-meta">
+    <a href="/2018/05/09/MNIST/" class="article-date">
+  <time datetime="2018-05-08T17:04:49.000Z" itemprop="datePublished">2018-05-09</time>
+</a>
+    
+  </div>
+  <div class="article-inner">
+    
+    
+      <header class="article-header">
+        
+  
+    <h1 class="article-title" itemprop="name">
+      C++实现一个识别MNIST数字的卷积神经网络
+    </h1>
+  
+
+      </header>
+    
+    <div class="article-entry" itemprop="articleBody">
+      
+        <p>新的一个财年加入了新的组，从事机器学习相关的工作。由于之前做的一直是iOS（略微底层）方面的事情，初来乍到，对很多东西不熟悉，在超级大神ZB的建议下，用C++实现一个多层前馈神经网络，来识别MNIST数据中的各种手写图片。</p>
+<h3 id="素材寻找">素材寻找</h3><ul>
+<li>感谢这位不知名的大佬提供的MNIST数据集，可以直接下载<a href="https://pan.baidu.com/s/1pLMV4Kz" target="_blank" rel="external">纯图片数据集</a></li>
+<li>搜索下载已经调整好的<code>weight</code>和<code>bias</code>模型。（下文会介绍）</li>
+</ul>
+<h3 id="实现过程">实现过程</h3><p>关于实现多层前馈神经网络，网络上的答案数不胜数，但是大多数都是参考Tensorflow或者Caffe（PyTorch）去实现，我觉得这样很不好。因为学习一门新技术，虽然快速完成项目看出效果很重要，但是对个人来说，弄懂黑盒背后的故事非常重要。因此我决定不依赖任何的库来完全裸写。</p>
+<blockquote>
+<p>当然，对于我来说，实现的完整度和正确性是第一位的，我并没有过多的关注性能。</p>
+</blockquote>
+<p>虽然在深度学习高度发展的今天，类似于<code>AlexNet</code>这样的网络模型能够近乎完美的识别手写数据集。但是作为这个领域的入门级选手，我还是想追溯起源，从头开始做起。因此，在一番学习和搜索后，我选定了<code>LeNet-5</code>模型进行编写。选择它的原因主要有如下几点：</p>
+<ul>
+<li>它自身是一个多层的前馈网络模型。</li>
+<li>麻雀虽小，五脏俱全。包含了卷积层、全联接层、放缩、灰度以及池化层。同时还引入了<code>ReLu</code>，<code>Softmax</code>等激活函数。</li>
+<li><b style="color:red">实现简单，哈哈哈哈哈</b></li>
+</ul>
+<h3 id="LeNet-5">LeNet-5</h3><p><code>LeNet-5</code>整体是个非常简单的过程，包含如下步骤：</p>
+<ol>
+<li>接受一个RGBA的图像。这个很简单，直接在RGBA的颜色空间下读取即可。</li>
+<li>放缩到<strong>28 * 28</strong>（保留所有的feature）的大小，采用的是<code>bilinear</code>插值方法。</li>
+<li>灰度化，公式如下：<code>r / 255.0 * 0.299 + g / 255.0 * 0.587 + b /255.0 * 0.114</code>。</li>
+<li>取反，即<code>255.0 - 灰度化的结果</code></li>
+<li><strong>5 * 5</strong>大小的卷积，加<code>Relu</code>，进行第一次卷积操作。（这里为了保证卷积后尺寸一致，添加了Padding）</li>
+<li>最大池化层降采样。</li>
+<li><strong>5 * 5</strong>大小的进行第二次卷积，加<code>ReLu</code>，进行第一次卷积操作。（这里为了保证卷积后尺寸一致，添加了Padding）</li>
+<li>最大池化层降采样。</li>
+<li>全链接计算 + <code>ReLu</code></li>
+<li>全链接输出10个<code>featureMap</code></li>
+<li><code>Softmax</code>计算并去除最大的值，即为检测的数字结果。</li>
+</ol>
+<p><b style="color:red">整体实现上没什么需要特别注意的，如果对这里的名次不懂，可以上网自行查询对应的解释。不过这里有一点很不好，浪费了大量的时间在调试我定义的张量的格式和网上找到的<code>weight</code>模型的格式。</b></p>
+<p>什么意思呢？我大致用如下的图解释下我自身设计的张量是如何存储的。</p>
+<p>理论上来讲，张量有三个维度，<code>width</code>, <code>height</code>, <code>featureChannels</code>。我在设计我的张量存储上按照的<code>data[height][row][featureChannels]</code>的方式，然后全部拍成了一维。如图所示：</p>
+<p><img src="https://github.com/SatanWoo/BeeHive/blob/master/mnist1.png?raw=true" alt=""></p>
+<blockquote>
+<p>之所以想这么做，主要是瞄了眼<code>TensorFlow</code>也是类似的设计，然后印象中CUDA也是按照这样维度进行存储，貌似可以有效做并行计算拆分。（这个不确定）</p>
+</blockquote>
+<p>然后为什么卡了很久呢？主要是<code>weights</code>和<code>bias</code>的模型文件是个按照自定义协议二进制流的文件（非结构化的数据）。</p>
+<p>这模型由于是我网上找的，一开始没注意模型的自定义协议和我设计的张量直接的区别。我直接按照我的张亮顺序进行了相乘，得到了十分错误的结果。</p>
+<p>当然，<code>bias</code>模型没什么好说的，就是按照<code>outputFeatureMap</code>定义的纯一维数组，不会出错。</p>
+<p>后来发现这个模型是基于苹果的<code>MPS</code>设计的模型，它的模型是这样的数据结构<code>weights[outputChannels][height][width][inputChannel/group]</code>。第一维在计算的时候需要和我做个映射，所以这里没搞清楚模型格式，查了比较久。</p>
+<p><b style="color:red">当然，我在加载权重和bias这块还是做了点小油画。用了<code>mmap</code>，避免一次性直接搞进来太大的数据，反正看起来<code>weight</code>和<code>bias</code>这块并不需要一次性的读取，而且只读的<code>mmap</code>还能合理利用iOS设备上的clean memory回收机制。</b></p>
+<h3 id="框架设计">框架设计</h3><ul>
+<li><p>网络模型拓扑结构，<code>MinstGraph</code>。这里偷懒了，因为<code>LeNet-5</code>也没啥复杂的拓扑结构，不用考虑多个节点连接，直接线性跑下去就好。</p>
+</li>
+<li><p>支持任意多维度的张量，类似<code>Tensorflow</code>里面的<code>Tensor</code>，这里对应了<code>MinstImage</code>。</p>
+</li>
+<li>各种Layer，如<code>MaxPoolingLayer</code>，<code>ConvolutionLayer</code>, <code>FullConnectionLayer</code>等等。</li>
+<li>各种激活函数，如<code>Relu</code>，<code>Softmax</code>等等。</li>
+<li>一些辅助函数之类的。</li>
+</ul>
+<p>代码下周发吧。</p>
+<h3 id="效果">效果</h3><p>准确度一开始不怎么高，检查了很多遍代码，确实发现了一些问题，比如数据精度问题。</p>
+<p>一开始从图像的角度理解，认为用<code>unsigned char</code>存储一个数据点就够了，毕竟图像像素点(RGB空间下)的取值范围就是<strong>0-255</strong>。</p>
+<p>后来发现在计算卷积、全链接层的时候会产生很多小数，用<code>unsigned char</code>存储精度全部丢失了。因此修改成了现在的<code>float</code>设计。对效果提升还是比较明显的。</p>
+<p>后来专门跑了下苹果基于Metal实现的卷积神经网络，由于上述我自身实现的<strong>所有Layer和激活函数</strong>在苹果的框架中都有内置，因此把网络模型搭起来跑就完了（除非苹果自己实现有错）。然后对比我的每一层输入输出和对应的<code>MPSImage</code>输入输出。</p>
+<p>不过这里有一点要注意，<code>MPSImage</code>的数据格式是<strong>NHWC</strong>，这里的N是把C按照4对齐后分成的不同batch。如下图所示：</p>
+<p><img src="https://github.com/SatanWoo/BeeHive/blob/master/mnist2.png?raw=true" alt=""></p>
+<p>假设是一个<code>2 * 1 * 5</code>(w <em> h </em> c)的数据，会先把前4层排完，再进行第五层的排列，按4对齐后多出来的三个层补0。</p>
+<p>我的代码里面<code>MinstImage</code>提供了一个<code>print</code>方法就是专门做输出对比的。嗯，对比了我的实现和用苹果框架的下输入输出，结果是一致的。(除了iOS10上不支持<code>bilinear</code>插值)</p>
+<p>最终效果如下图：</p>
+<p><img src="https://github.com/SatanWoo/BeeHive/blob/master/mnist3.png?raw=true" alt=""></p>
+<p><b style="color:red">备注：</b></p>
+<blockquote>
+<p>如果直接用我开头提到的MNIST数据集，由于每张图都是<strong>28 * 28</strong>的灰度图，因此不需要resize + grayscale，直接从取反开始计算就可以了。</p>
+</blockquote>
+<h3 id="后续规划">后续规划</h3><ol>
+<li><p>做神经网络还是挺有意思，不过目前还是参考简单的模型结构实现，主要做<code>inference</code>。还没真正去研究训练模型这块。<strong>这块需要多深入研究算法，多读论文。</strong></p>
+</li>
+<li><p>目前并没有真正设计<code>Session</code>的概念。<strong>理论上一张图就是一个静态的拓扑结构的组合而已，不应该承担类似执行<code>run</code>的功能</strong>。后续业余时间还会继续实现完整这套逻辑，将静态结构和动态执行结构彻底分离。</p>
+</li>
+<li><p>后续有时间的话，可以尝试实现别的模型。同时支持从文件中读取已经建立好的模型，类似Caffee模型之类的</p>
+</li>
+<li><p>移植到GPU上。</p>
+</li>
+</ol>
+<h3 id="最后">最后</h3><p>文章的最后，还是向我的偶像致敬。机器学习发展到今天，已经成为了不可忽视的研究方向。对于我们这样的后生来说，站在大牛的肩膀上是我们的福气和基石。而像杨萧玉这样，能够一周时间内学完机器学习课程，发表博客造福大众，才是推动机器学习不断发展的中坚力量。相信在他的带领下，我们国家一定能够在2030年达到全球领先的AI技术水准。</p>
+
+      
+    </div>
+    <footer class="article-footer">
+      <a data-url="http://satanwoo.github.io/2018/05/09/MNIST/" data-id="cjgxyzlyx0028d8i1i22ho9i3" class="article-share-link">Share</a>
+      
+        <a href="http://satanwoo.github.io/2018/05/09/MNIST/#disqus_thread" class="article-comment-link">Comments</a>
+      
+      
+  <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Machine-Learning/">Machine Learning</a></li></ul>
+
+    </footer>
+  </div>
+  
+    
+<nav id="article-nav">
+  
+  
+    <a href="/2018/04/01/jsengine/" id="article-nav-older" class="article-nav-link-wrap">
+      <strong class="article-nav-caption">Older</strong>
+      <div class="article-nav-title">动手制作一个简易的iOS动态执行器</div>
+    </a>
+  
+</nav>
+
+  
+</article>
+
+<div id="disqus_thread"></div>
+<script>
+
+/**
+*  RECOMMENDED CONFIGURATION VARIABLES: EDIT AND UNCOMMENT THE SECTION BELOW TO INSERT DYNAMIC VALUES FROM YOUR PLATFORM OR CMS.
+*  LEARN WHY DEFINING THESE VARIABLES IS IMPORTANT: https://disqus.com/admin/universalcode/#configuration-variables*/
+/*
+var disqus_config = function () {
+this.page.url = PAGE_URL;  // Replace PAGE_URL with your page's canonical URL variable
+this.page.identifier = PAGE_IDENTIFIER; // Replace PAGE_IDENTIFIER with your page's unique identifier variable
+};
+*/
+(function() { // DON'T EDIT BELOW THIS LINE
+var d = document, s = d.createElement('script');
+s.src = 'https://satanwoo-2.disqus.com/embed.js';
+s.setAttribute('data-timestamp', +new Date());
+(d.head || d.body).appendChild(s);
+})();
+</script>
+<noscript>Please enable JavaScript to view the <a href="https://disqus.com/?ref_noscript">comments powered by Disqus.</a></noscript>
+                                
+  <section id="comments">
+    <div id="disqus_thread">
+      <noscript>Please enable JavaScript to view the <a href="//disqus.com/?ref_noscript">comments powered by Disqus.</a></noscript>
+    </div>
+  </section>
+</section>
+        
+          <aside id="sidebar">
+  
+    
+  
+    
+  <div class="widget-wrap">
+    <h3 class="widget-title">Tags</h3>
+    <div class="widget">
+      <ul class="tag-list"><li class="tag-list-item"><a class="tag-list-link" href="/tags/Android/">Android</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/C/">C</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Growth/">Growth</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/JavaScript/">JavaScript</a><span class="tag-list-count">3</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Machine-Learning/">Machine Learning</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Math/">Math</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Performance/">Performance</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/R/">R</a><span class="tag-list-count">2</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Reverse-Engineering/">Reverse Engineering</a><span class="tag-list-count">6</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Swift/">Swift</a><span class="tag-list-count">6</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/XNU/">XNU</a><span class="tag-list-count">2</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/iOS/">iOS</a><span class="tag-list-count">35</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/shell/">shell</a><span class="tag-list-count">1</span></li></ul>
+    </div>
+  </div>
+
+  
+    
+  <div class="widget-wrap">
+    <h3 class="widget-title">Tag Cloud</h3>
+    <div class="widget tagcloud">
+      <a href="/tags/Android/" style="font-size: 10px;">Android</a> <a href="/tags/C/" style="font-size: 10px;">C</a> <a href="/tags/Growth/" style="font-size: 10px;">Growth</a> <a href="/tags/JavaScript/" style="font-size: 15px;">JavaScript</a> <a href="/tags/Machine-Learning/" style="font-size: 10px;">Machine Learning</a> <a href="/tags/Math/" style="font-size: 10px;">Math</a> <a href="/tags/Performance/" style="font-size: 10px;">Performance</a> <a href="/tags/R/" style="font-size: 12.5px;">R</a> <a href="/tags/Reverse-Engineering/" style="font-size: 17.5px;">Reverse Engineering</a> <a href="/tags/Swift/" style="font-size: 17.5px;">Swift</a> <a href="/tags/XNU/" style="font-size: 12.5px;">XNU</a> <a href="/tags/iOS/" style="font-size: 20px;">iOS</a> <a href="/tags/shell/" style="font-size: 10px;">shell</a>
+    </div>
+  </div>
+
+  
+    
+  <div class="widget-wrap">
+    <h3 class="widget-title">Archives</h3>
+    <div class="widget">
+      <ul class="archive-list"><li class="archive-list-item"><a class="archive-list-link" href="/archives/2018/05/">May 2018</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2018/04/">April 2018</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2018/02/">February 2018</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2018/01/">January 2018</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/11/">November 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/10/">October 2017</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/09/">September 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/08/">August 2017</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/07/">July 2017</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/06/">June 2017</a><span class="archive-list-count">3</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/04/">April 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/01/">January 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/10/">October 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/09/">September 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/07/">July 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/05/">May 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/04/">April 2016</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/03/">March 2016</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/02/">February 2016</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/12/">December 2015</a><span class="archive-list-count">6</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/11/">November 2015</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/10/">October 2015</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/09/">September 2015</a><span class="archive-list-count">4</span></li></ul>
+    </div>
+  </div>
+
+  
+    
+  <div class="widget-wrap">
+    <h3 class="widget-title">Recents</h3>
+    <div class="widget">
+      <ul>
+        
+          <li>
+            <a href="/2018/05/09/MNIST/">C++实现一个识别MNIST数字的卷积神经网络</a>
+          </li>
+        
+          <li>
+            <a href="/2018/04/01/jsengine/">动手制作一个简易的iOS动态执行器</a>
+          </li>
+        
+          <li>
+            <a href="/2018/02/04/iOS-iVar/">谈谈ivar的直接访问</a>
+          </li>
+        
+          <li>
+            <a href="/2018/01/14/iOS-virtual/">XNU之四：iOS虚拟内存限制（一）</a>
+          </li>
+        
+          <li>
+            <a href="/2017/11/27/KVO-Swizzle/">一种基于KVO的页面加载，渲染耗时监控方法</a>
+          </li>
+        
+      </ul>
+    </div>
+  </div>
+
+  
+</aside>
+        
+      </div>
+      <footer id="footer">
+  
+  <div class="outer">
+    <div id="footer-info" class="inner">
+      &copy; 2018 SatanWoo<br>
+      Powered by <a href="http://hexo.io/" target="_blank">Hexo</a>
+    </div>
+  </div>
+</footer>
+    </div>
+    <nav id="mobile-nav">
+  
+    <a href="/" class="mobile-nav-link">Home</a>
+  
+    <a href="/archives" class="mobile-nav-link">Archives</a>
+  
+    <a href="/sitemap.xml" class="mobile-nav-link">map</a>
+  
+</nav>
+    
+<script>
+  var disqus_shortname = 'satanwoo-2';
+  
+  var disqus_url = 'http://satanwoo.github.io/2018/05/09/MNIST/';
+  
+  (function(){
+    var dsq = document.createElement('script');
+    dsq.type = 'text/javascript';
+    dsq.async = true;
+    dsq.src = '//' + disqus_shortname + '.disqus.com/embed.js';
+    (document.getElementsByTagName('head')[0] || document.getElementsByTagName('body')[0]).appendChild(dsq);
+  })();
+</script>
+
+
+
+  <link rel="stylesheet" href="/fancybox/jquery.fancybox.css" type="text/css">
+  <script src="/fancybox/jquery.fancybox.pack.js" type="text/javascript"></script>
+
+
+<script src="/js/script.js" type="text/javascript"></script>
+
+  </div>
+</body>
+</html>

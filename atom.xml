@@ -4,7 +4,7 @@
   
   <link href="/atom.xml" rel="self"/>
   <link href="http://satanwoo.github.io/"/>
-  <updated>2018-04-01T15:11:33.000Z</updated>
+  <updated>2018-05-08T17:49:15.000Z</updated>
   <id>http://satanwoo.github.io/</id>
   
   <author>
@@ -13,6 +13,98 @@
   </author>
   
   <generator uri="http://hexo.io/">Hexo</generator>
+  
+  <entry>
+    <title><![CDATA[C++实现一个识别MNIST数字的卷积神经网络]]></title>
+    <link href="http://satanwoo.github.io/2018/05/09/MNIST/"/>
+    <id>http://satanwoo.github.io/2018/05/09/MNIST/</id>
+    <published>2018-05-08T17:04:49.000Z</published>
+    <updated>2018-05-08T17:49:15.000Z</updated>
+    <content type="html"><![CDATA[<p>新的一个财年加入了新的组，从事机器学习相关的工作。由于之前做的一直是iOS（略微底层）方面的事情，初来乍到，对很多东西不熟悉，在超级大神ZB的建议下，用C++实现一个多层前馈神经网络，来识别MNIST数据中的各种手写图片。</p>
+<h3 id="素材寻找">素材寻找</h3><ul>
+<li>感谢这位不知名的大佬提供的MNIST数据集，可以直接下载<a href="https://pan.baidu.com/s/1pLMV4Kz" target="_blank" rel="external">纯图片数据集</a></li>
+<li>搜索下载已经调整好的<code>weight</code>和<code>bias</code>模型。（下文会介绍）</li>
+</ul>
+<h3 id="实现过程">实现过程</h3><p>关于实现多层前馈神经网络，网络上的答案数不胜数，但是大多数都是参考Tensorflow或者Caffe（PyTorch）去实现，我觉得这样很不好。因为学习一门新技术，虽然快速完成项目看出效果很重要，但是对个人来说，弄懂黑盒背后的故事非常重要。因此我决定不依赖任何的库来完全裸写。</p>
+<blockquote>
+<p>当然，对于我来说，实现的完整度和正确性是第一位的，我并没有过多的关注性能。</p>
+</blockquote>
+<p>虽然在深度学习高度发展的今天，类似于<code>AlexNet</code>这样的网络模型能够近乎完美的识别手写数据集。但是作为这个领域的入门级选手，我还是想追溯起源，从头开始做起。因此，在一番学习和搜索后，我选定了<code>LeNet-5</code>模型进行编写。选择它的原因主要有如下几点：</p>
+<ul>
+<li>它自身是一个多层的前馈网络模型。</li>
+<li>麻雀虽小，五脏俱全。包含了卷积层、全联接层、放缩、灰度以及池化层。同时还引入了<code>ReLu</code>，<code>Softmax</code>等激活函数。</li>
+<li><b style="color:red">实现简单，哈哈哈哈哈</b></li>
+</ul>
+<h3 id="LeNet-5">LeNet-5</h3><p><code>LeNet-5</code>整体是个非常简单的过程，包含如下步骤：</p>
+<ol>
+<li>接受一个RGBA的图像。这个很简单，直接在RGBA的颜色空间下读取即可。</li>
+<li>放缩到<strong>28 * 28</strong>（保留所有的feature）的大小，采用的是<code>bilinear</code>插值方法。</li>
+<li>灰度化，公式如下：<code>r / 255.0 * 0.299 + g / 255.0 * 0.587 + b /255.0 * 0.114</code>。</li>
+<li>取反，即<code>255.0 - 灰度化的结果</code></li>
+<li><strong>5 * 5</strong>大小的卷积，加<code>Relu</code>，进行第一次卷积操作。（这里为了保证卷积后尺寸一致，添加了Padding）</li>
+<li>最大池化层降采样。</li>
+<li><strong>5 * 5</strong>大小的进行第二次卷积，加<code>ReLu</code>，进行第一次卷积操作。（这里为了保证卷积后尺寸一致，添加了Padding）</li>
+<li>最大池化层降采样。</li>
+<li>全链接计算 + <code>ReLu</code></li>
+<li>全链接输出10个<code>featureMap</code></li>
+<li><code>Softmax</code>计算并去除最大的值，即为检测的数字结果。</li>
+</ol>
+<p><b style="color:red">整体实现上没什么需要特别注意的，如果对这里的名次不懂，可以上网自行查询对应的解释。不过这里有一点很不好，浪费了大量的时间在调试我定义的张量的格式和网上找到的<code>weight</code>模型的格式。</b></p>
+<p>什么意思呢？我大致用如下的图解释下我自身设计的张量是如何存储的。</p>
+<p>理论上来讲，张量有三个维度，<code>width</code>, <code>height</code>, <code>featureChannels</code>。我在设计我的张量存储上按照的<code>data[height][row][featureChannels]</code>的方式，然后全部拍成了一维。如图所示：</p>
+<p><img src="https://github.com/SatanWoo/BeeHive/blob/master/mnist1.png?raw=true" alt=""></p>
+<blockquote>
+<p>之所以想这么做，主要是瞄了眼<code>TensorFlow</code>也是类似的设计，然后印象中CUDA也是按照这样维度进行存储，貌似可以有效做并行计算拆分。（这个不确定）</p>
+</blockquote>
+<p>然后为什么卡了很久呢？主要是<code>weights</code>和<code>bias</code>的模型文件是个按照自定义协议二进制流的文件（非结构化的数据）。</p>
+<p>这模型由于是我网上找的，一开始没注意模型的自定义协议和我设计的张量直接的区别。我直接按照我的张亮顺序进行了相乘，得到了十分错误的结果。</p>
+<p>当然，<code>bias</code>模型没什么好说的，就是按照<code>outputFeatureMap</code>定义的纯一维数组，不会出错。</p>
+<p>后来发现这个模型是基于苹果的<code>MPS</code>设计的模型，它的模型是这样的数据结构<code>weights[outputChannels][height][width][inputChannel/group]</code>。第一维在计算的时候需要和我做个映射，所以这里没搞清楚模型格式，查了比较久。</p>
+<p><b style="color:red">当然，我在加载权重和bias这块还是做了点小油画。用了<code>mmap</code>，避免一次性直接搞进来太大的数据，反正看起来<code>weight</code>和<code>bias</code>这块并不需要一次性的读取，而且只读的<code>mmap</code>还能合理利用iOS设备上的clean memory回收机制。</b></p>
+<h3 id="框架设计">框架设计</h3><ul>
+<li><p>网络模型拓扑结构，<code>MinstGraph</code>。这里偷懒了，因为<code>LeNet-5</code>也没啥复杂的拓扑结构，不用考虑多个节点连接，直接线性跑下去就好。</p>
+</li>
+<li><p>支持任意多维度的张量，类似<code>Tensorflow</code>里面的<code>Tensor</code>，这里对应了<code>MinstImage</code>。</p>
+</li>
+<li>各种Layer，如<code>MaxPoolingLayer</code>，<code>ConvolutionLayer</code>, <code>FullConnectionLayer</code>等等。</li>
+<li>各种激活函数，如<code>Relu</code>，<code>Softmax</code>等等。</li>
+<li>一些辅助函数之类的。</li>
+</ul>
+<p>代码下周发吧。</p>
+<h3 id="效果">效果</h3><p>准确度一开始不怎么高，检查了很多遍代码，确实发现了一些问题，比如数据精度问题。</p>
+<p>一开始从图像的角度理解，认为用<code>unsigned char</code>存储一个数据点就够了，毕竟图像像素点(RGB空间下)的取值范围就是<strong>0-255</strong>。</p>
+<p>后来发现在计算卷积、全链接层的时候会产生很多小数，用<code>unsigned char</code>存储精度全部丢失了。因此修改成了现在的<code>float</code>设计。对效果提升还是比较明显的。</p>
+<p>后来专门跑了下苹果基于Metal实现的卷积神经网络，由于上述我自身实现的<strong>所有Layer和激活函数</strong>在苹果的框架中都有内置，因此把网络模型搭起来跑就完了（除非苹果自己实现有错）。然后对比我的每一层输入输出和对应的<code>MPSImage</code>输入输出。</p>
+<p>不过这里有一点要注意，<code>MPSImage</code>的数据格式是<strong>NHWC</strong>，这里的N是把C按照4对齐后分成的不同batch。如下图所示：</p>
+<p><img src="https://github.com/SatanWoo/BeeHive/blob/master/mnist2.png?raw=true" alt=""></p>
+<p>假设是一个<code>2 * 1 * 5</code>(w <em> h </em> c)的数据，会先把前4层排完，再进行第五层的排列，按4对齐后多出来的三个层补0。</p>
+<p>我的代码里面<code>MinstImage</code>提供了一个<code>print</code>方法就是专门做输出对比的。嗯，对比了我的实现和用苹果框架的下输入输出，结果是一致的。(除了iOS10上不支持<code>bilinear</code>插值)</p>
+<p>最终效果如下图：</p>
+<p><img src="https://github.com/SatanWoo/BeeHive/blob/master/mnist3.png?raw=true" alt=""></p>
+<p><b style="color:red">备注：</b></p>
+<blockquote>
+<p>如果直接用我开头提到的MNIST数据集，由于每张图都是<strong>28 * 28</strong>的灰度图，因此不需要resize + grayscale，直接从取反开始计算就可以了。</p>
+</blockquote>
+<h3 id="后续规划">后续规划</h3><ol>
+<li><p>做神经网络还是挺有意思，不过目前还是参考简单的模型结构实现，主要做<code>inference</code>。还没真正去研究训练模型这块。<strong>这块需要多深入研究算法，多读论文。</strong></p>
+</li>
+<li><p>目前并没有真正设计<code>Session</code>的概念。<strong>理论上一张图就是一个静态的拓扑结构的组合而已，不应该承担类似执行<code>run</code>的功能</strong>。后续业余时间还会继续实现完整这套逻辑，将静态结构和动态执行结构彻底分离。</p>
+</li>
+<li><p>后续有时间的话，可以尝试实现别的模型。同时支持从文件中读取已经建立好的模型，类似Caffee模型之类的</p>
+</li>
+<li><p>移植到GPU上。</p>
+</li>
+</ol>
+<h3 id="最后">最后</h3><p>文章的最后，还是向我的偶像致敬。机器学习发展到今天，已经成为了不可忽视的研究方向。对于我们这样的后生来说，站在大牛的肩膀上是我们的福气和基石。而像杨萧玉这样，能够一周时间内学完机器学习课程，发表博客造福大众，才是推动机器学习不断发展的中坚力量。相信在他的带领下，我们国家一定能够在2030年达到全球领先的AI技术水准。</p>
+]]></content>
+    <summary type="html">
+    <![CDATA[<p>新的一个财年加入了新的组，从事机器学习相关的工作。由于之前做的一直是iOS（略微底层）方面的事情，初来乍到，对很多东西不熟悉，在超级大神ZB的建议下，用C++实现一个多层前馈神经网络，来识别MNIST数据中的各种手写图片。</p>
+<h3 id="素材寻找">素材寻找</h]]>
+    </summary>
+    
+      <category term="Machine Learning" scheme="http://satanwoo.github.io/tags/Machine-Learning/"/>
+    
+  </entry>
   
   <entry>
     <title><![CDATA[动手制作一个简易的iOS动态执行器]]></title>
@@ -4390,121 +4482,6 @@ dispatch_sync(dq, ^{
 ]]></content>
     <summary type="html">
     <![CDATA[<h3 id="概述">概述</h3><p>想必做iOS的人都知道，我们的App是通过UIWindow这个载体呈现出来的。默认情况下，iOS App对于开发者来说只有一个<code>UIWindow</code>，也就是AppDelegate在<code>applicationD]]>
-    </summary>
-    
-      <category term="iOS" scheme="http://satanwoo.github.io/tags/iOS/"/>
-    
-  </entry>
-  
-  <entry>
-    <title><![CDATA[从Immutable来谈谈对于线程安全的理解误区]]></title>
-    <link href="http://satanwoo.github.io/2016/07/10/immutable-thread/"/>
-    <id>http://satanwoo.github.io/2016/07/10/immutable-thread/</id>
-    <published>2016-07-10T09:03:47.000Z</published>
-    <updated>2016-07-10T09:08:26.000Z</updated>
-    <content type="html"><![CDATA[<p>毫不夸张的说，80%的程序员对于多线程的理解都是浅陋和错误的。就拿我从事的iOS行业来说，虽然很多程序员可以对异步、GCD等等与线程相关的概念说的天花乱坠。但是实质上深挖本质的话，大多数人并不能很好的区分Race Condition，Atomic，Immutable对象在线程安全中真正起到的作用。</p>
-<p>所以今天就以这篇文章来谈谈我所理解的线程安全。</p>
-<p>首先就允许我从Immutable来开始整篇话题吧。</p>
-<h3 id="Swift中的Immutable">Swift中的Immutable</h3><p>用过Swift的人都知道，Swift相较于Objective-C有一个比较明显的改动就是将结构体（Struct）和类型（Class）进行了分离。从某种方面来说，Swift将值类型和引用类型进行了明显的区分。为什么要这么做？</p>
-<ol>
-<li>避免了引用类型在被作为参数传递后被他人持有后修改，从而引发比较难以排查的问题。</li>
-<li>在某些程度上提供了一定的线程安全（因为多线程本身的问题很大程序上出在<strong>写修改</strong>的不确定性）。而Immutable 数据的好处在于一旦创建结束就无法修改，因此相当于任一一个线程在使用它的过程中仅仅是使用了读的功能。</li>
-</ol>
-<p>看到这，很多人开始欢呼了（嘲讽下WWDC那些“托”一般的粉丝，哈哈），觉得线程安全的问题迎刃而解了。</p>
-<p>但事实上，我想说的是<strong>使用Immutable不直接等同于线程安全</strong>，不然在使用NSArray，NSDictionary等等Immutable对象之后，为啥还会有那么多奇怪的bug出现？</p>
-<h3 id="指针与对象">指针与对象</h3><p>有些朋友会问，Immutable都将一个对象变为不可变的“固态”了，为什么还是不安全呢，在各个线程间传递的只是一份只读文件啊。</p>
-<p>是的，对于一个Immutable的对象来说，它自身是不可变了。但是在我们的程序里，我们总是需要有“东西”去指向我们的对象的吧，那这个“东西”是什么？<strong>指向对象的指针</strong>。</p>
-<p>指针想必大家都不会陌生。对于指针来说，其实它本质也是一种对象，我们更改指针的指向的时候，实质上就是对于指针的一种赋值。所以想象这样一种场景，当你用一个指针指向一个Immutable对象的时候，在多线程更改的时候，你觉得你的指针修改是线程安全的吗？这也就是为什么有些人碰到一些跟<strong>NSArray</strong>这种Immutable对象的在多线程出现奇怪bug的时候会显得一脸懵逼。</p>
-<p>举例：  </p>
-<pre><code><span class="comment">// Thread A 其中immutableArrayA count 7</span>
-<span class="built_in">self</span><span class="built_in">.</span>xxx = <span class="built_in">self</span><span class="built_in">.</span>immutableArrayA;
-
-<span class="comment">// Thread B 其中immutableArrayB count 4</span>
-<span class="built_in">self</span><span class="built_in">.</span>xxx = <span class="built_in">self</span><span class="built_in">.</span>immutableArrayB 
-
-<span class="comment">// main Thread</span>
-<span class="preprocessor">[</span><span class="built_in">self</span><span class="built_in">.</span>xxx objectAtIndex:<span class="number">5</span><span class="preprocessor">]</span><span class="markup"></span>
-</code></pre><p>上述这个代码片段，绝对是存在线程的安全的隐患的。</p>
-<h3 id="锁">锁</h3><p>既然想到了多线程对于指针（或者对象）的修改，我们很理所当然的就会想到用锁。在现如今iOS博客泛滥的年代，大家都知道NSLock, OSSpinLock之类的可以用于短暂的Critical Section竞态的锁保护。</p>
-<p>所以对于一些多线程中需要使用共享数据源并支持修改操作的时候，比如NSMutableArray添加一些object的时候，我们可以写出如下代码：</p>
-<pre><code>OSSpinLock(&amp;_lock)<span class="comment">;</span>
-[self.array addObject:@"hahah"]<span class="comment">;</span>
-OSSpinUnlock(&amp;_lock)<span class="comment">;</span>
-</code></pre><p>乍一看，这个没问题了，这个就是最基本的写保护锁。如果有多个代码同时尝试添加进入<code>self.array</code>，是会通过锁抢占的方式一个一个的方式的添加。</p>
-<p>但是，这个东西有啥卵用吗？原子锁只能解决Race Condition的问题，但是它并不能解决任何你代码中需要有时序保证的逻辑。</p>
-<p>比如如下这段代码：</p>
-<pre><code>if (<span class="literal">self</span>.xxx) {
-    [<span class="literal">self</span>.dict <span class="built_in">set</span>Object:@<span class="string">"ah"</span> <span class="keyword">for</span>Key:<span class="literal">self</span>.xxx];
-}
-</code></pre><p>大家第一眼看到这样的代码，是不是会认为是正确的？因为在设置key的时候已经提前进行了<code>self.xxx</code>为<strong>非nil</strong>的判断，只有非nil得情况下才会执行后续的指令。<strong>但是，如上代码只有在单线程的前提下才是正确的。</strong></p>
-<p>假设我们将上述代码目前执行的线程为<code>Thread A</code>，当我们执行完<code>if (self.xxx)</code>的语句之后，此时CPU将执行权切换给了<code>Thread B</code>，而这个时候Thread B中调用了一句<strong><em><code>self.xxx = nil</code></em></strong>。<div style="color:red"><b>嘿嘿，后果如何，想必我不用多说了吧。</b></div></p>
-<p>那对于这种问题，我们有没有比较好的解决方案呢？答案是存在的，就是使用<strong>局部变量</strong>。<br>针对上述代码，我们进行如下修改：</p>
-<pre><code>__strong id <span class="function"><span class="keyword">val</span> =</span> self.xxx;
-<span class="keyword">if</span> (<span class="function"><span class="keyword">val</span>) {</span>
-    [self.dict setObject:@<span class="string">"ah"</span> forKey:<span class="function"><span class="keyword">val</span>];</span>
-}
-</code></pre><p>这样，无论多少线程尝试对<code>self.xxx</code>进行修改，本质上的<code>val</code>都会保持现有的状态，符合非nil的判断。</p>
-<h3 id="Objective-C的Property_Setter多线程并发bug">Objective-C的Property Setter多线程并发bug</h3><p>最后我们回到经常使用的Objective-C来谈谈现实生活中经常出现的问题。相信各位对于Property的Setter概念都不陌生，<code>self.xxx = @&quot;kks&quot;</code>其实就是调用了<code>xxx</code>的setter方法。而Setter方法本质上就是如下这样一段代码逻辑：</p>
-<pre><code>- (void)setXxx:(NSString *)newXXX {
-      if (newXXX != _xxx) {
-          [newXXX retain]<span class="comment">;</span>
-          [_xxx release]<span class="comment">;</span>
-          _userName = newXXX<span class="comment">;</span>
-      }
-}
-</code></pre><p>比如<strong>Thread A 和 B</strong>同时对<code>self.xxx</code>进行了赋值，当两者都越过了<code>if (newXXX != _xxx)</code>的判断的时候，就会产生<code>[_xxx release]</code>执行了两次，造成过度释放的crash危险。</p>
-<p>有人说，呵呵，你这是MRC时代的写法，我用了ARC，没问题了吧。</p>
-<p>ok，那让我们来看看ARC时代是怎么处理的，对于ARC中不复写Setter的属性（我相信是绝大多数情况），Objective-C的<a href="https://github.com/opensource-apple/objc4/blob/master/runtime/objc-accessors.mm" target="_blank" rel="external">底层源码</a>是这么处理的。</p>
-<pre><code><span class="keyword">static</span> <span class="keyword">inline</span> <span class="keyword">void</span> reallySetProperty(<span class="keyword">id</span> <span class="keyword">self</span>, SEL _cmd, <span class="keyword">id</span> newValue, 
-  ptrdiff_t offset, <span class="keyword">bool</span> atomic, <span class="keyword">bool</span> <span class="keyword">copy</span>, <span class="keyword">bool</span> mutableCopy) 
-{
-    <span class="keyword">id</span> oldValue;
-    <span class="comment">// 计算结构体中的偏移量</span>
-    <span class="keyword">id</span> *slot = (<span class="keyword">id</span>*) ((<span class="keyword">char</span>*)<span class="keyword">self</span> + offset);
-
-    <span class="keyword">if</span> (<span class="keyword">copy</span>) {
-        newValue = [newValue copyWithZone:<span class="literal">NULL</span>];
-    } <span class="keyword">else</span> <span class="keyword">if</span> (mutableCopy) {
-        newValue = [newValue mutableCopyWithZone:<span class="literal">NULL</span>];
-    } <span class="keyword">else</span> {
-        <span class="comment">// 某些程度的优化</span>
-        <span class="keyword">if</span> (*slot == newValue) <span class="keyword">return</span>;
-        newValue = objc_retain(newValue);
-    }
-
-    <span class="comment">// 危险区</span>
-    <span class="keyword">if</span> (!atomic) {
-         <span class="comment">// 第一步</span>
-        oldValue = *slot;
-
-        <span class="comment">// 第二步</span>
-        *slot = newValue;
-    } <span class="keyword">else</span> {
-        spin_lock_t *slotlock = &amp;PropertyLocks[GOODHASH(slot)];
-        _spin_lock(slotlock);
-        oldValue = *slot;
-        *slot = newValue;        
-        _spin_unlock(slotlock);
-    }
-
-    objc_release(oldValue);
-}
-</code></pre><p>由于我们一般声明的对象都是<strong>nonatomic</strong>，所以逻辑会走到上述注释<strong>危险区</strong>处。还是设想一下多线程对一个属性同时设置的情况，我们首先在线程A处获取到了执行第一步代码后的<strong>oldValue</strong>，然后此时线程切换到了B，B也获得了第一步后的oldValue，所以此时就有两处持有oldValue。然后无论是线程A或者线程B执行到最后都会执行<strong>objc_release(oldValue);</strong>。</p>
-<div style="color:red"><b>于是，重复释放的场景就出现了，crash在向你招手哦！</b></div>
-
-<p>如果不相信的话，可以尝试如下这个小例子：</p>
-<pre><code><span class="keyword">for</span> (<span class="keyword">int</span> i = <span class="number">0</span>; i &lt; <span class="number">10000</span>; i++) {
-    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, <span class="number">0</span>), ^{
-        self.data = [[NSMutableData alloc] init];
-    });
-}
-</code></pre><p>相信你很容易就能看到如下错误log：<strong>error for object: pointer being freed was not allocated</strong>。</p>
-<h3 id="结语">结语</h3><p>说了这么多，本质上线程安全是个一直存在并且相对来说是个比较困难的问题，没有绝对的银弹。用了Immutable不代表可以完全抛弃锁，用了锁也不代表高枕无忧了。希望这篇文章能够帮助大家更深入的思考下相关的问题，不要见到线程安全相关的问题就直接回答加锁、使用Immutable数据之类的。</p>
-<p><strong>当然，其实Stick To GCD (dispatch_barrier)是最好的解决方案。</strong></p>
-<p>本文写于头昏脑涨之中，写错之处请大神多多指出。</p>
-]]></content>
-    <summary type="html">
-    <![CDATA[<p>毫不夸张的说，80%的程序员对于多线程的理解都是浅陋和错误的。就拿我从事的iOS行业来说，虽然很多程序员可以对异步、GCD等等与线程相关的概念说的天花乱坠。但是实质上深挖本质的话，大多数人并不能很好的区分Race Condition，Atomic，Immutable对象在线]]>
     </summary>
     
       <category term="iOS" scheme="http://satanwoo.github.io/tags/iOS/"/>
