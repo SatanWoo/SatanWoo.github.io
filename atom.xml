@@ -4,7 +4,7 @@
   
   <link href="/atom.xml" rel="self"/>
   <link href="http://satanwoo.github.io/"/>
-  <updated>2018-05-08T17:55:18.000Z</updated>
+  <updated>2018-10-05T17:33:42.000Z</updated>
   <id>http://satanwoo.github.io/</id>
   
   <author>
@@ -13,6 +13,86 @@
   </author>
   
   <generator uri="http://hexo.io/">Hexo</generator>
+  
+  <entry>
+    <title><![CDATA[谈谈JSDebugger]]></title>
+    <link href="http://satanwoo.github.io/2018/10/06/JSDebugger-INTRO/"/>
+    <id>http://satanwoo.github.io/2018/10/06/JSDebugger-INTRO/</id>
+    <published>2018-10-05T17:32:55.000Z</published>
+    <updated>2018-10-05T17:33:42.000Z</updated>
+    <content type="html"><![CDATA[<h3 id="务虚乱弹">务虚乱弹</h3><blockquote>
+<p>JSDebugger开源地址：<a href="https://github.com/SatanWoo/JSDebugger" target="_blank" rel="external">https://github.com/SatanWoo/JSDebugger</a>  </p>
+</blockquote>
+<p>这是一篇谈谈设计<code>JSDebugger</code>的总体设想，不会过于深究具体实现细节，后续会单独探讨一些涉及实现方面的过程。</p>
+<p>读过我之前博客的朋友可能会记得我3-4月份的时候写过一篇<a href="http://satanwoo.github.io/2018/04/01/jsengine/">动手制作一个简易的iOS动态执行器</a>，效果如下：</p>
+<p><img src="https://github.com/SatanWoo/BeeHive/blob/master/jstester.gif?raw=true" alt=""></p>
+<p>虽然这个效果还起来还不错（有许多人问这个东西咋实现的，挺炫酷的），但是其实只是个原型而已，从设想构思到编码实现没有超过一天的时间。当时在博文里面承诺发代码，想想实现的完善度还不够，就准备完善后再继续搞搞。不过后来由于我转到其他组不继续钻研<code>iOS</code>，这事也就不了了之。</p>
+<p><strong><span style="color:red">那为什么现在又重新开搞呢？</span></strong>，三点原因吧：</p>
+<ol>
+<li>有朋友在群里问我之前提过的<code>Mach-o</code>包瘦身方案怎么也没发文章？</li>
+<li>看到同事查非Crash产生的Bug的过程还是比较累。</li>
+<li><strong>萧杨玉</strong>太强了。</li>
+</ol>
+<p>好，来说说前两个原因：</p>
+<ul>
+<li>第一点，有些文章为什么后续不发，主要原因还是很多产出和收获都是工作中和同事一起探讨研究出来的，发出来一是泄漏了公司的数据（职业操守还是很重要的），二是相当于霸占了一些别人的工作成果。比如说我之前写的内存等等，对外发的一般都是只和开源代码相关的同时删减了大部分略微关键的部分，所以导致有些读者读起来断断续续云里雾里。</li>
+</ul>
+<blockquote>
+<p>完整版的很多文章或者一些没对外的技术研究，我都发在了公司的内网里，欢迎加入阿里巴巴。</p>
+</blockquote>
+<ul>
+<li>第二点，我之前有段时间负责手淘的稳定性，除了有堆栈的Crash问题外，更多是用户反馈的使用异常以及毫无头绪的奇怪现象。针对这种问题，我相信各家一般都有自己的监控体系，比如日志啊、埋点等等。但是怎么说呢，从我的感受来看，都是使用起来偏繁琐。我想要的就是一个能像我在自己手机上调试应用一样调试用户手机的能力（前提是用户授权同意），因此我就想做了一个这样的工具。结合自己以前玩逆向的些许经历，<code>Cycript</code>就提供了类似的能力，因此就想做一个类似的。</li>
+</ul>
+<p><strong><span style="color:red">说了这么多原因，其实都是给萧杨玉太强了这个原因打掩护的，主要原因就是萧杨玉太强了，写这个JSDebugger是为了向他致敬学习。</span></strong></p>
+<h3 id="JSDebugger">JSDebugger</h3><p>言归正传，回到<strong>JSDebugger</strong>本身，基于之前的代码，这次主要做了完整性的代码重构重写以及功能完善上。</p>
+<ul>
+<li>类方法调用</li>
+<li>实例方法调用</li>
+<li>Setter &amp; Getter的调用</li>
+<li>可变参数的函数调用</li>
+<li>C Pointer的使用</li>
+<li>基础类型的使用</li>
+<li>对象和类的使用</li>
+<li>结构体的使用（目前支持<code>CGSize</code>, <code>CGRect</code>, <code>CGPoint</code>，正在开发自定义注册接口）</li>
+<li>插件化的扩展功能。</li>
+</ul>
+<p>同时，为了更好的测试所写的<code>JavaScript</code>代码，开发了玩具级别的<code>Playground</code>功能，每次实时修改文件后保存即可自动触发<code>Reload</code>。</p>
+<p>很多细节此文不表，但是有些功能上的实现还是比较用心的，比如支持了各种类型、个数的可变参数的函数调用，比如目前支持了<code>choose</code>和<code>introspect</code>的能力，二者配合可以对任意对象实时查询其当前所有的属性值。</p>
+<p>而且，我对<code>JavaScriptCore</code>的使用可能和常规大家所属性的<code>iOS JavaScriptCore</code>有所区别，利用更低层的设计思路，经过我实测：</p>
+<p>更低层的设计桥接思路在<code>iOS</code>上同比基于<code>Objective-C</code>的使用方式可以节省<strong>50%</strong>的时间；同比在<code>Android</code>上使用开源的<code>JavaScriptCore</code>是<strong>50分之一左右</strong>的时间。</p>
+<blockquote>
+<p>当然Android上比较主流的JS引擎室v8咯</p>
+</blockquote>
+<p>具体快原因可以阅读<a href="http://satanwoo.github.io/2018/04/01/jsengine/">动手制作一个简易的iOS动态执行器</a>中涉及的<code>JavaScriptCore</code>上层源码分析以及阅读我的<strong>JSDebugger</strong>源码。</p>
+<p>目前<strong>JSDebugger</strong>还在不断完善中，后续会把我更多的想法移植到里面，总体规划有几个关键点：</p>
+<ul>
+<li><p>实现一个交互式的编辑器（或者命令行），能够让大家写<code>Objective-C</code>的代码自动转换成<strong>JSDebugger</strong>的JS语法。以我目前的技术水准，还做不到<code>Cycript</code>那种牛逼的<code>Objective-C</code>和<code>JavaScript</code>的混合语法模式。</p>
+</li>
+<li><p>实现远程图形化<code>Debug</code>能力。目前<strong>JSDebugger</strong>可以调试数据，但是如果能像<code>Reveal</code>一样把操作界面和数据结合起来就会更有效的定位问题。</p>
+</li>
+</ul>
+<p>欢迎有想法的朋友一起来参与完善这个项目，开源地址如下：</p>
+<p><strong><a href="https://github.com/SatanWoo/JSDebugger" target="_blank" rel="external">https://github.com/SatanWoo/JSDebugger</a></strong></p>
+<p><strong><span style="color:red"><a href="https://github.com/SatanWoo/JSDebugger" target="_blank" rel="external">https://github.com/SatanWoo/JSDebugger</a></span></strong></p>
+<p><strong><a href="https://github.com/SatanWoo/JSDebugger" target="_blank" rel="external">https://github.com/SatanWoo/JSDebugger</a></strong></p>
+<p>当然，要是发现了任何的Bug或者使用上的疑惑、抑或是可以改进的点，也可以私聊我或者开<code>issue</code>。</p>
+<h3 id="最后">最后</h3><p>实现<strong>JSDebugger</strong>的过程，还是站在两个杰出的项目肩膀上：</p>
+<ul>
+<li>Cycript</li>
+<li>JSPatch</li>
+</ul>
+<p>我的思路是来自于<code>Cycript</code>，诸如结构体等许多方面的实现细节是参考了<code>JSPatch</code>。在这里对这几个项目的作者和代码贡献者表示感谢！</p>
+<p>此外，很多的技术方案是和<strong>HookZZ</strong>大神交流（主要是他教我）中学习而来，在这也特别感谢。也感谢头条的谢大佬的代码贡献以及寒神的<code>Code Style</code>整理。</p>
+<p>当然，<strong>JSDebugger</strong>在实现上还是有很多自己思考的部分，感兴趣的读者可以自行前往<a href="https://github.com/SatanWoo/JSDebugger" target="_blank" rel="external">JSDebugger的Github开源地址</a></p>
+]]></content>
+    <summary type="html">
+    <![CDATA[<h3 id="务虚乱弹">务虚乱弹</h3><blockquote>
+<p>JSDebugger开源地址：<a href="https://github.com/SatanWoo/JSDebugger" target="_blank" rel="external">https:]]>
+    </summary>
+    
+      <category term="iOS" scheme="http://satanwoo.github.io/tags/iOS/"/>
+    
+  </entry>
   
   <entry>
     <title><![CDATA[C++实现一个识别MNIST数字的卷积神经网络]]></title>
@@ -4371,117 +4451,6 @@ dispatch_sync(dq, ^{
     <summary type="html">
     <![CDATA[<p>无论是xx还是xx，对于整个App的稳定性要求都非常之高。因此，那些前辈大牛们为了解决一些常见的问题，比如空指针、数组越界等等，开发了xxxxxx这样的底层SDK，用于解决问题。</p>
 <p>但是随着业务逐渐的复杂化以及愈发严格的性能要求，xxApp绝大多数的Crash开]]>
-    </summary>
-    
-      <category term="iOS" scheme="http://satanwoo.github.io/tags/iOS/"/>
-    
-  </entry>
-  
-  <entry>
-    <title><![CDATA[浅谈iOS的多Window处理]]></title>
-    <link href="http://satanwoo.github.io/2016/09/17/uiwindow-iOS/"/>
-    <id>http://satanwoo.github.io/2016/09/17/uiwindow-iOS/</id>
-    <published>2016-09-17T14:51:46.000Z</published>
-    <updated>2016-09-17T14:53:57.000Z</updated>
-    <content type="html"><![CDATA[<h3 id="概述">概述</h3><p>想必做iOS的人都知道，我们的App是通过UIWindow这个载体呈现出来的。默认情况下，iOS App对于开发者来说只有一个<code>UIWindow</code>，也就是AppDelegate在<code>applicationDidFinishLaunching</code>里面创建出来的。</p>
-<p>但是即使我们什么都不做，在我们的APP里面也会有其他的<code>UIWindow</code>:</p>
-<ol>
-<li>键盘对应的UITextEffectWindow</li>
-<li>状态栏对应的UIStatusBarWindow</li>
-</ol>
-<p>只不过上述两种<code>UIWindow</code>我们一般不太容易去操作罢了，因此很多问题都无形被掩盖住了。所以接下来我们就说说如果在多个UIWindow状态下存在的一些问题吧。</p>
-<p>那么在什么情况下会导致我们想要创建多<code>UIWindow</code>的状态呢？我总结了一下，包括但不限于：</p>
-<ol>
-<li>全局性的自定义HUD，Alert效果（SCAlert）等等。</li>
-<li>需要展示的界面需要盖住UIStatusBar。</li>
-</ol>
-<p>其中，第一种方案其实不一定需要创建一个新的<code>UIWindow</code>实例，我们也可以将这些自定义的全局性界面添加到AppDelegate的window上。但是这样就会产生一个问题，由于在<strong>iOS8之前</strong>，UIWindow的bounds是不会随着旋转而改变的，拿到的永远是处于<strong>Portrait</strong>模式下的坐标系坐标。因此，<b>对于直接添加在UIWindow上的视图，我们需要自己根据  <code>UIApplicationDidChangeStatusBarOrientationNotification</code>来进行转换处理。</b></p>
-<p>苹果这篇<a href="https://developer.apple.com/library/content/qa/qa1688/_index.html" target="_blank" rel="external">Q&amp;A</a>讲述了比较具体的原因：<b style="color:red">UIWindow并不会处理rotation事件，而是UIWindow的rootViewController去处理。</b></p>
-<p>而对于第二种问题，添加一个盖在UIStatusBar上的界面，就必须依赖我们自己创建一个新的UIWindow，究其原因在于UIStatusBar本身并不属于我们App内可控的一个控件，而是一个系统级创建出来的产物。<br>因此，<strong>我们必须创建一个WindowLevel大于UIWindowStatusBar的新Window盖在上面才行。</strong></p>
-<p>有人会问：咦，奇怪了，为什么你在自己App内添加一个WindowLevel大于statusbar的就可以了呢？你只是在你自身应用内添加了一个UIView（UIWindow的子类），竟然能影响系统级的控件？</p>
-<p><b style="color:red">是的，不知道大家有没有了解过<code>CALayer</code>这层有个属性叫zIndex。通过操纵这个属性，我们可以调整视图渲染的前后关系。即使有的UIView在构建<span style="color:black">层级树</span>的时候被后加的UIView所遮盖，但是在构建<span style="color:black">渲染树</span>的时候，zIndex越高的视图就会越处于视觉前方进行渲染。 而渲染树构建完成之后，并不是在我们的App内部进行渲染，而是通过IPC通信，统一交由一个第三方进程<span style="color:black">Render Server</span>进行渲染。而在我们这里处理盖住StatusBar的多Window的情形也是基于这个原理进行。</b></p>
-<h3 id="横屏及旋转">横屏及旋转</h3><p>现在绝大多数的iPhone应用都是竖屏应用，即只支持<strong>Portrait</strong>模式。但是随着视频、直播的风口到来，在新闻、购物等等APP内都会插入视频播放这一特性，而视频播放需要的全屏播放特性势必要用到横屏，也就意味着会牵扯到旋转。</p>
-<p>横屏旋转分为两种，一种是强制性的，一种是随着设备进行旋转的。什么意思呢？<br>大家还记得手机上有旋转锁这一个开关吧，你将旋转锁开启的时候，手机就保持在锁定对应的模式下，无法自动根据你旋转设备而旋转。在这种模式下，如果你需要更改APP界面对应的UIInterfaceOrientation，就必须要么在对应的<strong>viewcontroller</strong>里面提供实现如下的方法：</p>
-<pre><code>- (<span class="built_in">NSUInteger</span>)supportedInterfaceOrientations
-{
-    <span class="keyword">return</span> <span class="built_in">UIInterfaceOrientationMaskLandscapeRight</span>; <span class="comment">// 表示支持水平右方向</span>
-}
-
-- (<span class="built_in">BOOL</span>)shouldAutorotate
-{
-    <span class="keyword">return</span> <span class="literal">YES</span>;
-}
-</code></pre><p>这样，当你展现到这个页面的时候，就会触发系统检查一下当前页面应该所处的Orientation，从而达到正确的显示效果。</p>
-<p><strong>但需要注意的是，如果你的界面是处于一个UINavigationController或者UITabbarController内的话，你就需要从父容器开始，写对应的<code>supportedInterfaceOrientations</code>实现，否则就无法得到正确的效果。</strong></p>
-<p>PS: <strong><i>其实这个道理和<code>hideBottomBarWhenPushed</code>是一个道理。很多人用了这个属性，发现隐藏Tabbar的时机经常错乱了</i></strong>，这个就在于没有仔细阅读文档，需要在整个导航栈里面的topmostViewController提供正确的属性设置才行。</p>
-<blockquote>
-<p>The value of this property on the topmost view controller determines whether the toolbar is visible. If the value of this property is true, the toolbar is hidden. If the value of this property is false, the bar is visible</p>
-</blockquote>
-<p>或者你可以将你需要横屏的ViewController通过present的形势展现出来（有人觉得会狠突兀，那你自己实现专场动画过渡就可以了）。<strong>不过呢，这种实现方式会有一个超级大坑，待会我们细细说。</strong></p>
-<p>上面这种就是强制性的。</p>
-<p>而自动旋转的就是打开旋转锁，让界面随着<strong>设备的旋转而进行旋转</strong>，这种旋转是物理特性的，非强制性的。</p>
-<p>Q: 那么这两种旋转的区别在哪？<br>A: <strong>UIInterfaceOrientation（UIStatusBar的所处方向）和UIDeviceOrientation</strong>是否一致。</p>
-<p>Q: 那么有什么问题呢？<br>A: 在iOS8之后，UIScreen的bounds是随着物理设备的旋转而更改的。如果你需要获取iOS8之前的bounds效果，需要使用<strong>nativeBounds</strong>。但是要记得，nativeBounds是像素级别的，你需要换算到对应的point单位来，所以关系是：</p>
-<pre><code>bounds<span class="list">( <span class="keyword">&lt;</span> iOS8.<span class="number">0</span>)</span> = nativeBounds / nativeScale<span class="comment">;</span>
-</code></pre><p>大家可以参考苹果的<a href="https://developer.apple.com/reference/uikit/uiscreen/1617838-bounds" target="_blank" rel="external">文档</a>来更确切的掌握一下。</p>
-<h3 id="坑">坑</h3><p>上面的内容我们曾经提及在采用多<code>UIWindow</code>时候的几个大坑，如果你现在有自定义的界面，想要添加到除了<code>delegate window</code>之外的window，可能会遇到如下几个问题。</p>
-<h4 id="直接将自定义的视图作为Subview添加到UIWindow上">直接将自定义的视图作为Subview添加到UIWindow上</h4><p>从理论上来说UIWindow继承于UIView，这种直接用法在认知上没有任何的问题。但是如果涉及的应用牵扯到横屏模式而且又要支持iOS7的话（我相信现在没有哪个产品还需要支持iOS6）吧，那么针对iOS7需要单独处理横屏的坐标系转换。我们摘录一段著名的开源库<strong>MBProgressHUD</strong>的代码作为示例：</p>
-<pre><code><span class="preprocessor">#if __IPHONE_OS_VERSION_MIN_REQUIRED <span class="title">&lt; 80000
-    // Only needed pre iOS 8 when added to a window
-    BOOL iOS8OrLater = kCFCoreFoundationVersionNumber &gt;</span>= kCFCoreFoundationVersionNumber_iOS_8_0;</span>
-    <span class="keyword">if</span> (iOS8OrLater || ![<span class="keyword">self</span><span class="variable">.superview</span> isKindOfClass:[<span class="built_in">UIWindow</span> class]]) <span class="keyword">return</span>;
-
-    <span class="comment">// Make extension friendly. Will not get called on extensions (iOS 8+) due to the above check.</span>
-    <span class="comment">// This just ensures we don't get a warning about extension-unsafe API.</span>
-    Class <span class="built_in">UIApplicationClass</span> = <span class="built_in">NSClassFromString</span>(<span class="string">@"UIApplication"</span>);
-    <span class="keyword">if</span> (!<span class="built_in">UIApplicationClass</span> || ![<span class="built_in">UIApplicationClass</span> respondsToSelector:<span class="keyword">@selector</span>(sharedApplication)]) <span class="keyword">return</span>;
-
-    <span class="built_in">UIApplication</span> *application = [<span class="built_in">UIApplication</span> performSelector:<span class="keyword">@selector</span>(sharedApplication)];
-    <span class="built_in">UIInterfaceOrientation</span> orientation = application<span class="variable">.statusBarOrientation</span>;
-    <span class="built_in">CGFloat</span> radians = <span class="number">0</span>;
-
-    <span class="keyword">if</span> (<span class="built_in">UIInterfaceOrientationIsLandscape</span>(orientation)) {
-        radians = orientation == <span class="built_in">UIInterfaceOrientationLandscapeLeft</span> ? -(<span class="built_in">CGFloat</span>)M_PI_2 : (<span class="built_in">CGFloat</span>)M_PI_2;
-        <span class="comment">// Window coordinates differ!</span>
-        <span class="keyword">self</span><span class="variable">.bounds</span> = <span class="built_in">CGRectMake</span>(<span class="number">0</span>, <span class="number">0</span>, <span class="keyword">self</span><span class="variable">.bounds</span><span class="variable">.size</span><span class="variable">.height</span>, <span class="keyword">self</span><span class="variable">.bounds</span><span class="variable">.size</span><span class="variable">.width</span>);
-    } <span class="keyword">else</span> {
-        radians = orientation == <span class="built_in">UIInterfaceOrientationPortraitUpsideDown</span> ? (<span class="built_in">CGFloat</span>)M_PI : <span class="number">0.</span>f;
-    }
-
-        <span class="keyword">self</span><span class="variable">.transform</span> = <span class="built_in">CGAffineTransformMakeRotation</span>(radians);
-<span class="preprocessor">#endif</span>
-</code></pre><h4 id="通过rootViewController的view添加子视图">通过rootViewController的view添加子视图</h4><p>这种方式就是通过将<code>window.rootViewController = vc</code>，然后我们所有的子视图都添加到<code>vc.view</code>。</p>
-<p>这种使用的好处是我们无需去考虑版本兼容的问题，通过vc.view拿到的坐标系对于我们来说都是和<strong>UIInterfaceOrientation</strong>正确转换过的。</p>
-<p>在iOS7之前，坐标系的转换是系统通过设置<code>vc.transform</code>更改；而在iOS8之后，vc和window的旋转会根据<strong>UIDeviceOrientation</strong>和viewcontroller自身<code>supportedInterfaceOrientations</code>进行<strong>交集</strong>的操作。</p>
-<p>总之，<strong>需要支持横屏的自定义界面，全部放在viewcontroller.view上来做，是准没错的。</strong></p>
-<p>而且，在iOS9以后，苹果推荐每个<code>UIWindow</code>都必须有一个rootViewController。否则<span style="color:red">在启动过程使用了不包含rootViewController的UIWindow中会导致必现的crash</span>。</p>
-<h4 id="presentViewController的大坑">presentViewController的大坑</h4><p>我们前面提过，如果想要让viewcontroller单独横屏有两种方式。</p>
-<blockquote>
-<ol>
-<li><p>如果你的界面是处于一个UINavigationController或者UITabbarController内的话，你就需要从父容器开始，写对应的<code>supportedInterfaceOrientations</code>实现，否则就无法得到正确的效果。</p>
-</li>
-<li><p>或者你可以将你需要横屏的ViewController通过present的形势展现出来</p>
-</li>
-</ol>
-</blockquote>
-<p>第二种方案在实现过程中，会产生一个非常隐晦的大坑，容我慢慢道来。<br>首先我们需要了解下整体响应旋转变化的事件流程，简单来说如下：</p>
-<pre><code><span class="constant">UIScreen </span>-&gt; <span class="constant">UIWindow </span>-&gt; <span class="constant">UIViewController </span>-&gt; <span class="constant">ChildViewControllers </span>-&gt; <span class="constant">View </span>-&gt; <span class="constant">Subviews</span>
-</code></pre><p>其中，UIWindow对应的处理方法是：<code>supportedInterfaceOrientationsForWindow</code>；而UIViewController对应的处理方法是<code>supportedInterfaceOrientations</code>。</p>
-<p>也就是说，当系统通过这个流程向我们请求界面的UIInterfaceOrientation的时候，我们必须确保我们能够提供正确的返回参数。</p>
-<p>而这个流程在使用<code>presentViewController</code>弹出<strong>modalViewController</strong>会产生一些问题：即当你想从<strong>modalViewController</strong> 返回（dismiss）原先的界面的时候，你会发现虽然原先界面强制设置了portrait模式，但是如果<strong>设备锁关闭且设备仍然处于水平状态</strong>，那么此时的UIInterfaceOrientation，仍然是不准确的。</p>
-<p>其原因在于：当你想要dismiss的时候，系统的确发起了一次新的请求流程。但是此时，modalViewController正处于dismissing的状态中，请求到的<code>supportedInterfaceOrientations</code>还是针对modalViewController的。所以，如果你的modalViewController是横屏模式，那么返回后的效果就是横屏模式，除非你人为的旋转一下设备，让其回到竖直方向。</p>
-<p>Q: 那么这种问题有没有解决办法呢？<br>A: 你可以在<code>supportedInterfaceOrientations</code>里面判断下当前的viewcontroller是不是处于<strong>isBeingDismissed</strong>，如果是的话，取其<strong>presentingViewController</strong>的<code>supportedInterfaceOrientations</code>作为返回值。</p>
-<p>Q: 有些同学会问，我们怎么从来没遇到过这个问题？<br>A: 那是因为你们使用的<code>UIWindow</code> 99%的可能都是默认的<code>delegate window</code>，对于这个window，所有的旋转事件都自动帮你校准了，因此无需担忧。</p>
-<h3 id="参考资料">参考资料</h3><ol>
-<li><a href="https://jkyin.me/uiwindow/" target="_blank" rel="external">UIWindow in iOS</a></li>
-<li><a href="http://stackoverflow.com/questions/8598315/after-rotation-uiview-coordinates-are-swapped-but-uiwindows-are-not" target="_blank" rel="external">After rotation UIView coordinates are swapped but UIWindow’s are not?</a></li>
-<li><a href="http://chun.tips/blog/2014/10/23/xiang-jie-uicoordinatespacehe-uiscreenzai-ios-8shang-de-zuo-biao-wen-ti/" target="_blank" rel="external">详解UICoordinateSpace和UIScreen在iOS 8上的坐标问题</a></li>
-<li><a href="http://stackoverflow.com/questions/25391564/ios-7-dismiss-modal-view-controller-and-force-portrait-orientation" target="_blank" rel="external">iOS 7+ Dismiss Modal View Controller and Force Portrait Orientation</a></li>
-<li><a href="http://swiftiostutorials.com/ios-orientations-landscape-orientation-one-view-controller/" target="_blank" rel="external">iOS Orientations: Landscape orientation for only one View Controller</a></li>
-</ol>
-]]></content>
-    <summary type="html">
-    <![CDATA[<h3 id="概述">概述</h3><p>想必做iOS的人都知道，我们的App是通过UIWindow这个载体呈现出来的。默认情况下，iOS App对于开发者来说只有一个<code>UIWindow</code>，也就是AppDelegate在<code>applicationD]]>
     </summary>
     
       <category term="iOS" scheme="http://satanwoo.github.io/tags/iOS/"/>
