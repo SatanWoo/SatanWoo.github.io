@@ -4,7 +4,7 @@
   
   <link href="/atom.xml" rel="self"/>
   <link href="http://satanwoo.github.io/"/>
-  <updated>2018-10-05T17:42:50.000Z</updated>
+  <updated>2018-10-07T12:40:22.000Z</updated>
   <id>http://satanwoo.github.io/</id>
   
   <author>
@@ -19,7 +19,7 @@
     <link href="http://satanwoo.github.io/2018/10/06/JSDebugger-INTRO/"/>
     <id>http://satanwoo.github.io/2018/10/06/JSDebugger-INTRO/</id>
     <published>2018-10-05T17:32:55.000Z</published>
-    <updated>2018-10-05T17:42:50.000Z</updated>
+    <updated>2018-10-07T12:40:22.000Z</updated>
     <content type="html"><![CDATA[<h3 id="务虚乱弹">务虚乱弹</h3><blockquote>
 <p>JSDebugger开源地址：<a href="https://github.com/SatanWoo/JSDebugger" target="_blank" rel="external">https://github.com/SatanWoo/JSDebugger</a>  </p>
 </blockquote>
@@ -31,7 +31,6 @@
 <ol>
 <li>有朋友在群里问我之前提过的<code>Mach-o</code>包瘦身方案怎么也没发文章？</li>
 <li>看到同事查非Crash产生的Bug的过程还是比较累。</li>
-<li><strong>萧杨玉</strong>太强了。</li>
 </ol>
 <p>好，来说说前两个原因：</p>
 <ul>
@@ -41,9 +40,9 @@
 <p>完整版的很多文章或者一些没对外的技术研究，我都发在了公司的内网里，欢迎加入阿里巴巴。</p>
 </blockquote>
 <ul>
-<li>第二点，我之前有段时间负责手淘的稳定性，除了有堆栈的Crash问题外，更多是用户反馈的使用异常以及毫无头绪的奇怪现象。针对这种问题，我相信各家(甚至开源方案)一般都有自己的监控体系，比如日志啊、埋点等等。但是怎么说呢，从我的感受来看，都是使用起来偏繁琐，而且<strong><span style="color:blue">还依赖对应的开发把错误信息等现场保留写入到日志内。</span></strong>我想要的就是一个能像我在自己手机上调试应用一样调试用户手机的能力（前提是用户授权同意），因此我就想做了一个这样的工具。结合自己以前玩逆向的些许经历，<code>Cycript</code>就提供了类似的能力，因此就想做一个类似的。</li>
+<li>第二点，我之前有段时间负责手淘的稳定性，除了有堆栈的Crash问题外，更多是用户反馈的使用异常以及毫无头绪的奇怪现象。针对这种问题，我相信各家(甚至开源方案)一般都有自己的监控体系，比如日志啊、埋点等等。但是怎么说呢，从我的感受来看，都是使用起来偏繁琐，而且<strong><span style="color:blue">还依赖对应的开发把错误信息等现场保留写入到日志内。</span></strong>我想要的就是一个能像我在自己手机上调试应用一样调试用户手机的能力（前提是用户授权同意），因此我就想做了一个这样的工具。结合自己以前玩逆向的些许经历，<code>Cycript</code>就提供了类似的能力，因此就利用业余时间做了一个<strong>JSDebugger</strong>。</li>
 </ul>
-<p><strong><span style="color:red">说了这么多原因，其实都是给萧杨玉太强了这个原因打掩护的，主要原因就是萧杨玉太强了，写这个JSDebugger是为了向他致敬学习。</span></strong></p>
+<p><strong><span style="color:red">说了这么多原因，其实还是我太懒了。</span></strong></p>
 <h3 id="JSDebugger">JSDebugger</h3><p>言归正传，回到<strong>JSDebugger</strong>本身，基于之前的代码，这次主要做了完整性的代码重构重写以及功能完善上。</p>
 <ul>
 <li>类方法调用</li>
