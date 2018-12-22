@@ -4,7 +4,7 @@
   
   <link href="/atom.xml" rel="self"/>
   <link href="http://satanwoo.github.io/"/>
-  <updated>2018-10-07T12:40:22.000Z</updated>
+  <updated>2018-12-22T15:24:46.000Z</updated>
   <id>http://satanwoo.github.io/</id>
   
   <author>
@@ -15,11 +15,206 @@
   <generator uri="http://hexo.io/">Hexo</generator>
   
   <entry>
+    <title><![CDATA[通过Xcode 10链接libstdc++来深入分析tbd文件]]></title>
+    <link href="http://satanwoo.github.io/2018/12/22/LD-1/"/>
+    <id>http://satanwoo.github.io/2018/12/22/LD-1/</id>
+    <published>2018-12-22T15:20:59.000Z</published>
+    <updated>2018-12-22T15:24:46.000Z</updated>
+    <content type="html"><![CDATA[<p>相信玩<code>iOS</code>开发的同学对<code>tbd</code>这个格式的文件已经不再陌生了。最近<code>Xcode 10</code>升级的时候，你会发现很多原先用<code>libstdc++</code>的库在新的<code>Xcode</code>已经没有链接通过。而临时的解决方案也比较简单，网上也很多这样的文章，简而言之就是从<code>Xcode 9</code>中拷贝对应的<code>libstdc++.tbd</code>文件给新的<code>Xcode 10</code>来使用。</p>
+<p>Ok，解决方案是有了，我们需要更深入的理解下：为什么<strong>拷贝tbd文件，就能够成功解决链接问题?</strong></p>
+<h3 id="tbd格式解析">tbd格式解析</h3><p><code>tbd</code>全称是<code>text-based stub libraries</code>，本质上就是一个<strong>YAML</strong>描述的文本文件。</p>
+<p>他的作用是用于记录<b style="color:red">动态库的一些信息</b>，包括导出的符号、动态库的架构信息、动态库的依赖信息。</p>
+<p>为什么需要包含这些信息呢？</p>
+<ul>
+<li>动态库的架构信息是了确保运行的程序在运行的平台加载正确的库。比如你不能在运行<code>ARM</code>指令集的<code>iOS</code>设备上加载<code>x86</code>格式的库。</li>
+</ul>
+<blockquote>
+<p>后续我们会举一个手动修改<code>tbd</code>中<code>install-name</code>字段的小例子来让运行在模拟器的时候加载<code>ARM64</code>架构的动态库</p>
+</blockquote>
+<ul>
+<li>导出的符号。写过程序的人都知道，我们肯定会依赖别人提供的一些函数方法。一般业界都会把这些函数或者方法封装成库的形势。</li>
+</ul>
+<p>那库就分为静态库和动态库两种。相信网上关于这两者的讨论和阐述已经很多了，再次不再赘述。唯一需要提及的一点是，动态库是在程序运行（启动依赖或者按需加载）时候加载进程序的地址空间的，那么我们在静态期的时候，是如何得知动态库提供了哪些能力呢？<b style="color:red">而这就是<code>tbd</code>格式提供的导出符号表的加载，它会指导链接器在链接过程中，将需要决议的符号先做个标记，标记是来自哪个动态库。</b></p>
+<p>这里举个小例子吧。<br>在程序构建的过程中，比如我们开发一个iOS应用，毋庸置疑的会用到<code>UIKit</code>这个动态库。而为了使我们的程序能够构建成功，这里分为了两个步骤：</p>
+<ul>
+<li><p>通过引入头文件，<code>import &lt;UIKit/UIKit.h&gt;</code>，我们知道了<code>UIKit</code>里面的函数、变量声明。有声明，就能通过编译器的检查。</p>
+</li>
+<li><p>我们在代码里面使用了<code>UIKit</code>的函数，其本质是一种符号，因此需要链接器来决议这个符号来自哪？要是所有地方都找到，就会报类似<code>undefined symbol</code>之类的错误（想必大家已经很熟悉了）。</p>
+</li>
+</ul>
+<h4 id="为什么要改造成tbd格式">为什么要改造成tbd格式</h4><p><code>tbd</code>格式实际上是从<code>Xcode 7</code>时代引入的。</p>
+<p><b style="color:red">用于取代在真机开发过程中直接使用传统的<code>dylib</code></b></p>
+<p><b style="color:red">用于取代在真机开发过程中直接使用传统的<code>dylib</code></b></p>
+<p><b style="color:red">用于取代在真机开发过程中直接使用传统的<code>dylib</code></b></p>
+<p>我们都知道一个库在没有<code>strip</code>诸如调试信息、非导出符号的情况下是非常大的。但是由于在开发过程中，调试等过程是必不可少的，我们来对比下传统直接包含<code>dylib</code>的时候大小，我们以<code>CoreImage.framework</code>来举例：</p>
+<ul>
+<li>首先看下模拟器上的传统架构大小：</li>
+</ul>
+<p><img src="https://github.com/SatanWoo/BeeHive/blob/master/ld-1-dylib.png?raw=true" alt=""></p>
+<ul>
+<li>再看下对应的真机上的伪<code>framework</code>(包含<code>tbd</code>)的大小</li>
+</ul>
+<p><img src="https://github.com/SatanWoo/BeeHive/blob/master/ld-1-tbd.png?raw=true" alt=""></p>
+<p>差距很明显了吧，对于真机来说，由于动态库都是在设备上，在<code>Xcode</code>上使用基于<code>tbd</code>格式的伪<code>framework</code>可以大大减少<code>Xcode</code>的大小。</p>
+<blockquote>
+<p>题外话：网上有人说模拟器上还是使用<code>dylib</code>，的确没错。但是模拟器现在也桥了一层<code>tbd</code>格式，真正的<code>dylib</code>是在这个路径下：<code>iPhoneOS.platform/Developer/Library/CoreSimulator/Profiles/Runtimes/iOS.simruntime/Contents</code></p>
+</blockquote>
+<p>此外，虽然从<code>Xcode 7</code>时代到现在，一直都是<code>tbd</code>的说法，但是它也是经历了一些演变了，目前已经发展了<code>v3</code>格式的版本。</p>
+<h3 id="为什么拷贝tbd文件能解决Xcode_10上的问题">为什么拷贝tbd文件能解决Xcode 10上的问题</h3><p>网上很多人都研究过<code>dyld</code>的代码，与之对应还有一种<code>ld</code>，就是平时我们在构建程序过程中，链接过程中出错的根因：</p>
+<p><img src="https://img-blog.csdn.net/20180918212007937?watermark/2/text/aHR0cHM6Ly9ibG9nLmNzZG4ubmV0L3FxXzE4NjgzOTg1/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70" alt=""></p>
+<p>既然我们通过拷贝<code>tbd</code>的方式能解决链接不过的问题，那我们就要知道<code>ld</code>是如何运用<code>tbd</code>文件的。</p>
+<p>既然报错事<code>library not found</code>，我们扒一下<code>linker</code>的源码即可：</p>
+<pre><code><span class="type">Options</span>::<span class="type">FileInfo</span> <span class="type">Options</span>::findLibrary(<span class="keyword">const</span> <span class="type">char</span>* rootName, <span class="type">bool</span> dylibsOnly) <span class="keyword">const</span>
+{
+    <span class="type">FileInfo</span> <span class="literal">result</span>;
+    <span class="keyword">const</span> <span class="type">int</span> rootNameLen = strlen(rootName);
+    // <span class="keyword">if</span> rootName ends <span class="keyword">in</span> .o there <span class="keyword">is</span> no .a vs .dylib choice
+    <span class="keyword">if</span> ( (rootNameLen &gt; <span class="number">3</span>) &amp;&amp; (strcmp(&amp;rootName[rootNameLen-<span class="number">2</span>], <span class="string">".o"</span>) == <span class="number">0</span>) ) {
+        <span class="keyword">for</span> (std::vector&lt;<span class="keyword">const</span> <span class="type">char</span>*&gt;::const_iterator it = fLibrarySearchPaths.begin();
+             it != fLibrarySearchPaths.<span class="keyword">end</span>();
+             it++) {
+            <span class="keyword">const</span> <span class="type">char</span>* dir = *it;
+            <span class="keyword">if</span> ( checkForFile(<span class="string">"%s/%s"</span>, dir, rootName, <span class="literal">result</span>) )
+                <span class="keyword">return</span> <span class="literal">result</span>;
+        }
+    }
+    <span class="keyword">else</span> {
+        <span class="type">bool</span> lookForDylibs = <span class="literal">false</span>;
+        switch ( fOutputKind ) {
+            <span class="keyword">case</span> <span class="type">Options</span>::kDynamicExecutable:
+            <span class="keyword">case</span> <span class="type">Options</span>::kDynamicLibrary:
+            <span class="keyword">case</span> <span class="type">Options</span>::kDynamicBundle:
+            <span class="keyword">case</span> <span class="type">Options</span>::kObjectFile:  // &lt;rdar://problem/<span class="number">15914513</span>&gt; 
+                lookForDylibs = <span class="literal">true</span>;
+                <span class="keyword">break</span>;
+            <span class="keyword">case</span> <span class="type">Options</span>::kStaticExecutable:
+            <span class="keyword">case</span> <span class="type">Options</span>::kDyld:
+            <span class="keyword">case</span> <span class="type">Options</span>::kPreload:
+            <span class="keyword">case</span> <span class="type">Options</span>::kKextBundle:
+                lookForDylibs = <span class="literal">false</span>;
+                <span class="keyword">break</span>;
+        }
+        switch ( fLibrarySearchMode ) {
+        <span class="keyword">case</span> kSearchAllDirsForDylibsThenAllDirsForArchives:
+                // first look <span class="keyword">in</span> all directories <span class="keyword">for</span> just <span class="keyword">for</span> dylibs
+                <span class="keyword">if</span> ( lookForDylibs ) {
+                    <span class="keyword">for</span> (std::vector&lt;<span class="keyword">const</span> <span class="type">char</span>*&gt;::const_iterator it = fLibrarySearchPaths.begin();
+                         it != fLibrarySearchPaths.<span class="keyword">end</span>();
+                         it++) {
+                        <span class="keyword">const</span> <span class="type">char</span>* dir = *it;
+                        <span class="type">auto</span> path = std::<span class="type">string</span>(dir) + <span class="string">"/lib"</span> + rootName + <span class="string">".dylib"</span>;
+                        <span class="keyword">if</span> ( findFile(path, {<span class="string">".tbd"</span>}, <span class="literal">result</span>) )
+                            <span class="keyword">return</span> <span class="literal">result</span>;
+                    }
+                    <span class="keyword">for</span> (std::vector&lt;<span class="keyword">const</span> <span class="type">char</span>*&gt;::const_iterator it = fLibrarySearchPaths.begin();
+                         it != fLibrarySearchPaths.<span class="keyword">end</span>();
+                         it++) {
+                        <span class="keyword">const</span> <span class="type">char</span>* dir = *it;
+                        <span class="keyword">if</span> ( checkForFile(<span class="string">"%s/lib%s.so"</span>, dir, rootName, <span class="literal">result</span>) )
+                            <span class="keyword">return</span> <span class="literal">result</span>;
+                    }
+                }
+                // next look <span class="keyword">in</span> all directories <span class="keyword">for</span> just <span class="keyword">for</span> archives
+                <span class="keyword">if</span> ( !dylibsOnly ) {
+                    <span class="keyword">for</span> (std::vector&lt;<span class="keyword">const</span> <span class="type">char</span>*&gt;::const_iterator it = fLibrarySearchPaths.begin();
+                         it != fLibrarySearchPaths.<span class="keyword">end</span>();
+                         it++) {
+                        <span class="keyword">const</span> <span class="type">char</span>* dir = *it;
+                        <span class="keyword">if</span> ( checkForFile(<span class="string">"%s/lib%s.a"</span>, dir, rootName, <span class="literal">result</span>) )
+                            <span class="keyword">return</span> <span class="literal">result</span>;
+                    }
+                }
+                <span class="keyword">break</span>;
+
+            <span class="keyword">case</span> kSearchDylibAndArchiveInEachDir:
+                // look <span class="keyword">in</span> each directory <span class="keyword">for</span> just <span class="keyword">for</span> a dylib then <span class="keyword">for</span> an archive
+                <span class="keyword">for</span> (std::vector&lt;<span class="keyword">const</span> <span class="type">char</span>*&gt;::const_iterator it = fLibrarySearchPaths.begin();
+                     it != fLibrarySearchPaths.<span class="keyword">end</span>();
+                     it++) {
+                    <span class="keyword">const</span> <span class="type">char</span>* dir = *it;
+                    <span class="type">auto</span> path = std::<span class="type">string</span>(dir) + <span class="string">"/lib"</span> + rootName + <span class="string">".dylib"</span>;
+                    <span class="keyword">if</span> ( lookForDylibs &amp;&amp; findFile(path, {<span class="string">".tbd"</span>}, <span class="literal">result</span>) )
+                        <span class="keyword">return</span> <span class="literal">result</span>;
+                    <span class="keyword">if</span> ( lookForDylibs &amp;&amp; checkForFile(<span class="string">"%s/lib%s.so"</span>, dir, rootName, <span class="literal">result</span>) )
+                        <span class="keyword">return</span> <span class="literal">result</span>;
+                    <span class="keyword">if</span> ( !dylibsOnly &amp;&amp; checkForFile(<span class="string">"%s/lib%s.a"</span>, dir, rootName, <span class="literal">result</span>) )
+                        <span class="keyword">return</span> <span class="literal">result</span>;
+                }
+                <span class="keyword">break</span>;
+        }
+    }
+    throwf(<span class="string">"library not found for -l%s"</span>, rootName);
+}
+</code></pre><ul>
+<li><p><code>throwf(&quot;library not found for -l%s&quot;, rootName);</code> 这里我们就找到了错误发生的原因，我们再往上溯源，找到<code>linker</code>处理编译单元的入口：</p>
+</li>
+<li><p><code>InputFiles::addOtherLinkerOptions</code>里面存在如下代码：</p>
+<pre><code>CStringSet newLibraries = <span class="built_in">std</span>::move(state.unprocessedLinkerOptionLibraries);
+    state.unprocessedLinkerOptionLibraries.clear();
+    <span class="keyword">for</span> (<span class="keyword">const</span> <span class="keyword">char</span>* libName : newLibraries) {
+        <span class="keyword">if</span> ( state.linkerOptionLibraries.count(libName) )
+            <span class="keyword">continue</span>;
+        <span class="keyword">try</span> {
+            Options::FileInfo info = _options.findLibrary(libName);
+            <span class="keyword">if</span> ( ! <span class="keyword">this</span>-&gt;libraryAlreadyLoaded(info.path) ) {
+                _linkerOptionOrdinal = _linkerOptionOrdinal.nextLinkerOptionOrdinal();
+                info.ordinal = _linkerOptionOrdinal;
+                 <span class="comment">//&lt;rdar://problem/17787306&gt; -force_load_swift_libs</span>
+                info.options.fForceLoad = _options.forceLoadSwiftLibs() &amp;&amp; (<span class="built_in">strncmp</span>(libName, <span class="string">"swift"</span>, <span class="number">5</span>) == <span class="number">0</span>);
+                ld::File* reader = <span class="keyword">this</span>-&gt;makeFile(info, <span class="literal">true</span>);
+                ld::dylib::File* dylibReader = <span class="keyword">dynamic_cast</span>&lt;ld::dylib::File*&gt;(reader);
+                ld::archive::File* archiveReader = <span class="keyword">dynamic_cast</span>&lt;ld::archive::File*&gt;(reader);
+                <span class="keyword">if</span> ( dylibReader != <span class="literal">NULL</span> ) {
+                    dylibReader-&gt;forEachAtom(handler);
+                    dylibReader-&gt;setImplicitlyLinked();
+                    dylibReader-&gt;setSpeculativelyLoaded();
+                    <span class="keyword">this</span>-&gt;addDylib(dylibReader, info);
+                }
+                <span class="keyword">else</span> <span class="keyword">if</span> ( archiveReader != <span class="literal">NULL</span> ) {
+                    _searchLibraries.push_back(LibraryInfo(archiveReader));
+                    _options.addDependency(Options::depArchive, archiveReader-&gt;path());
+                    <span class="comment">//&lt;rdar://problem/17787306&gt; -force_load_swift_libs</span>
+                    <span class="keyword">if</span> (info.options.fForceLoad) {
+                        archiveReader-&gt;forEachAtom(handler);
+                    }
+                }
+                <span class="keyword">else</span> {
+                    throwf(<span class="string">"linker option dylib at %s is not a dylib"</span>, info.path);
+                 }
+             }
+         }
+        <span class="keyword">catch</span> (<span class="keyword">const</span> <span class="keyword">char</span>* msg) {
+            <span class="comment">// &lt;rdar://problem/40829444&gt; only warn about missing auto-linked library if some missing symbol error happens later</span>
+            state.missingLinkerOptionLibraries.insert(libName);
+        }
+        state.linkerOptionLibraries.insert(libName);
+    }
+</code></pre></li>
+</ul>
+<p><strong>而上述这些需要查询的<code>library</code>是从哪里来的呢？</strong> </p>
+<ul>
+<li><p>我们以<code>xcconfig</code>举例来看：</p>
+<pre><code>OTHER_LDFLAGS = $(inherited) -ObjC <span class="operator">-l</span><span class="string">"stdc++"</span>
+</code></pre></li>
+</ul>
+<p>在链接过程中就需要处理这样的<code>stdc++</code> <strong>Library</strong>，而查询的方式就是在特定目录结构中搜索是否有对应的库文件或者<code>tbd</code>文件。</p>
+<h3 id="后记">后记</h3><p>使用<code>tbd</code>当然不止减少<code>Xcode</code>体积大小这一个好处，嘿嘿，你们自己摸索下吧～</p>
+<p>而且，基于这种思路，能玩出许多类似文体两开花，中美合拍美猴王的玩法，加油吧。</p>
+]]></content>
+    <summary type="html">
+    <![CDATA[<p>相信玩<code>iOS</code>开发的同学对<code>tbd</code>这个格式的文件已经不再陌生了。最近<code>Xcode 10</code>升级的时候，你会发现很多原先用<code>libstdc++</code>的库在新的<code>Xcode</cod]]>
+    </summary>
+    
+      <category term="iOS" scheme="http://satanwoo.github.io/tags/iOS/"/>
+    
+  </entry>
+  
+  <entry>
     <title><![CDATA[谈谈JSDebugger]]></title>
     <link href="http://satanwoo.github.io/2018/10/06/JSDebugger-INTRO/"/>
     <id>http://satanwoo.github.io/2018/10/06/JSDebugger-INTRO/</id>
     <published>2018-10-05T17:32:55.000Z</published>
-    <updated>2018-10-07T12:40:22.000Z</updated>
+    <updated>2018-10-08T08:40:41.000Z</updated>
     <content type="html"><![CDATA[<h3 id="务虚乱弹">务虚乱弹</h3><blockquote>
 <p>JSDebugger开源地址：<a href="https://github.com/SatanWoo/JSDebugger" target="_blank" rel="external">https://github.com/SatanWoo/JSDebugger</a>  </p>
 </blockquote>
@@ -4210,246 +4405,6 @@ func <span class="function"><span class="title">resultFromBatchObjects</span><sp
 ]]></content>
     <summary type="html">
     <![CDATA[<p>最近公司参与开源项目<code>BeeHive</code>的开发（第一版的代码是由前辈们写的，已经开源在了GitHub上的Alibaba项目里）。在参与开发的过程中，我一直在思考一个问题：基于Protocol的服务调用真的是最合理的方式吗？这种方式从某种方式来说还是一种强]]>
-    </summary>
-    
-      <category term="iOS" scheme="http://satanwoo.github.io/tags/iOS/"/>
-    
-  </entry>
-  
-  <entry>
-    <title><![CDATA[浅谈一种解决多线程野指针的新思路]]></title>
-    <link href="http://satanwoo.github.io/2016/10/23/multithread-dangling-pointer/"/>
-    <id>http://satanwoo.github.io/2016/10/23/multithread-dangling-pointer/</id>
-    <published>2016-10-22T18:43:25.000Z</published>
-    <updated>2016-10-23T12:05:48.000Z</updated>
-    <content type="html"><![CDATA[<p>无论是xx还是xx，对于整个App的稳定性要求都非常之高。因此，那些前辈大牛们为了解决一些常见的问题，比如空指针、数组越界等等，开发了xxxxxx这样的底层SDK，用于解决问题。</p>
-<p>但是随着业务逐渐的复杂化以及愈发严格的性能要求，xxApp绝大多数的Crash开始往野指针方面靠拢。这些野指针的问题，除了一些<strong>iOS7上delegate是assign声明导致的历史遗留问题以外，绝大多数都是多线程的赋值导致的野指针问题。</strong></p>
-<p><span style="color:red">而这些多线程的野指针问题，至今仍未有一个比较好的统一解决方案。因此，今天就想稍微聊下我自身研究的一个方案。</span></p>
-<h3 id="什么是多线程的野指针问题">什么是多线程的野指针问题</h3><p>之前在《浅谈多线程编程误区》一文中，曾经举过如下这样的<strong>多线程setter</strong>例子：</p>
-<pre><code><span class="keyword">for</span> (<span class="keyword">int</span> i = <span class="number">0</span>; i &lt; <span class="number">10000</span>; i++) {
-    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, <span class="number">0</span>), ^{
-        self.data = [[NSMutableData alloc] init];
-    });
-}
-</code></pre><p>如果这个<code>self.data</code>是个<code>nonatomic</code>的属性的话，就会造成在多次释放导致的野指针问题。（具体可以见《浅谈多线程编程误区》的原理解释）。</p>
-<p>从原理解释中不难发现，本质上会产生野指针的场景是由于我们没有对临界区进行保护。导致赋值替换的操作不是原子性的。</p>
-<p>有些人会说，例子中你刻意构建了一万个线程才会导致Crash。而我们平时就用用几个线程，不会有问题的。<br><strong>理论上一万个线程只不过是把两个线程中可能出现问题的概率放大了而已。在一万个线程中会出现的多线程野指针问题在两个线程中一定也会发生。</strong></p>
-<h3 id="传统业界方案：赋值加锁">传统业界方案：赋值加锁</h3><p>既然原子性是导致野指针的罪魁祸首，那么我们只要在对应可能产生冲突的临界区内加锁就好了，比如：</p>
-<pre><code>[<span class="operator"><span class="keyword">lock</span> <span class="keyword">lock</span>];</span>
-self.data = [[NSMutableData alloc] init];
-[<span class="operator"><span class="keyword">lock</span> <span class="keyword">unlock</span>]</span>
-</code></pre><p>按照这样的做法，同一时间不管有多少线程试图对<code>self.data</code>进行赋值，最终都只有一个线程能够抢到锁对其赋值。</p>
-<p>但是这样的做法从安全性角度来说是解决了原子赋值的问题。但是这样的做法却对开发要求比较严格，因为<strong>任意非基础类型的对象(Int, Bool)</strong>都有可能产生多线程赋值的野指针，所以开发需要牢记自身的属性变量究竟有哪些会在多线程场景中被使用到。</p>
-<p><b style="color:red">而且，这样的方案还有一个非常大的不确定性！</b></p>
-<p>当你开发了一个底层SDK，对外暴露了一些公共的<strong>readwrite</strong>的Property。别人对你的property赋值的时候，你怎么确定他们一定会做到线程安全？</p>
-<h3 id="我的方案：runtime追踪对象初始化的GCD_Queue">我的方案：runtime追踪对象初始化的GCD Queue</h3><p>我们都知道，在<code>Objective-C</code>中，对于一个<code>property</code>的赋值最终都会转化成对于<code>ivar</code>的setter方法。所以，如果我们能确保<code>setter</code>方法的线程安全性，就能确保多线程赋值不会产生野指针。</p>
-<p>好，按照这个思路进行操作的话，我们大致需要如下几个步骤：</p>
-<ol>
-<li>获取第一次setter调用的时机及对应的线程。</li>
-<li>将这个线程记录下来。</li>
-<li>后续调用setter的时候，判断当前setter调用的线程是不是我们之前记录的线程，如果是，直接赋值。如果不是，派发到对应的线程进行调用。</li>
-<li>获取所有的setter，重复实现上述步骤。</li>
-</ol>
-<p>看起来思路很简单，具体实现起来却有一定的难度，容我由浅入深慢慢道来：</p>
-<h4 id="1-_获取第一次赋值的线程并记录">1. 获取第一次赋值的线程并记录</h4><p>由于我们不能通过成员变量就记录每个ivar对应的setter的初始化线程(这样setter的个数就无限增长了)，因此本质上我们只有通过局部静态变量的方式来作为存储。同时由于我们只需要在初次执行时进行记录，所以很理所当然就想到了<code>dispatch_once</code>。</p>
-<p>具体代码如下：</p>
-<pre><code><span class="keyword">static</span> <span class="built_in">dispatch_queue_t</span> initQueue;
-<span class="keyword">static</span> <span class="keyword">void</span>* initQueueKey;
-<span class="keyword">static</span> <span class="keyword">void</span>* initQueueContext;
-
-<span class="keyword">static</span> <span class="built_in">dispatch_once_t</span> onceToken;
-<span class="built_in">dispatch_once</span>(&amp;onceToken, ^{
-
-    <span class="comment">// 1. 主队列</span>
-    <span class="keyword">if</span> ([<span class="built_in">UIApplication</span> isMainQueue]) {
-        initQueue = dispatch_get_main_queue();
-        initQueueKey = [<span class="built_in">UIApplication</span> mainQueueKey];
-        initQueueContext = [<span class="built_in">UIApplication</span> mainQueueContext];
-    } <span class="keyword">else</span> {
-        <span class="comment">// 2. 非主队列</span>
-        <span class="keyword">const</span> <span class="keyword">char</span> *label = [<span class="built_in">NSStringFromSelector</span>(_cmd) UTF8String];
-        initQueueKey = &amp;initQueueKey;
-        initQueueContext = &amp;initQueueContext;
-        initQueue = dispatch_queue_create(label, <span class="literal">nil</span>);
-        dispatch_queue_set_specific(initQueue, initQueueKey, initQueueContext, <span class="literal">nil</span>);
-    }
-});
-</code></pre><p>从代码中不难发现，由于主队列是全局共用的，所以如果这次setter的赋值是在主队列进行的，那么就直接复用主队列即可；而如果当前的队列我们自身都不确定的话，那么就干脆<strong>开辟一个串行的队列</strong>用语这个setter的后续赋值，并将其记录下来。</p>
-<p><strong>细心的读者可能会发现，我们标题里写的是线程，但是在代码中记录的却是GCD的队列（Queue）。而且，我们判断的是主队列而不是主线程。这是为什么呢？</strong></p>
-<p>嘿嘿，容我卖个关子，文章最后会有详细的阐述。</p>
-<h4 id="2-_判断后续赋值是否是记录的线程">2. 判断后续赋值是否是记录的线程</h4><p>由于我们之前记录的是队列，所以我们是无法直接使用诸如如下代码的方式进行是否是同一个线程的判断  </p>
-<pre><code><span class="string">[NSThread currentThread]</span> == xxxThread
-</code></pre><p>在iOS7之前，苹果提供了<code>dispatch_get_current_queue()</code>用于获取当前正在执行的队列，如果有这个方法，我们就可以很容易判断这个队列和我们记录的队列是否是同一个了。但是很不幸的是，该方法已经被从GCD的Public API中移除了，一时间研究陷入了僵局。</p>
-<p>不过好在<code>libdispatch</code>是开源的，经过一段时间的摸索，我发现了这个方法<code>dispatch_get_specific</code>，其自身实现如下：</p>
-<pre><code><span class="function">DISPATCH_NOINLINE
-<span class="keyword">void</span> *
-<span class="title">dispatch_get_specific</span><span class="params">(<span class="keyword">const</span> <span class="keyword">void</span> *key)</span>
-</span>{
-    <span class="keyword">if</span> (slowpath(!key)) {
-        <span class="keyword">return</span> <span class="literal">NULL</span>;
-    }
-    <span class="keyword">void</span> *ctxt = <span class="literal">NULL</span>;
-    <span class="comment">// 1. 获取当前线程的执行队列</span>
-    <span class="keyword">dispatch_queue_t</span> dq = _dispatch_queue_get_current();
-
-    <span class="keyword">while</span> (slowpath(dq)) {
-        <span class="comment">// 2. 如果进行过标记</span>
-        <span class="keyword">if</span> (slowpath(dq-&gt;dq_specific_q)) {
-            ctxt = (<span class="keyword">void</span> *)key;
-            dispatch_sync_f(dq-&gt;dq_specific_q, &amp;ctxt,
-                    _dispatch_queue_get_specific);
-            <span class="keyword">if</span> (ctxt) <span class="keyword">break</span>;
-        }
-        <span class="comment">// 3. 向上传递至target Queue</span>
-        dq = dq-&gt;do_targetq;
-    }
-    <span class="keyword">return</span> ctxt;
-}
-</code></pre><p>通过上述代码不难理解，系统会自动获取当前线程正在执行的队列的。如果进行该队列进行过标记，就根据我们传入的key去获取key对应的value(ctxt)。如果查询到了，就返回。否则按照目标队列层层上查，直至root_queue也没找到为止。（关于libdispatch的具体原理，我下周还会专门写篇细细分析的文章）。</p>
-<p>通过这个方法，我们可以在直接记录初始化队列的时候对其进行特殊的标定：</p>
-<pre><code>dispatch_queue_set_specific<span class="list">(<span class="keyword">initQueue</span>, initQueueKey, initQueueContext, <span class="literal">nil</span>)</span><span class="comment">;</span>
-</code></pre><p>随后在后续setter执行的时候通过如下代码进行判断并进行相应的直接赋值或者队列重新派发：</p>
-<pre><code><span class="comment">// 如果是当前队列</span>
-<span class="keyword">if</span> (dispatch_get_specific(initQueueKey) == initQueueContext) {
-    _threadSafeArray = threadSafeArray;
-} <span class="keyword">else</span> {
-     <span class="comment">// 不是当前队列</span>
-    <span class="built_in">dispatch_sync</span>(initQueue, ^{
-        _threadSafeArray = threadSafeArray;
-    });
-}
-</code></pre><h4 id="3-_遍历所有的setter，重复上述过程">3. 遍历所有的setter，重复上述过程</h4><p>由于我们的目的是减轻其他开发的负担，所以不得不借助了runtime的Method Swizzling技术。但是传统的Method Swizzling技术是将函数实现两两交换。如果按照这个思路，我们就需要为每一个setter编写一个对应的<code>hook_setter</code>，这工作量无疑太巨大了。</p>
-<p>所以，在这里我们需要的一个中心重定向的过程：即，将所有的setter都转移到一个hook_proxy中。代码如下：</p>
-<pre><code>- (<span class="function_or_atom">void</span>)<span class="function_or_atom">hookAllPropertiesSetter</span>
-{
-    <span class="function_or_atom">unsigned</span> <span class="function_or_atom">int</span> <span class="function_or_atom">outCount</span>;
-    <span class="function_or_atom">objc_property_t</span> *<span class="function_or_atom">properties</span> = <span class="function_or_atom">class_copyPropertyList</span>([<span class="function_or_atom">self</span> <span class="function_or_atom">class</span>], &amp;<span class="function_or_atom">outCount</span>);
-
-    <span class="variable">NSMutableArray</span> *<span class="function_or_atom">readWriteProperties</span> = [[<span class="variable">NSMutableArray</span> <span class="function_or_atom">alloc</span>] <span class="function_or_atom">initWithCapacity:outCount</span>];
-    <span class="function_or_atom">for</span> (<span class="function_or_atom">unsigned</span> <span class="function_or_atom">int</span> <span class="function_or_atom">i</span> = <span class="number">0</span>; <span class="function_or_atom">i</span> &lt; <span class="function_or_atom">outCount</span>; <span class="function_or_atom">i</span>++) {
-        <span class="function_or_atom">objc_property_t</span> <span class="function_or_atom">property</span> = <span class="function_or_atom">properties</span>[<span class="function_or_atom">i</span>];
-        <span class="variable">NSString</span> *<span class="function_or_atom">propertyName</span> = [[<span class="variable">NSString</span> <span class="function_or_atom">alloc</span>] <span class="function_or_atom">initWithCString:property_getName</span>(<span class="function_or_atom">property</span>) <span class="function_or_atom">encoding</span>:<span class="variable">NSUTF8StringEncoding</span>];
-
-        <span class="function_or_atom">unsigned</span> <span class="function_or_atom">int</span> <span class="function_or_atom">attrCount</span>;
-        <span class="function_or_atom">objc_property_attribute_t</span> *<span class="function_or_atom">attrs</span> = <span class="function_or_atom">property_copyAttributeList</span>(<span class="function_or_atom">property</span>, &amp;<span class="function_or_atom">attrCount</span>);
-
-        // <span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span>特别注意<span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span>
-        // <span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span>特别注意<span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span>
-        <span class="variable">BOOL</span> <span class="function_or_atom">isReadOnlyProperty</span> = <span class="variable">NO</span>;
-        <span class="function_or_atom">for</span> (<span class="function_or_atom">unsigned</span> <span class="function_or_atom">int</span> <span class="function_or_atom">j</span> = <span class="number">0</span>; <span class="function_or_atom">j</span> &lt; <span class="function_or_atom">attrCount</span>; <span class="function_or_atom">j</span>++) {
-            <span class="function_or_atom">if</span> (<span class="function_or_atom">attrs</span>[<span class="function_or_atom">j</span>].<span class="function_or_atom">name</span>[<span class="number">0</span>] == <span class="string">'R'</span>) {
-                <span class="function_or_atom">isReadOnlyProperty</span> = <span class="variable">YES</span>;
-                <span class="function_or_atom">break</span>;
-            }
-        }
-        <span class="function_or_atom">free</span>(<span class="function_or_atom">attrs</span>);
-
-        <span class="function_or_atom">if</span> (<span class="exclamation_mark">!</span><span class="function_or_atom">isReadOnlyProperty</span>) {
-            [<span class="function_or_atom">readWriteProperties</span> <span class="function_or_atom">addObject:propertyName</span>];
-        }
-    }
-    <span class="function_or_atom">free</span>(<span class="function_or_atom">properties</span>);
-
-    <span class="function_or_atom">for</span> (<span class="variable">NSString</span> *<span class="function_or_atom">propertyName</span> <span class="function_or_atom">in</span> <span class="function_or_atom">readWriteProperties</span>) {
-
-        <span class="variable">NSString</span> *<span class="function_or_atom">setterName</span> = [<span class="variable">NSString</span> <span class="function_or_atom">stringWithFormat</span>:@<span class="string">"set%@%@:"</span>, [<span class="function_or_atom">propertyName</span> <span class="function_or_atom">substringToIndex</span>:<span class="number">1</span>].<span class="function_or_atom">uppercaseString</span>, [<span class="function_or_atom">propertyName</span> <span class="function_or_atom">substringFromIndex</span>:<span class="number">1</span>]];
-
-        // <span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span>特别注意<span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span>
-        // <span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span>特别注意<span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span>
-        <span class="variable">NSString</span> *<span class="function_or_atom">hookSetterName</span> = [<span class="variable">NSString</span> <span class="function_or_atom">stringWithFormat</span>:@<span class="string">"hook_set%@:"</span>, <span class="function_or_atom">propertyName</span>];
-
-        <span class="variable">SEL</span> <span class="function_or_atom">originSetter</span> = <span class="variable">NSSelectorFromString</span>(<span class="function_or_atom">setterName</span>);
-        <span class="variable">SEL</span> <span class="function_or_atom">newSetter</span> = <span class="variable">NSSelectorFromString</span>(<span class="function_or_atom">hookSetterName</span>);
-
-        <span class="function_or_atom">swizzleMethod</span>([<span class="function_or_atom">self</span> <span class="function_or_atom">class</span>], <span class="function_or_atom">originSetter</span>, <span class="function_or_atom">newSetter</span>);
-    }
-}
-</code></pre><p>在这里有两点需要注意的地方：</p>
-<ol>
-<li><strong>readonly</strong>的property是不具备setter功能的，所以将其过滤。</li>
-<li>将每个setter，比如<code>setThreadSafeArray</code>都<strong>swizzle</strong>成了<code>hook__setThreadSafeArray</code>。即为每一个setter都定制了一个对应的hook_setter。</li>
-</ol>
-<p>哎，有人会问，你刚刚不才说为每一个setter编写对应的hook_setter是费时费力的吗？怎么自己打自己脸啊？</p>
-<p>别急，容我慢慢道来。</p>
-<p>在Method Swizzling的时候，我们需要调用<code>class_getInstanceMethod</code>来进行对应方法名的函数查找。整个过程简述如下：</p>
-<pre><code><span class="keyword">method</span> cache list -&gt; <span class="keyword">method</span> list -&gt; 动态方法决议 -&gt; 方法转交 (forward <span class="type">Invocation</span>)
-</code></pre><p>其中，在动态方法决议这步，如果我们添加了之前的没找到的方法，那么整个查找过程又会重新开始一遍。</p>
-<p><strong><span style="color:red">由于那些hook_setter是压根不会存在于method list中的，所以在查找这些函数的时候，一定会走到动态决议这一步。</span></strong></p>
-<p>基于此，我实现了如下的动态决议函数：</p>
-<pre><code>+ (BOOL)resolveInstanceMethod:(SEL)sel
-{
-    NSString *selName = NSStringFromSelector(sel);
-
-    <span class="keyword">if</span> ([selName hasPrefix:@<span class="string">"hook_"</span>]) {
-        <span class="function"><span class="keyword">Method</span> <span class="title">proxyMethod</span> =</span> class_getInstanceMethod([<span class="variable">self</span> <span class="class"><span class="keyword">class</span>], @<span class="title">selector</span>(<span class="title">hook_proxy</span>:));</span>
-        class_addMethod([<span class="variable">self</span> <span class="class"><span class="keyword">class</span>], <span class="title">sel</span>, <span class="title">method_getImplementation</span>(<span class="title">proxyMethod</span>), <span class="title">method_getTypeEncoding</span>(<span class="title">proxyMethod</span>));</span>
-        <span class="keyword">return</span> YES;
-    }
-
-    <span class="keyword">return</span> [<span class="variable">super</span> resolveInstanceMethod:sel];
-}
-</code></pre><p>从代码中很容易发现，如果是之前那么hook_setter的函数名，我就讲这些方法的<strong>函数实现</strong>全部重定向到函数<code>hook__proxy</code>上。</p>
-<h4 id="4-_寻找上下文">4. 寻找上下文</h4><p>在传统的Method Swizzling技术中，由于我们是两两交换，因此我们不需要上下文这一个步骤，直接调用hook_setter就可以重新返回对应的原setter方法。</p>
-<p>可是在本文的实现中，由于我们将所有的setter都重定向到了<code>hook__proxy</code>中，所以我们需要在<code>hook_proxy</code>中寻找究竟是给哪个property赋值。</p>
-<p><strong><span style="color:red">如果对Method Swizzling的理解只停留在表面，是很难想到后续步骤的。</span></strong></p>
-<p>Method Swizzling的原理是只是交换IMP，即函数实现。而我们在Objective-C的函数调用统统是通过objc_msgSend结合函数的Selector(可以简单理解为函数名)来找到真正的函数实现。</p>
-<p><strong>因此，swizzle后的Selector没变，变的是IMP。</strong></p>
-<p>有了这个理解，我们就可以在hook_proxy使用<b style="color:red">__cmd</b>这个隐藏变量，它会指引我们究竟是哪个Setter当前正在被调用，具体代码如下：</p>
-<pre><code>- (<span class="typename">void</span>)<span class="string">hook_proxy:</span>(NSObject *)proxyObject
-{
-    <span class="comment">// 只是实现被换了，但是selector还是没变</span>
-    NSString *originSelector = NSStringFromSelector(_cmd);
-    NSString *propertyName = [[originSelector <span class="string">stringByTrimmingCharactersInSet:</span>[NSCharacterSet <span class="string">characterSetWithCharactersInString:</span>@<span class="string">":"</span>]] <span class="string">stringByReplacingOccurrencesOfString:</span>@<span class="string">"set"</span> <span class="string">withString:</span>@<span class="string">""</span>];
-    <span class="keyword">if</span> (propertyName.length &lt;= <span class="number">0</span>) <span class="keyword">return</span>;
-
-    NSString *ivarName = [NSString <span class="string">stringWithFormat:</span>@<span class="string">"_%@%@"</span>, [propertyName <span class="string">substringToIndex:</span><span class="number">1</span>].lowercaseString, [propertyName <span class="string">substringFromIndex:</span><span class="number">1</span>]];
-
-    <span class="comment">//NSLog(@"hook_proxy is %@ for property %@", proxyObject, propertyName);</span>
-
-    重复之前步骤即可。
-}
-</code></pre><h4 id="5-_其他拓展">5. 其他拓展</h4><p><strong>本文中只是探索了下没有重载setter的那些ivar，因此只需要简单对ivar进行赋值即可。</strong><br>如果你碰到了大量自定义setter的ivar，那么也一样很简单，你只需要维护一个ivar 到对应自定义的setter的imp映射，在hook_proxy将<code>setValue:ForKey:</code>替换成直接的IMP调用即可。</p>
-<h3 id="一些额外细节">一些额外细节</h3><ul>
-<li><ol>
-<li>线程和GCD Queue并不是一一对应的关系。</li>
-</ol>
-</li>
-</ul>
-<p>前面提到了，我们要记录的是队列而不是线程。相信很多人可能一开始都不能理解，那么我用如下这样的代码进行解释：</p>
-<pre><code><span class="tag">if</span> ([NSThread isMainThread]) {
-    <span class="attr_selector">[self doSomeThing]</span>;
-} <span class="tag">else</span> {
-    <span class="tag">dispatch_sync</span>(<span class="function">dispatch_get_main_queue</span>(), ^{
-        <span class="attr_selector">[self doSomething]</span>;
-    });
-}
-</code></pre><p>上述代码想必大家非常熟悉，就是全包在主线程执行一些操作，比如UI操作等等。但是事实上，这里有个误区：</p>
-<p><strong>主队列一定在主线程执行，而主线程不一定只执行主队列。</strong></p>
-<p><b style="color:red">换句话说：上述代码的if 和 else是不等价的。</b> </p>
-<p>有时候，主线程有可能会被调度到执行其他队列（其他线程亦是如此），比如如下代码：</p>
-<pre><code><span class="comment">// 在主线程创建</span>
-dispatch\_queue\_t dq = dispatch\_queue\_create(<span class="string">'com.mingyi.dashuaibi'</span>, <span class="keyword">NULL</span>);
-dispatch_sync(dq, ^{
-    NSLog(@<span class="string">"current thread is %@"</span>, [NSThread currentThread]);
-});
-</code></pre><p>具体效果，大家可以自己尝试下，看看Log输出的结果是不是主线程。</p>
-<ul>
-<li><ol>
-<li>为什么不能直接将所有的setter直接hook到hook_proxy，非要通过动态决议来进行。</li>
-</ol>
-</li>
-</ul>
-<p>我们举个简单的例子，假设我们有两个property，分别叫A和B。那么在执行下述代码的时候：</p>
-<pre><code>for <span class="list">(<span class="keyword">int</span> i = <span class="number">0</span><span class="comment">; i &lt; 2; i++) {</span>
-     SEL originSetter = NSSelectorFromString<span class="list">(<span class="keyword">setterName</span>)</span><span class="comment">;</span>
-     SEL newSetter = NSSelectorFromString<span class="list">(<span class="keyword">hook_proxy</span>)</span><span class="comment">;</span>
-     swizzleMethod<span class="list">([self class], originSetter, newSetter)</span><span class="comment">;</span>
-}</span>
-</code></pre><p>第一次交换的时候，Setter A的 IMP和 hook_proxy的 IMP进行了交换，这一步没问题。<br>第二次交换的时候，Setter B的 IMP和 hook_proxy的 IMP进行了交换，而此时hook_proxy的IMP已经指向了Setter A的IMP，因此导致的结果就是交换错乱了，调用setter B实质上是调用了setter A。</p>
-]]></content>
-    <summary type="html">
-    <![CDATA[<p>无论是xx还是xx，对于整个App的稳定性要求都非常之高。因此，那些前辈大牛们为了解决一些常见的问题，比如空指针、数组越界等等，开发了xxxxxx这样的底层SDK，用于解决问题。</p>
-<p>但是随着业务逐渐的复杂化以及愈发严格的性能要求，xxApp绝大多数的Crash开]]>
     </summary>
     
       <category term="iOS" scheme="http://satanwoo.github.io/tags/iOS/"/>
