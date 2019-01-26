@@ -3,24 +3,34 @@
 <head>
   <meta charset="utf-8">
   
-  <title>HTML中的“空白符”，你真的懂了吗？ | SatanWoo</title>
+  <title>从C++ std::shared_ptr 原理来看看栈溢出的危害 | SatanWoo</title>
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
-  <meta name="description" content="这几天由于某项任务，暂时转型了成为了前端码农（实际上就是个写初级CSS的屌丝）。在这期间，我有一个需求大致是这样的：
-我有一个父类容器，比如div，这个div的宽度是固定的。我现在要在这个div中插入5个img，这5个img等宽。同时伴随这5个img的当然还有四个间隙，这四个间隙也是等宽的。
-当然，需要根据百分比宽度进行简单适配。是不是觉得很简单呢？呵呵，别说专业的前端工程师，我这种半吊子都觉得简">
+  <meta name="description" content="C++ std::shared_ptr 实现原理上周五排查了一个由于XXX模块操作疏忽导致栈越界引发的我的模块的智能指针Crash问题，因此稍微研究了一下，以作参考：
+
+shared_ptr共享被管理对象，同一时刻可以有多个shared_ptr拥有对象的所有权，当最后一个shared_ptr对象销毁时，被管理对象自动销毁
+
+shared_ptr 实现
+简单来说，shared_ptr实现包含了两部分">
 <meta property="og:type" content="article">
-<meta property="og:title" content="HTML中的“空白符”，你真的懂了吗？">
-<meta property="og:url" content="http://satanwoo.github.io/2016/04/26/blank-space-in-html/index.html">
+<meta property="og:title" content="从C++ std::shared_ptr 原理来看看栈溢出的危害">
+<meta property="og:url" content="http://satanwoo.github.io/2019/01/26/shared-ptr/index.html">
 <meta property="og:site_name" content="SatanWoo">
-<meta property="og:description" content="这几天由于某项任务，暂时转型了成为了前端码农（实际上就是个写初级CSS的屌丝）。在这期间，我有一个需求大致是这样的：
-我有一个父类容器，比如div，这个div的宽度是固定的。我现在要在这个div中插入5个img，这5个img等宽。同时伴随这5个img的当然还有四个间隙，这四个间隙也是等宽的。
-当然，需要根据百分比宽度进行简单适配。是不是觉得很简单呢？呵呵，别说专业的前端工程师，我这种半吊子都觉得简">
-<meta property="og:updated_time" content="2016-04-26T16:03:25.000Z">
+<meta property="og:description" content="C++ std::shared_ptr 实现原理上周五排查了一个由于XXX模块操作疏忽导致栈越界引发的我的模块的智能指针Crash问题，因此稍微研究了一下，以作参考：
+
+shared_ptr共享被管理对象，同一时刻可以有多个shared_ptr拥有对象的所有权，当最后一个shared_ptr对象销毁时，被管理对象自动销毁
+
+shared_ptr 实现
+简单来说，shared_ptr实现包含了两部分">
+<meta property="og:image" content="https://img-blog.csdn.net/20160529232019149?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center">
+<meta property="og:updated_time" content="2019-01-26T08:51:10.000Z">
 <meta name="twitter:card" content="summary">
-<meta name="twitter:title" content="HTML中的“空白符”，你真的懂了吗？">
-<meta name="twitter:description" content="这几天由于某项任务，暂时转型了成为了前端码农（实际上就是个写初级CSS的屌丝）。在这期间，我有一个需求大致是这样的：
-我有一个父类容器，比如div，这个div的宽度是固定的。我现在要在这个div中插入5个img，这5个img等宽。同时伴随这5个img的当然还有四个间隙，这四个间隙也是等宽的。
-当然，需要根据百分比宽度进行简单适配。是不是觉得很简单呢？呵呵，别说专业的前端工程师，我这种半吊子都觉得简">
+<meta name="twitter:title" content="从C++ std::shared_ptr 原理来看看栈溢出的危害">
+<meta name="twitter:description" content="C++ std::shared_ptr 实现原理上周五排查了一个由于XXX模块操作疏忽导致栈越界引发的我的模块的智能指针Crash问题，因此稍微研究了一下，以作参考：
+
+shared_ptr共享被管理对象，同一时刻可以有多个shared_ptr拥有对象的所有权，当最后一个shared_ptr对象销毁时，被管理对象自动销毁
+
+shared_ptr 实现
+简单来说，shared_ptr实现包含了两部分">
   
     <link rel="alternative" href="/atom.xml" title="SatanWoo" type="application/atom+xml">
   
@@ -67,10 +77,10 @@
   </div>
 </header>
       <div class="outer">
-        <section id="main"><article id="post-blank-space-in-html" class="article article-type-post" itemscope itemprop="blogPost">
+        <section id="main"><article id="post-shared-ptr" class="article article-type-post" itemscope itemprop="blogPost">
   <div class="article-meta">
-    <a href="/2016/04/26/blank-space-in-html/" class="article-date">
-  <time datetime="2016-04-26T15:21:22.000Z" itemprop="datePublished">2016-04-26</time>
+    <a href="/2019/01/26/shared-ptr/" class="article-date">
+  <time datetime="2019-01-26T08:48:20.000Z" itemprop="datePublished">2019-01-26</time>
 </a>
     
   </div>
@@ -81,7 +91,7 @@
         
   
     <h1 class="article-title" itemprop="name">
-      HTML中的“空白符”，你真的懂了吗？
+      从C++ std::shared_ptr 原理来看看栈溢出的危害
     </h1>
   
 
@@ -89,84 +99,51 @@
     
     <div class="article-entry" itemprop="articleBody">
       
-        <p>这几天由于某项任务，暂时转型了成为了前端码农（实际上就是个写初级CSS的屌丝）。在这期间，我有一个需求大致是这样的：</p>
-<p>我有一个父类容器，比如<strong>div</strong>，这个<strong>div</strong>的宽度是固定的。我现在要在这个<strong>div</strong>中插入5个<strong>img</strong>，这5个<strong>img</strong>等宽。同时伴随这5个<strong>img</strong>的当然还有四个间隙，这四个间隙也是等宽的。</p>
-<p><strong>当然</strong>，需要根据百分比宽度进行简单适配。<br>是不是觉得很简单呢？呵呵，别说专业的前端工程师，我这种半吊子都觉得简单。<br>根据PSD效果图，我量出了对应的百分比尺寸，于是写出来如下的<strong>HTML</strong>和<strong>CSS</strong>代码：</p>
-<pre><code><span class="comment">// HTML 文件</span>
-&lt;div <span class="keyword">class</span>=<span class="string">"parent"</span>&gt;
-    &lt;img <span class="keyword">class</span>=<span class="string">"element"</span> src=<span class="string">"http://xxxxxxx.com/shshshshs.png"</span> /&gt;
-    &lt;img <span class="keyword">class</span>=<span class="string">"element"</span> src=<span class="string">"http://xxxxxxx.com/shshshshs.png"</span> /&gt;
-    &lt;img <span class="keyword">class</span>=<span class="string">"element"</span> src=<span class="string">"http://xxxxxxx.com/shshshshs.png"</span> /&gt;
-    &lt;img <span class="keyword">class</span>=<span class="string">"element"</span> src=<span class="string">"http://xxxxxxx.com/shshshshs.png"</span> /&gt;
-    &lt;img <span class="keyword">class</span>=<span class="string">"element"</span> src=<span class="string">"http://xxxxxxx.com/shshshshs.png"</span> /&gt;
-&lt;/div&gt;
-
-<span class="comment">// css 文件</span>
-.parent {
-    width:x%;
-}
-
-.parent img {
-    width:y%;
-    height:auto;
-    margin-left:k%;
-}
-
-.parent img:first-child {
-    margin-left:<span class="number">0</span>;
-}
-</code></pre><p>这段代码相当简洁明了吧，我通过量好的百分比，对各个图片和之间的间距进行了控制，基本上业界大多数也是这么做的吧。</p>
-<p>按理说事情到这基本就结束了，毕竟img是个<strong>行内可替换元素</strong>，会自动布局在一行之内，<strong>当然前提是父容器宽度足够的前提下</strong>。不过既然我都身体力行的量过了，那自然不应该出现问题。</p>
-<p>但是，卧槽，你越担心的事就越会发生。整个界面出现了非常奇葩的现象：</p>
-<pre><code>这是正常情况：
-[图<span class="tag">&lt;<span class="title">-</span>&gt;</span>图<span class="tag">&lt;<span class="title">-</span>&gt;</span>图<span class="tag">&lt;<span class="title">-</span>&gt;</span>图<span class="tag">&lt;<span class="title">-</span>&gt;</span>图] 
-
-这是实际情况：
-[图<span class="tag">&lt;<span class="title">-</span>&gt;</span>图<span class="tag">&lt;<span class="title">-</span>&gt;</span>图<span class="tag">&lt;<span class="title">-</span>&gt;</span>图<span class="tag">&lt;<span class="title">-</span>&gt;</span>］
-图]
-</code></pre><p>卧槽，竟然宽度不够，换行了。尝试了很长时间，后来发现，将<code>.parent img</code>中添加<code>float:left</code>就可以完美解决，但这什么原因呢?</p>
-<h3 id="原因">原因</h3><p>经过一番探索研究，我发现，这是由于<strong>空白符</strong>对<strong>inline</strong>类型的元素造成的影响。</p>
-<ul>
-<li>首先，<strong>img</strong>元素是一种行内可替代元素，效果基本可以理解为<strong>inline-block</strong>。</li>
-<li><p>第二，我们在HTML的时候，为了在编辑器内写的美观，常常会使用回车，而回车在HTML中会被识别为空白符。</p>
-<pre><code>比如
-&lt;<span class="tag">img</span> src = <span class="string">"xxxx"</span> /&gt;（空白符）
-&lt;<span class="tag">img</span> src = <span class="string">"xxxx"</span> /&gt;
-</code></pre></li>
-<li><p>第三，空白符具备宽度（和font-size有关），不具备高度。</p>
-</li>
-</ul>
-<p><strong>所以，表面上我们根据设计好的图片进行了</strong>精准<strong>的测量，构造了完全匹配父类宽度的元素和间距，但是实际上却由于空白符所具备的宽度而产生了偏差。</strong></p>
-<p>用一张图来表示拥有空白符后的效果：</p>
-<pre><code><span class="list">[<span class="keyword">图</span><span class="list">(<span class="keyword">空白</span>)</span>&lt;-&gt;图<span class="list">(<span class="keyword">空白</span>)</span>&lt;-&gt;图<span class="list">(<span class="keyword">空白</span>)</span>&lt;-&gt;
-图&lt;-&gt;］</span>
-</code></pre><h3 id="为什么float可以解决这个问题">为什么float可以解决这个问题</h3><blockquote>
-<p>A floated box is shifted to the left or right until its outer edge touches the containing block edge or the outer edge of another float</p>
-</blockquote>
-<p>看到这个关于float的定义了吗？<strong>float要么依赖前一个（或者后一个）float元素的边界，要么就依赖于父元素的边界。而一个空白符，既不是包含块（父容器）的边界，也不是另一个float元素，因此不受影响，也不会对其余float元素有影响。</strong></p>
-<p>所以，当你对<code>.parent img</code>启用<code>float:left</code>之后，效果就成了下图所示：</p>
-<pre><code>[<span class="built_in">float</span>&lt;-&gt;<span class="built_in">float</span>&lt;-&gt;<span class="built_in">float</span>&lt;-&gt;<span class="built_in">float</span>&lt;-&gt;<span class="built_in">float</span>]
-[空白符]
-</code></pre><p>这次我们测量的宽度正好匹配完全，所以将空白符自然而然的挤到了下一行。还记得我们前面说过空白符不具备高度吗？因此，这个空白符压根没起作用！</p>
+        <h2 id="C++_std::shared_ptr_实现原理">C++ std::shared_ptr 实现原理</h2><p>上周五排查了一个由于<code>XXX模块</code>操作疏忽导致栈越界引发的<code>我的模块</code>的智能指针Crash问题，因此稍微研究了一下，以作参考：</p>
 <blockquote>
-<p>文中的 [] 代表父容器，&lt;-&gt; 代表间隔。</p>
+<p>shared_ptr共享被管理对象，同一时刻可以有多个shared_ptr拥有对象的所有权，当最后一个shared_ptr对象销毁时，被管理对象自动销毁</p>
 </blockquote>
-<h3 id="其余方案">其余方案</h3><ol>
-<li>将父容器的<code>font-size</code>设置为<strong>0</strong>。</li>
-<li>避免换行，写出<img src=""><img src=""><img src=""><img src=""> 这样的代码。</li>
-<li>启用HTML压缩。</li>
-</ol>
-<p>最后：<strong>感谢美团大神FTR和淘宝大神YWJ对本菜比的指导。</strong></p>
+<h3 id="shared_ptr_实现">shared_ptr 实现</h3><p><img src="https://img-blog.csdn.net/20160529232019149?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""></p>
+<p>简单来说，<code>shared_ptr</code>实现包含了两部分，</p>
+<ul>
+<li>一个指向堆上创建的对象的裸指针</li>
+<li><strong>一个指向内部隐藏的、共享的管理对象。</strong></li>
+</ul>
+<p>第一部分没什么好说的，第二部分是需要关注的重点：</p>
+<ul>
+<li><code>use_count</code>，当前这个堆上对象被多少对象引用了，简单来说就是引用计数。</li>
+<li><code>weak_count</code>，这个管理对象被多少个智能指针共享了，简单来说就是<code>管理对象</code>的引用计数。</li>
+</ul>
+<p><b style="color:red">不同指针创建的对同一个堆上对象的智能管理，并不共享管理对象，因此存在<code>double free</code>的可能性</b></p>
+<p><code>_shared_ptr</code>直接包含的裸指针是为了实现一般指针的-&gt;,*等操作，通过<code>__shared_count</code>间接包含的指针是为了管理对象的生命周期，回收相关资源。</p>
+<p>换句话说，<code>__shared_count</code>内部的<code>use_count</code>主要用来标记被管理对象的生命周期，<code>weak_count</code>主要用来标记管理对象的生命周期。</p>
+<h3 id="问题原因">问题原因</h3><p>了解了原理，可以看出<code>std::share_ptr</code>本身的<code>_M_ptr</code>指向了堆上通过<code>new</code>创建的对象。但是其自身这个<code>_M_ptr</code>却会如果在不当操作上，被修改，比如栈越界操作，就会被破坏，导致产生对非法对象的访问：</p>
+<pre><code><span class="keyword">int</span> i = <span class="number">5</span>;
+NSLog(@<span class="string">"i address is %p"</span>, &amp;i);
+
+XXX::XX df = XXX::XX::buildDataFrame();
+NSLog(@<span class="string">"sp0 address is %p"</span>, &amp;df);
+
+<span class="keyword">int</span> a[<span class="number">1</span>] = {<span class="number">1</span>};
+
+NSLog(@<span class="string">"k address is %p"</span>, a);
+
+<span class="keyword">for</span> (<span class="keyword">int</span> i = <span class="number">0</span>; i &lt; <span class="number">10</span>; i++) {
+    a[i] = i;
+}
+
+NSLog(@<span class="string">"haha"</span>);
+</code></pre><p>上述这段代码就会引发问题，这里<code>XXX::XX</code>的具体内部设计使用了经典的RAII，下文再表。</p>
 
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/04/26/blank-space-in-html/" data-id="cjrd8lh8t0019eri1tu3sz3gx" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2019/01/26/shared-ptr/" data-id="cjrd8lh7p0009eri1z0ieaeuj" class="article-share-link">Share</a>
       
-        <a href="http://satanwoo.github.io/2016/04/26/blank-space-in-html/#disqus_thread" class="article-comment-link">Comments</a>
+        <a href="http://satanwoo.github.io/2019/01/26/shared-ptr/#disqus_thread" class="article-comment-link">Comments</a>
       
       
-  <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/JavaScript/">JavaScript</a></li></ul>
+  <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/c/">c++</a></li></ul>
 
     </footer>
   </div>
@@ -174,19 +151,19 @@
     
 <nav id="article-nav">
   
-    <a href="/2016/05/02/Spotify/" id="article-nav-newer" class="article-nav-link-wrap">
+    <a href="/2019/01/26/LD-2/" id="article-nav-newer" class="article-nav-link-wrap">
       <strong class="article-nav-caption">Newer</strong>
       <div class="article-nav-title">
         
-          为什么Spotify的付费用户转化率惊人的高？
+          LD-2
         
       </div>
     </a>
   
   
-    <a href="/2016/04/11/dispatch-once/" id="article-nav-older" class="article-nav-link-wrap">
+    <a href="/2019/01/01/Synchronized/" id="article-nav-older" class="article-nav-link-wrap">
       <strong class="article-nav-caption">Older</strong>
-      <div class="article-nav-title">滥用单例之dispatch_once死锁</div>
+      <div class="article-nav-title">抛开性能，谈谈不该用@Synchronized的原因</div>
     </a>
   
 </nav>
@@ -310,7 +287,7 @@ s.setAttribute('data-timestamp', +new Date());
 <script>
   var disqus_shortname = 'satanwoo-2';
   
-  var disqus_url = 'http://satanwoo.github.io/2016/04/26/blank-space-in-html/';
+  var disqus_url = 'http://satanwoo.github.io/2019/01/26/shared-ptr/';
   
   (function(){
     var dsq = document.createElement('script');

@@ -3,24 +3,38 @@
 <head>
   <meta charset="utf-8">
   
-  <title>HTML中的“空白符”，你真的懂了吗？ | SatanWoo</title>
+  <title>LD-2 | SatanWoo</title>
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
-  <meta name="description" content="这几天由于某项任务，暂时转型了成为了前端码农（实际上就是个写初级CSS的屌丝）。在这期间，我有一个需求大致是这样的：
-我有一个父类容器，比如div，这个div的宽度是固定的。我现在要在这个div中插入5个img，这5个img等宽。同时伴随这5个img的当然还有四个间隙，这四个间隙也是等宽的。
-当然，需要根据百分比宽度进行简单适配。是不是觉得很简单呢？呵呵，别说专业的前端工程师，我这种半吊子都觉得简">
+  <meta name="description" content="了解苹果的LD
+其实文章关于传统Section Based Linker那块我还没怎么读懂，有兴趣的欢迎互相探讨。
+
+之前研究Xcode 10兼容libstdc++的时候，稍微把玩了下苹果的LD，借这个机会正好通读了下苹果的LD设计，本文做一下总结。
+Atom &amp;amp; FixUp苹果的LD，核心理念就是基于Atom和FixUp，拿着两个术语是啥意思呢？
+
+Atom就是一块代码（函数）或者数据（">
 <meta property="og:type" content="article">
-<meta property="og:title" content="HTML中的“空白符”，你真的懂了吗？">
-<meta property="og:url" content="http://satanwoo.github.io/2016/04/26/blank-space-in-html/index.html">
+<meta property="og:title" content="LD-2">
+<meta property="og:url" content="http://satanwoo.github.io/2019/01/26/LD-2/index.html">
 <meta property="og:site_name" content="SatanWoo">
-<meta property="og:description" content="这几天由于某项任务，暂时转型了成为了前端码农（实际上就是个写初级CSS的屌丝）。在这期间，我有一个需求大致是这样的：
-我有一个父类容器，比如div，这个div的宽度是固定的。我现在要在这个div中插入5个img，这5个img等宽。同时伴随这5个img的当然还有四个间隙，这四个间隙也是等宽的。
-当然，需要根据百分比宽度进行简单适配。是不是觉得很简单呢？呵呵，别说专业的前端工程师，我这种半吊子都觉得简">
-<meta property="og:updated_time" content="2016-04-26T16:03:25.000Z">
+<meta property="og:description" content="了解苹果的LD
+其实文章关于传统Section Based Linker那块我还没怎么读懂，有兴趣的欢迎互相探讨。
+
+之前研究Xcode 10兼容libstdc++的时候，稍微把玩了下苹果的LD，借这个机会正好通读了下苹果的LD设计，本文做一下总结。
+Atom &amp;amp; FixUp苹果的LD，核心理念就是基于Atom和FixUp，拿着两个术语是啥意思呢？
+
+Atom就是一块代码（函数）或者数据（">
+<meta property="og:image" content="https://opensource.apple.com/source/ld64/ld64-253.3/doc/design/hello.png">
+<meta property="og:image" content="https://opensource.apple.com/source/ld64/ld64-253.3/doc/design/bindings.png">
+<meta property="og:updated_time" content="2019-01-26T08:52:11.000Z">
 <meta name="twitter:card" content="summary">
-<meta name="twitter:title" content="HTML中的“空白符”，你真的懂了吗？">
-<meta name="twitter:description" content="这几天由于某项任务，暂时转型了成为了前端码农（实际上就是个写初级CSS的屌丝）。在这期间，我有一个需求大致是这样的：
-我有一个父类容器，比如div，这个div的宽度是固定的。我现在要在这个div中插入5个img，这5个img等宽。同时伴随这5个img的当然还有四个间隙，这四个间隙也是等宽的。
-当然，需要根据百分比宽度进行简单适配。是不是觉得很简单呢？呵呵，别说专业的前端工程师，我这种半吊子都觉得简">
+<meta name="twitter:title" content="LD-2">
+<meta name="twitter:description" content="了解苹果的LD
+其实文章关于传统Section Based Linker那块我还没怎么读懂，有兴趣的欢迎互相探讨。
+
+之前研究Xcode 10兼容libstdc++的时候，稍微把玩了下苹果的LD，借这个机会正好通读了下苹果的LD设计，本文做一下总结。
+Atom &amp;amp; FixUp苹果的LD，核心理念就是基于Atom和FixUp，拿着两个术语是啥意思呢？
+
+Atom就是一块代码（函数）或者数据（">
   
     <link rel="alternative" href="/atom.xml" title="SatanWoo" type="application/atom+xml">
   
@@ -67,10 +81,10 @@
   </div>
 </header>
       <div class="outer">
-        <section id="main"><article id="post-blank-space-in-html" class="article article-type-post" itemscope itemprop="blogPost">
+        <section id="main"><article id="post-LD-2" class="article article-type-post" itemscope itemprop="blogPost">
   <div class="article-meta">
-    <a href="/2016/04/26/blank-space-in-html/" class="article-date">
-  <time datetime="2016-04-26T15:21:22.000Z" itemprop="datePublished">2016-04-26</time>
+    <a href="/2019/01/26/LD-2/" class="article-date">
+  <time datetime="2019-01-26T08:51:30.000Z" itemprop="datePublished">2019-01-26</time>
 </a>
     
   </div>
@@ -81,7 +95,7 @@
         
   
     <h1 class="article-title" itemprop="name">
-      HTML中的“空白符”，你真的懂了吗？
+      LD-2
     </h1>
   
 
@@ -89,84 +103,62 @@
     
     <div class="article-entry" itemprop="articleBody">
       
-        <p>这几天由于某项任务，暂时转型了成为了前端码农（实际上就是个写初级CSS的屌丝）。在这期间，我有一个需求大致是这样的：</p>
-<p>我有一个父类容器，比如<strong>div</strong>，这个<strong>div</strong>的宽度是固定的。我现在要在这个<strong>div</strong>中插入5个<strong>img</strong>，这5个<strong>img</strong>等宽。同时伴随这5个<strong>img</strong>的当然还有四个间隙，这四个间隙也是等宽的。</p>
-<p><strong>当然</strong>，需要根据百分比宽度进行简单适配。<br>是不是觉得很简单呢？呵呵，别说专业的前端工程师，我这种半吊子都觉得简单。<br>根据PSD效果图，我量出了对应的百分比尺寸，于是写出来如下的<strong>HTML</strong>和<strong>CSS</strong>代码：</p>
-<pre><code><span class="comment">// HTML 文件</span>
-&lt;div <span class="keyword">class</span>=<span class="string">"parent"</span>&gt;
-    &lt;img <span class="keyword">class</span>=<span class="string">"element"</span> src=<span class="string">"http://xxxxxxx.com/shshshshs.png"</span> /&gt;
-    &lt;img <span class="keyword">class</span>=<span class="string">"element"</span> src=<span class="string">"http://xxxxxxx.com/shshshshs.png"</span> /&gt;
-    &lt;img <span class="keyword">class</span>=<span class="string">"element"</span> src=<span class="string">"http://xxxxxxx.com/shshshshs.png"</span> /&gt;
-    &lt;img <span class="keyword">class</span>=<span class="string">"element"</span> src=<span class="string">"http://xxxxxxx.com/shshshshs.png"</span> /&gt;
-    &lt;img <span class="keyword">class</span>=<span class="string">"element"</span> src=<span class="string">"http://xxxxxxx.com/shshshshs.png"</span> /&gt;
-&lt;/div&gt;
-
-<span class="comment">// css 文件</span>
-.parent {
-    width:x%;
-}
-
-.parent img {
-    width:y%;
-    height:auto;
-    margin-left:k%;
-}
-
-.parent img:first-child {
-    margin-left:<span class="number">0</span>;
-}
-</code></pre><p>这段代码相当简洁明了吧，我通过量好的百分比，对各个图片和之间的间距进行了控制，基本上业界大多数也是这么做的吧。</p>
-<p>按理说事情到这基本就结束了，毕竟img是个<strong>行内可替换元素</strong>，会自动布局在一行之内，<strong>当然前提是父容器宽度足够的前提下</strong>。不过既然我都身体力行的量过了，那自然不应该出现问题。</p>
-<p>但是，卧槽，你越担心的事就越会发生。整个界面出现了非常奇葩的现象：</p>
-<pre><code>这是正常情况：
-[图<span class="tag">&lt;<span class="title">-</span>&gt;</span>图<span class="tag">&lt;<span class="title">-</span>&gt;</span>图<span class="tag">&lt;<span class="title">-</span>&gt;</span>图<span class="tag">&lt;<span class="title">-</span>&gt;</span>图] 
-
-这是实际情况：
-[图<span class="tag">&lt;<span class="title">-</span>&gt;</span>图<span class="tag">&lt;<span class="title">-</span>&gt;</span>图<span class="tag">&lt;<span class="title">-</span>&gt;</span>图<span class="tag">&lt;<span class="title">-</span>&gt;</span>］
-图]
-</code></pre><p>卧槽，竟然宽度不够，换行了。尝试了很长时间，后来发现，将<code>.parent img</code>中添加<code>float:left</code>就可以完美解决，但这什么原因呢?</p>
-<h3 id="原因">原因</h3><p>经过一番探索研究，我发现，这是由于<strong>空白符</strong>对<strong>inline</strong>类型的元素造成的影响。</p>
+        <h2 id="了解苹果的LD">了解苹果的LD</h2><blockquote>
+<p>其实文章关于传统<code>Section Based Linker</code>那块我还没怎么读懂，有兴趣的欢迎互相探讨。</p>
+</blockquote>
+<p>之前研究<code>Xcode 10</code>兼容<code>libstdc++</code>的时候，稍微把玩了下苹果的<code>LD</code>，借这个机会正好通读了下苹果的<code>LD</code>设计，本文做一下总结。</p>
+<h3 id="Atom_&amp;_FixUp">Atom &amp; FixUp</h3><p>苹果的<code>LD</code>，核心理念就是基于<code>Atom</code>和<code>FixUp</code>，拿着两个术语是啥意思呢？</p>
 <ul>
-<li>首先，<strong>img</strong>元素是一种行内可替代元素，效果基本可以理解为<strong>inline-block</strong>。</li>
-<li><p>第二，我们在HTML的时候，为了在编辑器内写的美观，常常会使用回车，而回车在HTML中会被识别为空白符。</p>
-<pre><code>比如
-&lt;<span class="tag">img</span> src = <span class="string">"xxxx"</span> /&gt;（空白符）
-&lt;<span class="tag">img</span> src = <span class="string">"xxxx"</span> /&gt;
-</code></pre></li>
-<li><p>第三，空白符具备宽度（和font-size有关），不具备高度。</p>
+<li><code>Atom</code>就是一块代码（函数）或者数据（全局变量）之类的，每个<code>Atom</code>都有一些属性，比如名称、作用域、内容类型、字节对齐之类的。</li>
+<li><code>Fixup</code>可以理解为一个包含种类、便宜、辅助加数以及目标<code>Atom</code>的数据结构。</li>
+</ul>
+<p>有点抽象对吧？概要来说，苹果<code>LD</code>通过<code>Atom</code>和<code>FixUP</code>构建一张图，图中的节点都是<code>Atom</code>，连接<code>Atom</code>的则是<code>FixUP</code>。</p>
+<p><strong>通过构建这样一张图，苹果就可以在链接期间进行一系列的优化，比如死代码剔除，怎么做呢？比如一段代码也会被抽象成<code>Atom</code>，如果没有<code>FixUP</code>连接的<code>Atom</code>就可以进行剔除</strong></p>
+<p>举一个简单的小例子<code>main.c</code>：</p>
+<pre><code><span class="preprocessor">#<span class="keyword">include</span> <span class="string">&lt;stdio.h&gt;</span></span>
+
+<span class="function"><span class="keyword">int</span> <span class="title">main</span><span class="params">()</span>
+</span>{
+    <span class="built_in">printf</span>(<span class="string">"hello world"</span>);
+    <span class="keyword">return</span> <span class="number">0</span>;
+}
+</code></pre><p>会被抽象出如下行为：</p>
+<p><img src="https://opensource.apple.com/source/ld64/ld64-253.3/doc/design/hello.png" alt=""></p>
+<p>单独编译这个<code>.c</code>文件生成的<code>.o</code>会包含两个<code>atom</code>，一个是<code>main</code>函数，另外一个是<code>C</code>字符串<code>&quot;hello world&quot;</code></p>
+<blockquote>
+<p>printf 本质上也会一个<code>atom</code>，但是在这个编译单元内他还没加入图中。</p>
+</blockquote>
+<p>而<code>fixup</code>也存在两个，一个是去调用不知道在哪的函数<code>printf</code>的调用<code>fixup</code>，一个是去加载字符串的<code>fixup</code>。</p>
+<h3 id="链接过程">链接过程</h3><ul>
+<li><p>链接过程的第一步就是要处理输入文件，构建一张初始图。</p>
+<ul>
+<li>如果输入文件是<code>.o</code>，那么所有的<code>atom</code>都会被加入到初始图当中。</li>
+<li>如果输入文件是静态库(静态库基本上就是一组<code>.o</code>文件包含一个目录)，初始状态下这里面的<code>atom</code>都默认<b style="color:red">不会加入到里面</b>，当<code>LD</code>不断初始图中有没被决议的<code>fixup</code>，如果fixup对应的目标<code>atom</code>在这个静态库里面的话，就会把找到的<code>atom</code>的加入到图内。</li>
+<li>动态库其实在链接期间不会添加任何的<code>atom</code>，同静态库一样，如果有没被决议的<code>fixup</code>对应的<code>atom</code>在动态库内找到（比如<code>tbd</code>声明的那些），就就提供一个代理，<b style="color:red">这个代理标记了这个符号来自哪个动态库</b></li>
+</ul>
 </li>
 </ul>
-<p><strong>所以，表面上我们根据设计好的图片进行了</strong>精准<strong>的测量，构造了完全匹配父类宽度的元素和间距，但是实际上却由于空白符所具备的宽度而产生了偏差。</strong></p>
-<p>用一张图来表示拥有空白符后的效果：</p>
-<pre><code><span class="list">[<span class="keyword">图</span><span class="list">(<span class="keyword">空白</span>)</span>&lt;-&gt;图<span class="list">(<span class="keyword">空白</span>)</span>&lt;-&gt;图<span class="list">(<span class="keyword">空白</span>)</span>&lt;-&gt;
-图&lt;-&gt;］</span>
-</code></pre><h3 id="为什么float可以解决这个问题">为什么float可以解决这个问题</h3><blockquote>
-<p>A floated box is shifted to the left or right until its outer edge touches the containing block edge or the outer edge of another float</p>
-</blockquote>
-<p>看到这个关于float的定义了吗？<strong>float要么依赖前一个（或者后一个）float元素的边界，要么就依赖于父元素的边界。而一个空白符，既不是包含块（父容器）的边界，也不是另一个float元素，因此不受影响，也不会对其余float元素有影响。</strong></p>
-<p>所以，当你对<code>.parent img</code>启用<code>float:left</code>之后，效果就成了下图所示：</p>
-<pre><code>[<span class="built_in">float</span>&lt;-&gt;<span class="built_in">float</span>&lt;-&gt;<span class="built_in">float</span>&lt;-&gt;<span class="built_in">float</span>&lt;-&gt;<span class="built_in">float</span>]
-[空白符]
-</code></pre><p>这次我们测量的宽度正好匹配完全，所以将空白符自然而然的挤到了下一行。还记得我们前面说过空白符不具备高度吗？因此，这个空白符压根没起作用！</p>
 <blockquote>
-<p>文中的 [] 代表父容器，&lt;-&gt; 代表间隔。</p>
+<p>本质上来说，链接期间动态库的作用就是参与标记一下。</p>
 </blockquote>
-<h3 id="其余方案">其余方案</h3><ol>
-<li>将父容器的<code>font-size</code>设置为<strong>0</strong>。</li>
-<li>避免换行，写出<img src=""><img src=""><img src=""><img src=""> 这样的代码。</li>
-<li>启用HTML压缩。</li>
-</ol>
-<p>最后：<strong>感谢美团大神FTR和淘宝大神YWJ对本菜比的指导。</strong></p>
+<ul>
+<li><p>考虑完符号决议，还要考虑符号合并之类的，比如根据字符串表的设计，来自不同文件的相同字符串，比如<code>&quot;haha&quot;</code>，不可能保留两份，需要合并。此外还有诸如<code>C</code>中的<code>tentative definitions</code>，<code>C++ Weak Symbol</code>等</p>
+</li>
+<li><p>处理<code>fixup</code>的时候，也需要分几种类型，见下图：</p>
+</li>
+</ul>
+<p><img src="https://opensource.apple.com/source/ld64/ld64-253.3/doc/design/bindings.png" alt=""></p>
+<h3 id="其他">其他</h3><p>虽然苹果的<code>LD</code>已经抽象成了<code>Atom-FixUP</code>的架构，但是它的可执行文件<code>Mach-O</code>还是传统的基于<code>section</code>的结构，这限制了<code>Atom-FixUP</code>的能力。</p>
 
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/04/26/blank-space-in-html/" data-id="cjrd8lh8t0019eri1tu3sz3gx" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2019/01/26/LD-2/" data-id="cjrd8lhal002qeri188czzw6n" class="article-share-link">Share</a>
       
-        <a href="http://satanwoo.github.io/2016/04/26/blank-space-in-html/#disqus_thread" class="article-comment-link">Comments</a>
+        <a href="http://satanwoo.github.io/2019/01/26/LD-2/#disqus_thread" class="article-comment-link">Comments</a>
       
       
-  <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/JavaScript/">JavaScript</a></li></ul>
+  <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
 
     </footer>
   </div>
@@ -174,19 +166,10 @@
     
 <nav id="article-nav">
   
-    <a href="/2016/05/02/Spotify/" id="article-nav-newer" class="article-nav-link-wrap">
-      <strong class="article-nav-caption">Newer</strong>
-      <div class="article-nav-title">
-        
-          为什么Spotify的付费用户转化率惊人的高？
-        
-      </div>
-    </a>
   
-  
-    <a href="/2016/04/11/dispatch-once/" id="article-nav-older" class="article-nav-link-wrap">
+    <a href="/2019/01/26/shared-ptr/" id="article-nav-older" class="article-nav-link-wrap">
       <strong class="article-nav-caption">Older</strong>
-      <div class="article-nav-title">滥用单例之dispatch_once死锁</div>
+      <div class="article-nav-title">从C++ std::shared_ptr 原理来看看栈溢出的危害</div>
     </a>
   
 </nav>
@@ -310,7 +293,7 @@ s.setAttribute('data-timestamp', +new Date());
 <script>
   var disqus_shortname = 'satanwoo-2';
   
-  var disqus_url = 'http://satanwoo.github.io/2016/04/26/blank-space-in-html/';
+  var disqus_url = 'http://satanwoo.github.io/2019/01/26/LD-2/';
   
   (function(){
     var dsq = document.createElement('script');

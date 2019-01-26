@@ -4,7 +4,7 @@
   
   <link href="/atom.xml" rel="self"/>
   <link href="http://satanwoo.github.io/"/>
-  <updated>2019-01-01T15:55:53.000Z</updated>
+  <updated>2019-01-26T08:52:11.000Z</updated>
   <id>http://satanwoo.github.io/</id>
   
   <author>
@@ -13,6 +13,120 @@
   </author>
   
   <generator uri="http://hexo.io/">Hexo</generator>
+  
+  <entry>
+    <title><![CDATA[LD-2]]></title>
+    <link href="http://satanwoo.github.io/2019/01/26/LD-2/"/>
+    <id>http://satanwoo.github.io/2019/01/26/LD-2/</id>
+    <published>2019-01-26T08:51:30.000Z</published>
+    <updated>2019-01-26T08:52:11.000Z</updated>
+    <content type="html"><![CDATA[<h2 id="了解苹果的LD">了解苹果的LD</h2><blockquote>
+<p>其实文章关于传统<code>Section Based Linker</code>那块我还没怎么读懂，有兴趣的欢迎互相探讨。</p>
+</blockquote>
+<p>之前研究<code>Xcode 10</code>兼容<code>libstdc++</code>的时候，稍微把玩了下苹果的<code>LD</code>，借这个机会正好通读了下苹果的<code>LD</code>设计，本文做一下总结。</p>
+<h3 id="Atom_&amp;_FixUp">Atom &amp; FixUp</h3><p>苹果的<code>LD</code>，核心理念就是基于<code>Atom</code>和<code>FixUp</code>，拿着两个术语是啥意思呢？</p>
+<ul>
+<li><code>Atom</code>就是一块代码（函数）或者数据（全局变量）之类的，每个<code>Atom</code>都有一些属性，比如名称、作用域、内容类型、字节对齐之类的。</li>
+<li><code>Fixup</code>可以理解为一个包含种类、便宜、辅助加数以及目标<code>Atom</code>的数据结构。</li>
+</ul>
+<p>有点抽象对吧？概要来说，苹果<code>LD</code>通过<code>Atom</code>和<code>FixUP</code>构建一张图，图中的节点都是<code>Atom</code>，连接<code>Atom</code>的则是<code>FixUP</code>。</p>
+<p><strong>通过构建这样一张图，苹果就可以在链接期间进行一系列的优化，比如死代码剔除，怎么做呢？比如一段代码也会被抽象成<code>Atom</code>，如果没有<code>FixUP</code>连接的<code>Atom</code>就可以进行剔除</strong></p>
+<p>举一个简单的小例子<code>main.c</code>：</p>
+<pre><code><span class="preprocessor">#<span class="keyword">include</span> <span class="string">&lt;stdio.h&gt;</span></span>
+
+<span class="function"><span class="keyword">int</span> <span class="title">main</span><span class="params">()</span>
+</span>{
+    <span class="built_in">printf</span>(<span class="string">"hello world"</span>);
+    <span class="keyword">return</span> <span class="number">0</span>;
+}
+</code></pre><p>会被抽象出如下行为：</p>
+<p><img src="https://opensource.apple.com/source/ld64/ld64-253.3/doc/design/hello.png" alt=""></p>
+<p>单独编译这个<code>.c</code>文件生成的<code>.o</code>会包含两个<code>atom</code>，一个是<code>main</code>函数，另外一个是<code>C</code>字符串<code>&quot;hello world&quot;</code></p>
+<blockquote>
+<p>printf 本质上也会一个<code>atom</code>，但是在这个编译单元内他还没加入图中。</p>
+</blockquote>
+<p>而<code>fixup</code>也存在两个，一个是去调用不知道在哪的函数<code>printf</code>的调用<code>fixup</code>，一个是去加载字符串的<code>fixup</code>。</p>
+<h3 id="链接过程">链接过程</h3><ul>
+<li><p>链接过程的第一步就是要处理输入文件，构建一张初始图。</p>
+<ul>
+<li>如果输入文件是<code>.o</code>，那么所有的<code>atom</code>都会被加入到初始图当中。</li>
+<li>如果输入文件是静态库(静态库基本上就是一组<code>.o</code>文件包含一个目录)，初始状态下这里面的<code>atom</code>都默认<b style="color:red">不会加入到里面</b>，当<code>LD</code>不断初始图中有没被决议的<code>fixup</code>，如果fixup对应的目标<code>atom</code>在这个静态库里面的话，就会把找到的<code>atom</code>的加入到图内。</li>
+<li>动态库其实在链接期间不会添加任何的<code>atom</code>，同静态库一样，如果有没被决议的<code>fixup</code>对应的<code>atom</code>在动态库内找到（比如<code>tbd</code>声明的那些），就就提供一个代理，<b style="color:red">这个代理标记了这个符号来自哪个动态库</b></li>
+</ul>
+</li>
+</ul>
+<blockquote>
+<p>本质上来说，链接期间动态库的作用就是参与标记一下。</p>
+</blockquote>
+<ul>
+<li><p>考虑完符号决议，还要考虑符号合并之类的，比如根据字符串表的设计，来自不同文件的相同字符串，比如<code>&quot;haha&quot;</code>，不可能保留两份，需要合并。此外还有诸如<code>C</code>中的<code>tentative definitions</code>，<code>C++ Weak Symbol</code>等</p>
+</li>
+<li><p>处理<code>fixup</code>的时候，也需要分几种类型，见下图：</p>
+</li>
+</ul>
+<p><img src="https://opensource.apple.com/source/ld64/ld64-253.3/doc/design/bindings.png" alt=""></p>
+<h3 id="其他">其他</h3><p>虽然苹果的<code>LD</code>已经抽象成了<code>Atom-FixUP</code>的架构，但是它的可执行文件<code>Mach-O</code>还是传统的基于<code>section</code>的结构，这限制了<code>Atom-FixUP</code>的能力。</p>
+]]></content>
+    <summary type="html">
+    <![CDATA[<h2 id="了解苹果的LD">了解苹果的LD</h2><blockquote>
+<p>其实文章关于传统<code>Section Based Linker</code>那块我还没怎么读懂，有兴趣的欢迎互相探讨。</p>
+</blockquote>
+<p>之前研究<code>X]]>
+    </summary>
+    
+      <category term="iOS" scheme="http://satanwoo.github.io/tags/iOS/"/>
+    
+  </entry>
+  
+  <entry>
+    <title><![CDATA[从C++ std::shared_ptr 原理来看看栈溢出的危害]]></title>
+    <link href="http://satanwoo.github.io/2019/01/26/shared-ptr/"/>
+    <id>http://satanwoo.github.io/2019/01/26/shared-ptr/</id>
+    <published>2019-01-26T08:48:20.000Z</published>
+    <updated>2019-01-26T08:51:10.000Z</updated>
+    <content type="html"><![CDATA[<h2 id="C++_std::shared_ptr_实现原理">C++ std::shared_ptr 实现原理</h2><p>上周五排查了一个由于<code>XXX模块</code>操作疏忽导致栈越界引发的<code>我的模块</code>的智能指针Crash问题，因此稍微研究了一下，以作参考：</p>
+<blockquote>
+<p>shared_ptr共享被管理对象，同一时刻可以有多个shared_ptr拥有对象的所有权，当最后一个shared_ptr对象销毁时，被管理对象自动销毁</p>
+</blockquote>
+<h3 id="shared_ptr_实现">shared_ptr 实现</h3><p><img src="https://img-blog.csdn.net/20160529232019149?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""></p>
+<p>简单来说，<code>shared_ptr</code>实现包含了两部分，</p>
+<ul>
+<li>一个指向堆上创建的对象的裸指针</li>
+<li><strong>一个指向内部隐藏的、共享的管理对象。</strong></li>
+</ul>
+<p>第一部分没什么好说的，第二部分是需要关注的重点：</p>
+<ul>
+<li><code>use_count</code>，当前这个堆上对象被多少对象引用了，简单来说就是引用计数。</li>
+<li><code>weak_count</code>，这个管理对象被多少个智能指针共享了，简单来说就是<code>管理对象</code>的引用计数。</li>
+</ul>
+<p><b style="color:red">不同指针创建的对同一个堆上对象的智能管理，并不共享管理对象，因此存在<code>double free</code>的可能性</b></p>
+<p><code>_shared_ptr</code>直接包含的裸指针是为了实现一般指针的-&gt;,*等操作，通过<code>__shared_count</code>间接包含的指针是为了管理对象的生命周期，回收相关资源。</p>
+<p>换句话说，<code>__shared_count</code>内部的<code>use_count</code>主要用来标记被管理对象的生命周期，<code>weak_count</code>主要用来标记管理对象的生命周期。</p>
+<h3 id="问题原因">问题原因</h3><p>了解了原理，可以看出<code>std::share_ptr</code>本身的<code>_M_ptr</code>指向了堆上通过<code>new</code>创建的对象。但是其自身这个<code>_M_ptr</code>却会如果在不当操作上，被修改，比如栈越界操作，就会被破坏，导致产生对非法对象的访问：</p>
+<pre><code><span class="keyword">int</span> i = <span class="number">5</span>;
+NSLog(@<span class="string">"i address is %p"</span>, &amp;i);
+
+XXX::XX df = XXX::XX::buildDataFrame();
+NSLog(@<span class="string">"sp0 address is %p"</span>, &amp;df);
+
+<span class="keyword">int</span> a[<span class="number">1</span>] = {<span class="number">1</span>};
+
+NSLog(@<span class="string">"k address is %p"</span>, a);
+
+<span class="keyword">for</span> (<span class="keyword">int</span> i = <span class="number">0</span>; i &lt; <span class="number">10</span>; i++) {
+    a[i] = i;
+}
+
+NSLog(@<span class="string">"haha"</span>);
+</code></pre><p>上述这段代码就会引发问题，这里<code>XXX::XX</code>的具体内部设计使用了经典的RAII，下文再表。</p>
+]]></content>
+    <summary type="html">
+    <![CDATA[<h2 id="C++_std::shared_ptr_实现原理">C++ std::shared_ptr 实现原理</h2><p>上周五排查了一个由于<code>XXX模块</code>操作疏忽导致栈越界引发的<code>我的模块</code>的智能指针Crash问题，因此稍微]]>
+    </summary>
+    
+      <category term="c++" scheme="http://satanwoo.github.io/tags/c/"/>
+    
+  </entry>
   
   <entry>
     <title><![CDATA[抛开性能，谈谈不该用@Synchronized的原因]]></title>
@@ -4271,283 +4385,6 @@ foo(&amp;s, <span class="number">1</span>, <span class="number">2</span>);
 ]]></content>
     <summary type="html">
     <![CDATA[<h3 id="ARM64下Indirect_Result_Location摸索">ARM64下Indirect Result Location摸索</h3><p>之前学习汇编的时候，大概了解了一些ARM64下寄存器的用途，比如<code>x0 - x7</code>作为函数传递]]>
-    </summary>
-    
-      <category term="Reverse Engineering" scheme="http://satanwoo.github.io/tags/Reverse-Engineering/"/>
-    
-      <category term="iOS" scheme="http://satanwoo.github.io/tags/iOS/"/>
-    
-  </entry>
-  
-  <entry>
-    <title><![CDATA[快速计算两组数据源的变化的方法 - Doppelganger 源码剖析]]></title>
-    <link href="http://satanwoo.github.io/2017/04/18/CalculateTwoArrayDiff/"/>
-    <id>http://satanwoo.github.io/2017/04/18/CalculateTwoArrayDiff/</id>
-    <published>2017-04-17T17:15:40.000Z</published>
-    <updated>2017-04-17T17:24:33.000Z</updated>
-    <content type="html"><![CDATA[<h3 id="Doppelganger_源码剖析">Doppelganger 源码剖析</h3><p>性能优化系列一：如何快速的计算UITableView的数据量变换。</p>
-<p>今天要介绍的是一个比较精简但是很实用的库：Doppelganger。平时我们经常会和<code>UITableView</code>或者<code>UICollectionView</code>打交道，所以数据源（dataSource）及其变化就非常重要。</p>
-<p>如何高效的求解两次数据源之间的删除、增加以及移动（交换位置）就成为了一个可以显著加速的地方。</p>
-<blockquote>
-<p>备注：这里指的是将一定量的数据计算放在客户端来进行，而不是通过多次发送网络请求获取数据然后整体重新刷新。有人会问，什么情况下会有这样的需求呢？比如，你有个用户选项，可以支持按照倒序或者正序的方式进行布局，那这个时候，你直接在本地进行计算并展示差量布局计算，就要比从网络请求多次拉取整体重新刷新的效果赞很多。</p>
-</blockquote>
-<p>本文提到的<code>Doppelganger</code>其实就是一种对于上述需求的封装，提供了及其简化的数据源更新机制。抛开其性能不谈，我们先来看看其实现。</p>
-<h4 id="数据结构">数据结构</h4><p>从需求不难看出，我们的数据结构需要支持如下潜在数据记录：</p>
-<ul>
-<li>改动类型：增加、删除、移动</li>
-<li>改动索引：增加的话，是插入到哪行、删除的话是删除哪行、移动的话是从哪行移动到哪行。</li>
-</ul>
-<p>基于此，数据结构的定义就很显而易见了：</p>
-<pre><code><span class="keyword">typedef</span> <span class="built_in">NS_ENUM</span>(<span class="built_in">NSInteger</span>, WMLArrayDiffType) {
-    WMLArrayDiffTypeMove,
-    WMLArrayDiffTypeInsert,
-    WMLArrayDiffTypeDelete
-};
-
-<span class="class"><span class="keyword">@interface</span> <span class="title">WMLArrayDiff</span> : <span class="title">NSObject</span></span>
-
-<span class="keyword">@property</span> (<span class="keyword">nonatomic</span>, <span class="keyword">readonly</span>) WMLArrayDiffType type;
-
-<span class="keyword">@property</span> (<span class="keyword">nonatomic</span>, <span class="keyword">readonly</span>) <span class="built_in">NSUInteger</span> previousIndex;
-
-<span class="keyword">@property</span> (<span class="keyword">nonatomic</span>, <span class="keyword">readonly</span>) <span class="built_in">NSUInteger</span> currentIndex;
-
-<span class="keyword">@end</span>
-</code></pre><p>其中，有些字段在某些类型下可以为空。</p>
-<h4 id="计算变动">计算变动</h4><p>我们先简化下我们的模型，我们就是两个数组A和B，里面各自一堆不重复的数字，分别代表之前的数据源和现在的数据源。现在我们需要求得这两个数组之前提到的三种变化。</p>
-<p><strong>首先是删除的计算，非常简单，只要计算在A中不在B中就可以：</strong></p>
-<pre><code>NSSet *deletedObject = ({
-    NSMutableSet *<span class="keyword">set</span> = [previousSet mutableCopy];
-    [<span class="keyword">set</span> minusSet:currentSet];
-    [<span class="keyword">set</span> <span class="keyword">copy</span>];
-});
-</code></pre><p><strong>然后是增加的计算，同样简单，只要计算在B中不在A中的：</strong></p>
-<pre><code>NSSet *insertedObjects = ({
-    NSMutableSet *<span class="keyword">set</span> = [currentSet mutableCopy];
-    [<span class="keyword">set</span> minusSet:previousSet];
-    [<span class="keyword">set</span> <span class="keyword">copy</span>];
-});
-</code></pre><p><strong>最后就是计算那些即在A中又在B中的改变，对于这种计算，我们要得到在A中的原索引和现在的新索引。</strong></p>
-<pre><code>- (<span class="type">NSArray</span> *)_moveDiffsWithDeletedObjects:(<span class="type">NSSet</span> *)deletedObjects insertedObjects:(<span class="type">NSSet</span> *)insertedObjects {    
-    // <span class="type">TODO</span>: <span class="type">Improve</span> on O(n^<span class="number">2</span>)
-    __block <span class="type">NSInteger</span> delta = <span class="number">0</span>;
-    <span class="type">NSMutableArray</span> *<span class="literal">result</span> = [<span class="type">NSMutableArray</span> <span class="type">array</span>];
-    [self.previousArray enumerateObjectsUsingBlock:^(id leftObj, <span class="type">NSUInteger</span> leftIdx, <span class="type">BOOL</span> *stop) {
-        <span class="keyword">if</span> ([deletedObjects containsObject:leftObj]) {
-            delta++;
-            <span class="keyword">return</span>; 
-        }
-        <span class="type">NSUInteger</span> localDelta = delta;
-        <span class="keyword">for</span> (<span class="type">NSUInteger</span> rightIdx = <span class="number">0</span>; rightIdx &lt; self.currentArray.count; ++rightIdx) {
-            id rightObj = self.currentArray[rightIdx];
-            <span class="keyword">if</span> ([insertedObjects containsObject:rightObj]) {
-                localDelta--;
-                <span class="keyword">continue</span>;
-            }
-
-            <span class="keyword">if</span> (![rightObj isEqual:leftObj]) {
-                <span class="keyword">continue</span>;
-            }
-
-             //  注意点：          
-            <span class="type">NSInteger</span> adjustedRightIdx = rightIdx + localDelta;
-            // 首先如果前后索引一致，没有变化的区别，没有必要做diff变化
-            // 或者如果你前面删除了一条，自身索引是<span class="number">1</span>，然后这边是<span class="number">0</span>，那也没必要做move变化。
-            <span class="keyword">if</span> (leftIdx != rightIdx &amp;&amp; adjustedRightIdx != leftIdx) {
-                [<span class="literal">result</span> addObject:[<span class="type">WMLArrayDiff</span> arrayDiffForMoveFromIndex:leftIdx toIndex:rightIdx]];
-            }
-            <span class="keyword">return</span>;
-        }
-    }];
-    <span class="keyword">return</span> [<span class="literal">result</span> copy];
-}
-</code></pre><p>上述代码一开始我看了也是懵逼了，我觉得直接二重遍历计算同样数在不同两组数据源中的索引区别不就行了？在读了代码一遍以后确定了，作者的思路是这样的：</p>
-<ol>
-<li><p>如果在旧数组中和新数组中的数据源一样，那就不更新了，也即<code>leftIdx != rightIdx</code>的判断。</p>
-</li>
-<li><p>如果在旧数组中，索引为1，但是之前的0索引位置的数据删除了；然后这个索引为1的数据在新数据中位置为索引0，那么也不需要改了，因为之前计算删除变化的时候已经做了这个相同的效果。</p>
-</li>
-</ol>
-<h4 id="时间复杂度">时间复杂度</h4><p>虽然不知道苹果内部的数据结构代码实现是如何的，但是我们可以进行数据模拟，同时也可以看看<a href="http://devstreaming.apple.com/videos/wwdc/2013/224xcx5x1y1yx8ra5jbmfyhf/224/224.pdf" target="_blank" rel="external">苹果WWDC的文章</a> 来进行时间复杂度估算。</p>
-<p>而从上面实现的计算变动源代码来看，整个库的实现时间复杂度还是有所欠缺的，到达了O(mn) + O(n) ≈ O(mn)的级别，因此我们可以进行一些优化。</p>
-<blockquote>
-<p>备注：O(mn)就是二重循环遍历的问题。其中m是数据源A的数据个数，n是数据源b的数据个数。简单来看就是O(n^2)级别的运算耗时。</p>
-</blockquote>
-<p>怎么优化呢，答案很简单，就是利用动态规划思想来求解最小编辑距离。</p>
-<p>我们举个简单的例子，还是没有重复数组的数组，<code>A = [1, 3, 5, 6, 8]</code>以及<code>B = [1, 5, 6, 9, 2]</code>。</p>
-<p>怎么样最小变化才能从A变成B呢？</p>
-<p>我们列一个二维的矩阵先，如下图：</p>
-<p><img src="https://github.com/SatanWoo/BeeHive/blob/master/%E5%B1%8F%E5%B9%95%E5%BF%AB%E7%85%A7%202017-03-25%20%E4%B8%8A%E5%8D%881.22.02.png?raw=true" alt=""></p>
-<blockquote>
-<p>备注：蓝色为原数据，绿色为新数据，黄色的为最小变化的开销。</p>
-</blockquote>
-<p>不难看出，这个算法的时间复杂度就是填满整张表的O(mn)。</p>
-<p>看到这，有人会问，你的Big(O) 复杂度都是O(mn)啊，这你优化在什么地方啊。</p>
-<p>从时间复杂度分析上看，最大数值都是O(mn)没错，但是在大数量的情况下，还是会有比较大的区别。</p>
-<p>究竟原因在于作者的算法做了很多重复性的劳动，而利用动态规划的特征可以合理的储存状态，避免重复性的劳动。</p>
-<h4 id="一些细节">一些细节</h4><p>在查看源码的时候，查看过一个代码，</p>
-<pre><code>NSSet *deletedObject = ({
-    NSMutableSet *<span class="keyword">set</span> = [previousSet mutableCopy];
-    [<span class="keyword">set</span> minusSet:currentSet];
-    [<span class="keyword">set</span> <span class="keyword">copy</span>];
-});
-</code></pre><p>这里非常有意思，利用了<a href="http://gcc.gnu.org/onlinedocs/gcc/Statement-Exprs.html" target="_blank" rel="external">Statements and Declarations in Expressions</a>，具体不多说了，非常巧妙，大开眼界。</p>
-<blockquote>
-<p>The last thing in the compound statement should be an expression followed by a semicolon; the value of this subexpression serves as the value of the entire construct</p>
-</blockquote>
-<p>啥意思呢？就是说这种符合表达式的最后一句必须是一个用分号结尾的表达式，并且这个表达式必须有返回值。而这个返回值就作为整个符号表达式的返回值。</p>
-]]></content>
-    <summary type="html">
-    <![CDATA[<h3 id="Doppelganger_源码剖析">Doppelganger 源码剖析</h3><p>性能优化系列一：如何快速的计算UITableView的数据量变换。</p>
-<p>今天要介绍的是一个比较精简但是很实用的库：Doppelganger。平时我们经常会和<code]]>
-    </summary>
-    
-      <category term="Performance" scheme="http://satanwoo.github.io/tags/Performance/"/>
-    
-      <category term="iOS" scheme="http://satanwoo.github.io/tags/iOS/"/>
-    
-  </entry>
-  
-  <entry>
-    <title><![CDATA[iOS疑难问题排查之深入探究dispatch_group crash]]></title>
-    <link href="http://satanwoo.github.io/2017/01/07/DispatchGroupCrash/"/>
-    <id>http://satanwoo.github.io/2017/01/07/DispatchGroupCrash/</id>
-    <published>2017-01-07T13:44:39.000Z</published>
-    <updated>2017-01-07T14:08:40.000Z</updated>
-    <content type="html"><![CDATA[<h3 id="起因">起因</h3><p>昨天其他部门的同事突然反馈一起相对来说比较严重的Crash问题（占比达到了yyyy左右，并且从Crash堆栈上可以发现很多情况下是一启动就Crash了）。去掉隐私数据大致堆栈如下：</p>
-<pre><code>Thread <span class="number">0</span> Crashed:
-<span class="number">0</span>   libdispatch.dylib               <span class="number">0x000000018953e828</span> _dispatch_group_leave :<span class="number">76</span> (in libdispatch.dylib)
-<span class="number">1</span>   libdispatch.dylib               <span class="number">0x000000018954b084</span> __dispatch_barrier_sync_f_slow_invoke :<span class="number">320</span> (in libdispatch.dylib)
-<span class="number">2</span>   libdispatch.dylib               <span class="number">0x000000018953a1bc</span> __dispatch_client_callout :<span class="number">16</span> (in libdispatch.dylib)
-<span class="number">3</span>   libdispatch.dylib               <span class="number">0x000000018953ed68</span> __dispatch_main_queue_callback_4CF :<span class="number">1000</span> (in libdispatch.dylib)
-<span class="number">4</span>   CoreFoundation                  <span class="number">0x000000018a65e810</span> ___CFRUNLOOP_IS_SERVICING_THE_MAIN_DISPATCH_QUEUE__ :<span class="number">12</span> (in CoreFoundation)
-<span class="number">5</span>   CoreFoundation                  <span class="number">0x000000018a65c3fc</span> ___CFRunLoopRun :<span class="number">1660</span> (in CoreFoundation)
-<span class="number">6</span>   CoreFoundation                  <span class="number">0x000000018a58a2b8</span> _CFRunLoopRunSpecific :<span class="number">444</span> (in CoreFoundation)
-<span class="number">7</span>   GraphicsServices                <span class="number">0x000000018c03e198</span> _GSEventRunModal :<span class="number">180</span> (in GraphicsServices)
-<span class="number">8</span>   UIKit                           <span class="number">0x00000001905d17fc</span> -[UIApplication _run] :<span class="number">684</span> (in UIKit)
-<span class="number">9</span>   UIKit                           <span class="number">0x00000001905cc534</span> _UIApplicationMain :<span class="number">208</span> (in UIKit)
-<span class="number">10</span>  xxxiPhone                       <span class="number">0x0000000100041a98</span> main main.m:<span class="number">26</span> (in xxxiPhone)
-<span class="number">11</span>  libdyld.dylib                   <span class="number">0x000000018956d5b8</span> _start :<span class="number">4</span> (in libdyld.dylib)
-</code></pre><p>一看到这种堆栈，头就大了，除了<strong>Thread 0 的第10行是和程序本身二进制相关的</strong>堆栈，其余的调用栈全部是系统库里面的，并且唯一一行程序本身二进制的代码还是一个完全没作用的<code>main</code>函数。</p>
-<p>好吧，只能重新找找其余的线索。从堆栈上来反推当时的场景应该是如下场景：</p>
-<pre><code>启动 -&gt; main函数 -&gt; main_queue 执行 -&gt; dispatch_group_leave -&gt; <span class="constant">Crash</span>
-</code></pre><p>于是，我们的线索就从最后的<code>_dispatch_group_leave</code>来进行。  </p>
-<p>首先先来最简单的方法：下符号断点：<code>dispatch_group_leave</code>。</p>
-<p>当然事情没有这么简单，尝试重复多次也没有断到我们想要的符号断点上，于是这条路暂时考虑放弃（结合Crash率也可以发现这并非必现的Crash场景）。</p>
-<p>这条路不通，我们先尝试全局搜索<code>dispatch_group_leave</code>，结果发现有如下几条线索：</p>
-<ul>
-<li>外部开源库</li>
-<li>自身工程代码</li>
-</ul>
-<p>结合Crash出现的版本以及以上上述各库最后升级时间来判断，我们基本确定出在问题出现在自身工程中的代码里，如下：</p>
-<pre><code>dispatch_group_t serviceGroup = dispatch_group_create();
-dispatch_group_notify(serviceGroup, dispatch_get_main_queue(), ^{
-    <span class="built_in">NSLog</span>(<span class="string">@"ttttttt:%@"</span>,t);
-});
-
-<span class="comment">// t 是一个包含一堆字符串的数组 </span>
-[t enumerateObjectsUsingBlock:^(<span class="keyword">id</span>  _Nonnull obj, <span class="built_in">NSUInteger</span> idx, <span class="built_in">BOOL</span> * _Nonnull stop) {
-    dispatch_group_enter(serviceGroup);
-    SDWebImageCompletionWithFinishedBlock completion =
-    ^(<span class="built_in">UIImage</span> *image, <span class="built_in">NSError</span> *error, SDImageCacheType cacheType, <span class="built_in">BOOL</span> finished, <span class="built_in">NSURL</span> *imageURL) {
-        dispatch_group_leave(serviceGroup);
-        <span class="built_in">NSLog</span>(<span class="string">@"idx:%zd"</span>,idx);
-    };
-    [[SDWebImageManager sharedManager] downloadImageWithURL:[<span class="built_in">NSURL</span> URLWithString:t[idx]]
-                                                    options:SDWebImageLowPriority
-                                                   progress:<span class="literal">nil</span>
-                                                  completed:completion];
-}];
-</code></pre><p>这段代码逻辑非常简单吧：给你一个数组，里面是一堆图片地址。你使用多线程进行并发下载，直到所有图片都下载完成（可以失败）进行回调，其中图片下载使用的是<code>SDWebImage</code>。</p>
-<p>这段代码里面的的确确出现了可疑的<code>dispatch_group_leave</code>，但是这段代码太常见了。和同事认认真真检查了许久，同时也和天猫、手淘中使用<code>dispatch_group_t</code>的地方进行了对比，没发现任何问题。</p>
-<p>好吧，问题一下子陷入了僵局，只好上终极调试大法：<strong>汇编分析法</strong>。</p>
-<p>通过文章开头的堆栈我们查找<code>libdispatch.dylib</code>中对应的Crash位置，然后通过汇编解析查看相关指令，结果如下：</p>
-<p><img src="https://github.com/SatanWoo/BeeHive/blob/master/hopper.png?raw=true" alt=""></p>
-<p>从上图看出，指令挂掉的原因是因为执行了<code>brk</code> （brk可以理解为跳转指令特殊的一种，一旦执行，就会进入某种Exception模式，导致Crash）。</p>
-<p>为什么执行<code>dispatch_group_leave</code>会挂？从上述图中汇编不难发现，<code>dispatch_group_leave</code>具有两条分支：比较x9寄存器和0之间的关系，如果是less equal，就跳转到0x180502808(即会crash的逻辑分支)；反之则正确执行ret返回。</p>
-<p>那么x9寄存器是什么？我们继续往上看指令<code>ldxr x9, [x10]</code>，x9中的值是以x10寄存器中的内容作为地址，取64位放入x9寄存器中。继续，那么x10中的内存是什么？x10中的内容是指令<code>add x10, x0, #0x30</code>。也就是x10 = x0 + 48(0x30的10进制表示)。那么，函数调用的时候x0是self，也即是一个类或者结构体的首地址。所以这两句指令加起来的含义就是<strong><b style="color:red">取结构体地址偏移48位置的某个成员变量的值。</b></strong></p>
-<p>除此之外，汇编解析还完整保留了Crash的字符串提示： <strong>“BUG IN CLIENT OF LIBDISPATCH: Unbalanced call to dispatch_group_leave()”</strong></p>
-<p>结合这两点，我们查看<code>libdispatch</code>的源码，代码如下：</p>
-<pre><code><span class="function"><span class="keyword">void</span>
-<span class="title">dispatch_group_leave</span>(<span class="params">dispatch_group_t dg</span>)
-</span>{
-    dispatch_semaphore_t dsema = (dispatch_semaphore_t)dg;
-    dispatch_atomic_release_barrier();
-    <span class="keyword">long</span> <span class="keyword">value</span> = dispatch_atomic_inc2o(dsema, dsema_value);
-    <span class="keyword">if</span> (slowpath(<span class="keyword">value</span> == LONG_MIN)) {
-        DISPATCH_CLIENT_CRASH(<span class="string">"Unbalanced call to dispatch_group_leave()"</span>);
-    }
-    <span class="keyword">if</span> (slowpath(<span class="keyword">value</span> == dsema-&gt;dsema_orig)) {
-        (<span class="keyword">void</span>)_dispatch_group_wake(dsema);
-    }
-}
-</code></pre><p><em>注：苹果开发的libdispatch源码经过了各种变形修改，不是真正运行的代码，仅供参考。</em></p>
-<p>果不其然，这段代码完整复现了我们之前汇编分析的结果：如果<code>dg</code>信号量中的字段<code>dsema_value</code>原子性自加一后等于LONGMIN，就会<strong>CRASH</strong>。为什么会Crash呢？</p>
-<p>我们需要关注下LONG_MIN这个数字，<code>LONG_MIN = -LONG_MAX - 1</code>。理解起来很简单，就是可以表征的(该类型合法范围)最大数和最小数。</p>
-<p>搜索下LONGMAX，我们发现在<code>dispatch_group_create</code>里面发现了它的踪影：</p>
-<pre><code><span class="keyword">dispatch_group_t</span>
-dispatch_group_create(<span class="keyword">void</span>)
-{
-    <span class="keyword">dispatch_group_t</span> dg = _dispatch_alloc(DISPATCH_VTABLE(group),
-            <span class="keyword">sizeof</span>(<span class="keyword">struct</span> dispatch_semaphore_s));
-    _dispatch_semaphore_init(LONG_MAX, dg);
-    <span class="keyword">return</span> dg;
-}
-</code></pre><p>好了， 这下豁然开朗。这两段代码的结合告诉了我们一个事实：当<code>dq</code>这个信号量加一导致<strong><b style="color:red">溢出</b></strong>后，<code>dispatch_group_leave</code>就会Crash。</p>
-<p>最简单的复现代码如下：</p>
-<pre><code>- (<span class="keyword">void</span>)viewDidLoad 
-{
-    [<span class="keyword">super</span> viewDidLoad];
-    dispatch_group_t <span class="keyword">group</span> = dispatch_group_create();
-    dispatch_group_leave(<span class="keyword">group</span>);
-    <span class="comment">// Do any additional setup after loading the view, typically from a nib.</span>
-}
-</code></pre><p><img src="https://github.com/SatanWoo/BeeHive/blob/master/symbol.png?raw=true" alt=""></p>
-<p>当然，上述代码相当直白简单，我们一般都不会犯这样低级的错误。</p>
-<h3 id="代码究竟出错在哪？">代码究竟出错在哪？</h3><p>了解了<code>dispatch_group_leave</code>的出错原因后，我们再回到我们刚刚认为没问题的代码，一定是哪个地方我们欠考虑了。</p>
-<p>上述代码执行流程还是非常简单的，我们用模型简述一遍：</p>
-<p><strong>遍历数组，对每个URL进行<code>dispatch_group_enter</code>，然后将其丢入一个下载block交由SDWebImage进行并发下载，下载回调（无论失败或者成功）后执行<code>dispatch_group_leave</code>。</strong></p>
-<p>我们举个简单的例子，假设我们有一个包含5个URL的数组：</p>
-<ol>
-<li>遍历的时候，对信号量<code>dq</code> enter了5次，简单理解信号量减去5次。</li>
-<li>SDWebImage下载回调的时候，对信号量<code>dq</code> leave了5次，于是信号量增加了5次。</li>
-<li>执行完毕，整个group执行完成。</li>
-</ol>
-<p><strong><b style="color:red">但是，由于SDWebImage的下载是异步且无法保证时间的，如果在整个group没有执行完毕期间，上述函数整体又被执行到了，会怎么样？</b></strong></p>
-<p>我们再用上述的例子来走遍流程。</p>
-<ol>
-<li>第一次遍历，我们创建了信号量<code>dq1</code>，enter了5次，dq1 现在 = -5。</li>
-<li>SDWebImage的下载回调捕捉了<code>dq1</code>，准备留待回调后加回来，我们将这次遍历生成的下载回调block统称为b10, b12, b13, b14, b15。</li>
-<li><strong>但是，在第一次SDWebImage下载回调还没执行的时候，第二次函数遍历来了。</strong></li>
-<li>第二次遍历，我们创建了信号量<code>dq2</code>，enter了5次，dq2 现在 = -5。</li>
-<li>创建第二次遍历对应的回调block，称为b20，b21, b22, b23, b24。</li>
-</ol>
-<p>通过查阅<a href="https://github.com/rs/SDWebImage/blob/master/SDWebImage/SDWebImageDownloader.m" target="_blank" rel="external">SDWebImageDownloader.m</a>源码我们发现：</p>
-<pre><code><span class="function_or_atom">dispatch_barrier_sync</span>(<span class="function_or_atom">self</span>.<span class="function_or_atom">barrierQueue</span>, ^{
-    <span class="variable">SDWebImageDownloaderOperation</span> *<span class="function_or_atom">operation</span> = <span class="function_or_atom">self</span>.<span class="variable">URLOperations</span>[<span class="function_or_atom">url</span>];
-    <span class="function_or_atom">if</span> (<span class="exclamation_mark">!</span><span class="function_or_atom">operation</span>) {
-    <span class="function_or_atom">operation</span> = <span class="function_or_atom">createCallback</span>();
-
-    // <span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span>特别注意这行<span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span><span class="exclamation_mark">!</span>
-    <span class="function_or_atom">self</span>.<span class="variable">URLOperations</span>[<span class="function_or_atom">url</span>] = <span class="function_or_atom">operation</span>;
-
-    __weak <span class="variable">SDWebImageDownloaderOperation</span> *<span class="function_or_atom">woperation</span> = <span class="function_or_atom">operation</span>;
-    <span class="function_or_atom">operation</span>.<span class="function_or_atom">completionBlock</span> = ^{
-      <span class="variable">SDWebImageDownloaderOperation</span> *<span class="function_or_atom">soperation</span> = <span class="function_or_atom">woperation</span>;
-      <span class="function_or_atom">if</span> (<span class="exclamation_mark">!</span><span class="function_or_atom">soperation</span>) <span class="function_or_atom">return</span>;
-      <span class="function_or_atom">if</span> (<span class="function_or_atom">self</span>.<span class="variable">URLOperations</span>[<span class="function_or_atom">url</span>] == <span class="function_or_atom">soperation</span>) {
-          [<span class="function_or_atom">self</span>.<span class="variable">URLOperations</span> <span class="function_or_atom">removeObjectForKey:url</span>];
-      };
-    };
-}
-</code></pre><p>SDWebImage的下载器会<strong>根据URL做下载任务对应NSOperation映射，也即之前创建的下载回调Block。</strong></p>
-<p>好，就是这行导致Crash的发生。为什么呢？</p>
-<p>我们设想下，假设在第二次遍历中包含了第一次遍历中的图片URL，比如b20对应的图片URL和b10对应的图片URL一样，那么在SDWebImage的处理回调里，b20就会替换掉b10。<b style="color:red">于是，在第一次遍历创建的5个下载任务回调中，b10回调的时候实际已经执行的是b20，也就是<code>dq2 + 1</code>；而在后续第二次遍历执行下载任务回调的时候，又分别执行了b20-b24的5个任务，导致<code>dq2 + 5</code>。这从导致<code>dq2</code>实际上leave的次数比enter的次数多了1 (6比5)，导致了dq2信号量的数值溢出，从而进入了Crash分支。</b></p>
-<h3 id="最后">最后</h3><p>看起来很简单、清晰易懂的代码，没想到也会造成巨大的问题。所以，写代码一定要谨慎谨慎再谨慎。</p>
-]]></content>
-    <summary type="html">
-    <![CDATA[<h3 id="起因">起因</h3><p>昨天其他部门的同事突然反馈一起相对来说比较严重的Crash问题（占比达到了yyyy左右，并且从Crash堆栈上可以发现很多情况下是一启动就Crash了）。去掉隐私数据大致堆栈如下：</p>
-<pre><code>Thread <span]]>
     </summary>
     
       <category term="Reverse Engineering" scheme="http://satanwoo.github.io/tags/Reverse-Engineering/"/>
