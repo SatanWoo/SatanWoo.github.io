@@ -4,7 +4,7 @@
   
   <link href="/atom.xml" rel="self"/>
   <link href="http://satanwoo.github.io/"/>
-  <updated>2019-01-26T08:52:11.000Z</updated>
+  <updated>2019-01-26T18:43:29.000Z</updated>
   <id>http://satanwoo.github.io/</id>
   
   <author>
@@ -13,6 +13,135 @@
   </author>
   
   <generator uri="http://hexo.io/">Hexo</generator>
+  
+  <entry>
+    <title><![CDATA[基于智能指针和RAII的对象内存管理设计]]></title>
+    <link href="http://satanwoo.github.io/2019/01/26/RAII/"/>
+    <id>http://satanwoo.github.io/2019/01/26/RAII/</id>
+    <published>2019-01-26T15:13:23.000Z</published>
+    <updated>2019-01-26T18:43:29.000Z</updated>
+    <content type="html"><![CDATA[<p>在<a href="http://satanwoo.github.io/2019/01/26/shared-ptr/">从C++ std::shared_ptr 原理来看看栈溢出的危害</a>，我提及了<code>C++</code>的智能指针指向被管理对象的<code>raw ptr</code>会被栈内存溢出而破坏，而利用智能指针进行对象构造的管理和设计，可以衍生出和<code>RAII</code>的结合，今天就来谈谈这项技术。</p>
+<h3 id="什么是RAII？">什么是RAII？</h3><p><code>RAII</code>是<code>Resource Acquisition Is Initialization</code>，简而言之就是将对一个资源的申请封装在一个对象的生命周期内的理念。这样做的好处就是，C++的对象势必在创建的时候会经过构造函数，而在销毁的时候会触发析构函数。</p>
+<p>听起来有点绕是不是，让我们来简化一下其主要特点。</p>
+<ul>
+<li>所有的资源管理内聚在对象内部</li>
+<li>利用对象申请／释放的特性对资源同步进行对应的申请／释放</li>
+<li>自动管理对象</li>
+</ul>
+<p>前两点都比较容易，那么第三点如何达到呢？</p>
+<p><b style="color:red">合理的利用局部变量。</b></p>
+<p>绝大多数语言，比如<code>C++</code>，都居于块级作用域。当在创建的变量离开其所在的块级时候，就会触发释放。而这就可以达到我们所说的自动管理对象。</p>
+<blockquote>
+<p>这其实就是压栈／出栈的高级语言表现。</p>
+</blockquote>
+<p>而在<code>C++</code>领域，有一个比较经典的利用<code>RAII</code>特性的设计就是<strong>ScopeLock</strong>。</p>
+<pre><code><span class="title">template</span>&lt;<span class="keyword">class</span> <span class="type">LockType</span>&gt;
+<span class="class">
+<span class="keyword">class</span> <span class="type">My_scope_lock</span>
+{
+
+   public:
+
+   <span class="type">My_scope_lock</span><span class="container">(<span class="type">LockType</span>&amp; <span class="title">_lock</span>)</span>:m_lock<span class="container">(<span class="title">_lock</span>)</span>
+
+   {
+
+         m_lock.occupy<span class="container">()</span>;
+
+    }
+
+   ~<span class="type">My_scope_lock</span><span class="container">()</span>
+
+   {
+
+        m_lock.relase<span class="container">()</span>;
+
+   }
+
+   protected:
+
+   <span class="type">LockType</span>    m_lock;
+}</span>
+</code></pre><p>在这里，<b style="color:red">锁被看成是一种资源，他需要lock/unlock的配对操作，不然就会引发问题。</b></p>
+<p>而上述代码，将锁保留在对象的构造函数和西沟函数中。这样，当我们在某个函数中需要操作临界区域的时候，就可以简洁明了的使用局部变量来操作锁：</p>
+<pre><code><span class="keyword">void</span> Data::Update()
+{
+     <span class="function">My_scope_lock <span class="title">l_lock</span><span class="params">(m_mutex_lock)</span></span>;
+    <span class="comment">// do some operation</span>
+}
+</code></pre><h3 id="基于智能指针的RAII">基于智能指针的RAII</h3><p>上文我们用锁的例子来举例说明了<code>RAII</code>的设计理念，那什么又是基于智能指针的<code>RAII</code>呢？</p>
+<p>我们都知道，在编程过程中，我们必须和内存打交道，而内存分为了两种类型：栈上内存和堆上内存。栈上内存不仅和线程相关，同时空间大小也相对堆内存来说非常小。因此，当我们在处理一些大规模数据（以及对象规模不确定）的时候，比如使用几百个对象的数据等等，一般都采用堆上动态分配内存。</p>
+<p>但是堆上内存，在诸多的语言中，都需要手动管理，比如<code>C++</code>。而一般处理不当，比如（new []和delete搭配），或者遗忘了释放，那么就会产生内存泄漏等严重问题。</p>
+<p>为此，我们参考上节的设计，准备构建一个可以在对象的构造／析构函数中成对正确释放内存的设计思路。</p>
+<p>先假设一个需要在堆上频发操作的对象<code>Data</code></p>
+<pre><code><span class="class"><span class="keyword">class</span> <span class="title">Data</span> </span>{
+    <span class="comment">// 省略</span>
+}
+</code></pre><p>如果直接使用，一般情况下是这样的代码:</p>
+<pre><code><span class="type">Data</span> *<span class="typedef"><span class="keyword">data</span> = new <span class="type">Data</span><span class="container">()</span>;</span>
+<span class="title">delete</span> <span class="typedef"><span class="keyword">data</span>;</span>
+</code></pre><p>需要频繁的确认对堆内存的正确使用。现在我们给他加一个包装对象，<code>DataHandle</code></p>
+<pre><code><span class="class"><span class="keyword">class</span> <span class="title">DataHandle</span> </span>{
+    <span class="keyword">private</span>:
+        Data *m_data;
+}
+
+DataHandle::DataHandle():m_data(<span class="keyword">new</span> Data())
+{}
+
+DataHandle::~DataHandle()
+{
+    delete m_data;
+    m_data = NULL;
+}
+</code></pre><p>这样，我们后续每次使用，就可以简化成  </p>
+<pre><code><span class="collection">{
+    DataHandle handle;
+}</span>
+</code></pre><p>但是，别忘记了，<code>C++</code>中海油拷贝构造和重载赋值等操作，一旦我们写出如下代码，就会引发<code>double free</code>的问题。</p>
+<pre><code><span class="collection">{
+    DataHandle handle1<span class="list">(<span class="keyword">handle</span>)</span><span class="comment">;</span>
+    handle1 = handle;
+}</span>
+</code></pre><p>因此，我们需要对拷贝构造函数和重载赋值进行特别处理。这里有两种处理方式：</p>
+<ul>
+<li>对于拷贝／赋值，每次把内部指针<code>m_data</code>也拷贝<code>new</code>一次。</li>
+<li>对于<code>m_data</code>进行合理的计数记录。</li>
+</ul>
+<p><strong>一般情况下，我们期望<code>DataHandle</code>的行为和<code>Data</code>是一致的。</strong> 因此我们想使用第二种方式。</p>
+<p>这个时候，<code>C++</code>的<code>shared_ptr</code>就派上用场了。改写下<code>DataHanle</code></p>
+<pre><code><span class="keyword">class</span> DataHandle{
+    <span class="keyword">public</span>:
+        DataHandle();
+        DataHandle(<span class="keyword">const</span> DataHandle &amp;handle);
+        DataHandle&amp; <span class="keyword">operator</span>=(<span class="keyword">const</span> DataHanlde &amp;handle);
+    <span class="keyword">private</span>:
+        <span class="built_in">std</span>::<span class="built_in">shared_ptr</span>&lt;Data&gt; m_dataS;
+}
+</code></pre><p>对于重载后的拷贝／复制函数，我们只要利用智能指针自身重载过的赋值操作赋，即可解决引用计数问题。</p>
+<p><strong>最后要特别注意的是，下述两种情况的代码，是完全不相同的含义。</strong></p>
+<pre><code><span class="comment">// 第一种情况</span>
+Data *data = <span class="keyword">new</span> Data();
+
+<span class="built_in">std</span>::<span class="built_in">shared_ptr</span>&lt;Data&gt; s1 = <span class="built_in">std</span>::<span class="built_in">shared_ptr</span>(data);
+
+<span class="built_in">std</span>::<span class="built_in">shared_ptr</span>&lt;Data&gt; s2 = s1;
+
+<span class="comment">// 第二种情况</span>
+
+Data *data = <span class="keyword">new</span> Data();
+
+<span class="built_in">std</span>::<span class="built_in">shared_ptr</span>&lt;Data&gt; s1 = <span class="built_in">std</span>::<span class="built_in">shared_ptr</span>(data);
+
+<span class="built_in">std</span>::<span class="built_in">shared_ptr</span>&lt;Data&gt; s2 = <span class="built_in">std</span>::<span class="built_in">shared_ptr</span>(data);
+</code></pre>]]></content>
+    <summary type="html">
+    <![CDATA[<p>在<a href="http://satanwoo.github.io/2019/01/26/shared-ptr/">从C++ std::shared_ptr 原理来看看栈溢出的危害</a>，我提及了<code>C++</code>的智能指针指向被管理对象的<code>r]]>
+    </summary>
+    
+      <category term="C++" scheme="http://satanwoo.github.io/tags/C/"/>
+    
+  </entry>
   
   <entry>
     <title><![CDATA[LD-2]]></title>
@@ -83,16 +212,16 @@
     <link href="http://satanwoo.github.io/2019/01/26/shared-ptr/"/>
     <id>http://satanwoo.github.io/2019/01/26/shared-ptr/</id>
     <published>2019-01-26T08:48:20.000Z</published>
-    <updated>2019-01-26T08:54:53.000Z</updated>
+    <updated>2019-01-26T15:22:43.000Z</updated>
     <content type="html"><![CDATA[<h2 id="C++_std::shared_ptr_实现原理">C++ std::shared_ptr 实现原理</h2><p>上周五排查了一个由于<code>XXX模块</code>操作疏忽导致栈越界引发的<code>我的模块</code>的智能指针Crash问题，因此稍微研究了一下，以作参考：</p>
 <blockquote>
 <p>shared_ptr共享被管理对象，同一时刻可以有多个shared_ptr拥有对象的所有权，当最后一个shared_ptr对象销毁时，被管理对象自动销毁</p>
 </blockquote>
-<h3 id="shared_ptr_实现">shared_ptr 实现</h3><p><img src="https://img-blog.csdn.net/20160529232019149?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQv/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center" alt=""></p>
+<h3 id="shared_ptr_实现">shared_ptr 实现</h3><p><img src="https://github.com/SatanWoo/BeeHive/blob/master/share_ptr.png?raw=true" alt=""></p>
 <p>简单来说，<code>shared_ptr</code>实现包含了两部分，</p>
 <ul>
-<li>一个指向堆上创建的对象的裸指针</li>
-<li><strong>一个指向内部隐藏的、共享的管理对象。</strong></li>
+<li>一个指向堆上创建的对象的裸指针，<code>raw_ptr</code></li>
+<li><strong>一个指向内部隐藏的、共享的管理对象。<code>share_count_object</code></strong></li>
 </ul>
 <p>第一部分没什么好说的，第二部分是需要关注的重点：</p>
 <ul>
@@ -100,9 +229,12 @@
 <li><code>weak_count</code>，这个管理对象被多少个智能指针共享了，简单来说就是<code>管理对象</code>的引用计数。</li>
 </ul>
 <p><b style="color:red">不同指针创建的对同一个堆上对象的智能管理，并不共享管理对象，因此存在<code>double free</code>的可能性</b></p>
-<p><code>_shared_ptr</code>直接包含的裸指针是为了实现一般指针的-&gt;,*等操作，通过<code>__shared_count</code>间接包含的指针是为了管理对象的生命周期，回收相关资源。</p>
-<p>换句话说，<code>__shared_count</code>内部的<code>use_count</code>主要用来标记被管理对象的生命周期，<code>weak_count</code>主要用来标记管理对象的生命周期。</p>
-<h3 id="问题原因">问题原因</h3><p>了解了原理，可以看出<code>std::share_ptr</code>本身的<code>_M_ptr</code>指向了堆上通过<code>new</code>创建的对象。但是其自身这个<code>_M_ptr</code>却会如果在不当操作上，被修改，比如栈越界操作，就会被破坏，导致产生对非法对象的访问：</p>
+<p><code>_shared_ptr</code>直接包含的裸指针，即<code>raw prt</code>，是为了实现一般指针的-&gt;,*等操作，通过<code>__shared_count object</code>间接包含的指针是为了管理对象的生命周期，回收相关资源。</p>
+<p>换句话说，<code>__shared_count object</code>内部的<code>use_count</code>主要用来标记<strong>被管理对象</strong>的生命周期，<code>weak_count</code>主要用来标记<strong>管理对象</strong>的生命周期。</p>
+<blockquote>
+<p>注意区分管理和被管理。</p>
+</blockquote>
+<h3 id="问题原因">问题原因</h3><p>了解了原理，可以看出<code>std::share_ptr</code>本身的<code>raw ptr</code>指向了堆上通过<code>new</code>创建的对象。但是其自身这个<code>raw ptr</code>却会如果在不当操作上，被修改，比如栈越界操作，就会被破坏，导致产生对非法对象的访问：</p>
 <pre><code><span class="keyword">int</span> i = <span class="number">5</span>;
 NSLog(@<span class="string">"i address is %p"</span>, &amp;i);
 
@@ -118,7 +250,7 @@ NSLog(@<span class="string">"k address is %p"</span>, a);
 }
 
 NSLog(@<span class="string">"haha"</span>);
-</code></pre><p>上述这段代码就会引发问题，这里<code>XXX::XX</code>的具体内部设计使用了经典的RAII，下文再表。</p>
+</code></pre><p>上述这段代码就会引发问题，这里<code>XXX::XX</code>的具体内部设计使用了经典的<code>RAII</code>，下文再表。</p>
 ]]></content>
     <summary type="html">
     <![CDATA[<h2 id="C++_std::shared_ptr_实现原理">C++ std::shared_ptr 实现原理</h2><p>上周五排查了一个由于<code>XXX模块</code>操作疏忽导致栈越界引发的<code>我的模块</code>的智能指针Crash问题，因此稍微]]>
@@ -4291,103 +4423,6 @@ _attribute__((section (<span class="string">"__DATA, MinyiSpecific"</span>))) <s
     <summary type="html">
     <![CDATA[<p>在开发的过程中，我们进场要做一些类似于参数调整之类的琐碎问题。如果每次都通过<code>CMD + R</code>来编译运行查看效果，浪费的时间真是得不偿失。因此，在看到了<code>FBTweak</code>这个项目以后，就感觉比较有意思，让我们来对这个项目一探究竟。]]>
     </summary>
-    
-      <category term="iOS" scheme="http://satanwoo.github.io/tags/iOS/"/>
-    
-  </entry>
-  
-  <entry>
-    <title><![CDATA[ARM64下Indirect Result Location摸索]]></title>
-    <link href="http://satanwoo.github.io/2017/04/23/ARM64IndirectReturn/"/>
-    <id>http://satanwoo.github.io/2017/04/23/ARM64IndirectReturn/</id>
-    <published>2017-04-22T19:00:36.000Z</published>
-    <updated>2017-04-22T19:18:04.000Z</updated>
-    <content type="html"><![CDATA[<h3 id="ARM64下Indirect_Result_Location摸索">ARM64下Indirect Result Location摸索</h3><p>之前学习汇编的时候，大概了解了一些ARM64下寄存器的用途，比如<code>x0 - x7</code>作为函数传递使用。同时，<code>x0</code>也可以作为函数返回值时候的寄存器。</p>
-<p>但是，今天在研究一些跟返回结构体相关的时候，发现返回值并不是放在<code>X0</code>寄存器中。上网搜索了一下资料，发现在<strong>ARM64下，当一个<code>Callee</code>函数返回的内容大于16bytes的时候，该内容会被存到一个内存地址当中，然后这个内存地址的值会存入寄存器<code>x8</code>。后续<code>Caller</code>函数在使用该返回值的时候，会从<code>X8</code>寄存器中取出内存地址，并从内存地址取出内容的值</strong></p>
-<p>是不是有点绕，还是让我们来看个例子吧。</p>
-<h3 id="原理">原理</h3><p>首先我根据<strong>大于16 bytes</strong>的要求定义了如下结构体：</p>
-<pre><code><span class="keyword">typedef</span> <span class="keyword">struct</span> {
-    <span class="keyword">int64_t</span> i;
-    <span class="keyword">int64_t</span> j;
-    <span class="keyword">int64_t</span> k;
-} MYStruct;
-</code></pre><p>在ARM64下，该结构体默认按<code>4 bytes</code>对齐，每个<code>int64</code>占用<code>8 bytes</code>，因此结构体大小<code>24 bytes</code></p>
-<p>我们定义如下函数，用于返回一个该结构体：</p>
-<pre><code>- (MYStruct)testIndirectResultLocation:(int64_t)i1 second:(int64_t)i2 th:(int64_t)i3
-{
-    MYStruct s<span class="comment">;</span>
-    s.i = i1<span class="comment">;</span>
-    s.j = i2<span class="comment">;</span>
-    s.k = i3<span class="comment">;</span>
-    return s<span class="comment">;</span>
-}
-</code></pre><p>这个函数很简单，传入三个值。然后构造个局部变量<code>MYStruct s</code>，将其对应的成员变量按照刚刚的传入参数赋值，最后返回该结构体。</p>
-<p>该函数调用<strong>在未优化的前提下</strong>的汇编结果如下：</p>
-<pre><code>IndirectResultLocation`-[ViewController testIndirectResultLocation:second:th:]:
-    <span class="comment">// 预留空间</span>
-    &lt;+<span class="number">0</span>&gt;:  sub    sp, sp, <span class="preprocessor">#<span class="number">0x40</span>             ; =<span class="number">0x40</span> </span>
-
-    <span class="comment">// 存参</span>
-    &lt;+<span class="number">4</span>&gt;:  str    x0, [sp, <span class="preprocessor">#<span class="number">0x38</span>]</span>
-    &lt;+<span class="number">8</span>&gt;:  str    x1, [sp, <span class="preprocessor">#<span class="number">0x30</span>]</span>
-    &lt;+<span class="number">12</span>&gt;: str    x2, [sp, <span class="preprocessor">#<span class="number">0x28</span>]</span>
-    &lt;+<span class="number">16</span>&gt;: str    x3, [sp, <span class="preprocessor">#<span class="number">0x20</span>]</span>
-    &lt;+<span class="number">20</span>&gt;: str    x4, [sp, <span class="preprocessor">#<span class="number">0x18</span>]</span>
-
-    <span class="comment">// 赋值</span>
--&gt;  &lt;+<span class="number">24</span>&gt;: ldr    x0, [sp, <span class="preprocessor">#<span class="number">0x28</span>]</span>
-    &lt;+<span class="number">28</span>&gt;: str    x0, [sp]
-    &lt;+<span class="number">32</span>&gt;: ldr    x0, [sp, <span class="preprocessor">#<span class="number">0x20</span>]</span>
-    &lt;+<span class="number">36</span>&gt;: str    x0, [sp, <span class="preprocessor">#<span class="number">0x8</span>]</span>
-    &lt;+<span class="number">40</span>&gt;: ldr    x0, [sp, <span class="preprocessor">#<span class="number">0x18</span>]</span>
-    &lt;+<span class="number">44</span>&gt;: str    x0, [sp, <span class="preprocessor">#<span class="number">0x10</span>]</span>
-
-    <span class="comment">// 将结构体存到x8寄存器的值代表的地址去</span>
-    &lt;+<span class="number">48</span>&gt;: ldr    x0, [sp]
-    &lt;+<span class="number">52</span>&gt;: str    x0, [x8]
-    &lt;+<span class="number">56</span>&gt;: ldr    x0, [sp, <span class="preprocessor">#<span class="number">0x8</span>]</span>
-    &lt;+<span class="number">60</span>&gt;: str    x0, [x8, <span class="preprocessor">#<span class="number">0x8</span>]</span>
-    &lt;+<span class="number">64</span>&gt;: ldr    x0, [sp, <span class="preprocessor">#<span class="number">0x10</span>]</span>
-    &lt;+<span class="number">68</span>&gt;: str    x0, [x8, <span class="preprocessor">#<span class="number">0x10</span>]</span>
-
-    <span class="comment">// 释放空间</span>
-    &lt;+<span class="number">72</span>&gt;: add    sp, sp, <span class="preprocessor">#<span class="number">0x40</span>             ; =<span class="number">0x40</span> </span>
-    &lt;+<span class="number">76</span>&gt;: ret    
-</code></pre><p>第一行：SP即<code>Stack Pointer</code>，向下减<code>0x40（64 bytes）</code>的大小，预先分配出函数需要用的栈空间。为什么要预留这么多的大小呢？首先按照<strong>Objective-C的函数调用规定，前两个参数必须是<code>self</code>和<code>selector</code>，也即会使用到寄存器<code>X0</code>和<code>X1</code>。然后该函数有三个形参，使用了<code>X2-X4</code>的寄存器</strong>。<br>上述这五个，大小占用了<strong>self(8 bytes) + selector(8 bytes) + 三个参数(24 bytes) = 40 bytes</strong>。那么还有<code>24 bytes</code>去干嘛了呢？</p>
-<p>别忘了，我们在函数中可以声明了一个局部变量<code>MYStruct s</code>，该结构体大小是24 bytes。而在函数调用中使用到的变量，基本上都在栈区中开辟对应的空间进行暂存。</p>
-<p>后续第二行到第六行非常简单易懂，就是把上述5个参数存到实际的栈区中去使用。按照这个存法以后，内存布局如下（注意高地址在上，低地址在下，ARM下的栈是向下增长）：</p>
-<p><img src="https://github.com/SatanWoo/WZRecyclePhotoStackView/blob/master/%E5%B1%8F%E5%B9%95%E5%BF%AB%E7%85%A7%202017-04-23%20%E4%B8%8A%E5%8D%882.48.35.png?raw=true" alt=""></p>
-<p>将参数都存入到栈以后，我们就要对结构体进行赋值了，这些操作在第七行到第十二行之间。<br>将<strong>1赋值给[SP]，2赋值给[SP + #0x8]，3赋值给[SP + #0x10]</strong>。如果不理解啥意思的话，可以看下我自己转化的伪代码：</p>
-<pre><code><span class="keyword">void</span> *address = &amp;s;
-*(<span class="keyword">int64_t</span> *)(address) = <span class="number">1</span>;
-*(<span class="keyword">int64_t</span> *)(address + <span class="number">8</span>) = <span class="number">2</span>;
-*(<span class="keyword">int64_t</span> *)(address + <span class="number">16</span>) = <span class="number">3</span>;
-</code></pre><p>赋值完以后，我们可以通过内存分布看下数据是否正确：</p>
-<p><img src="https://github.com/SatanWoo/WZRecyclePhotoStackView/blob/master/%E5%B1%8F%E5%B9%95%E5%BF%AB%E7%85%A7%202017-04-23%20%E4%B8%8A%E5%8D%882.30.06.png?raw=true" alt=""></p>
-<p><img src="https://github.com/SatanWoo/WZRecyclePhotoStackView/blob/master/%E5%B1%8F%E5%B9%95%E5%BF%AB%E7%85%A7%202017-04-23%20%E4%B8%8A%E5%8D%882.29.53.png?raw=true" alt=""></p>
-<p>当赋值完成后，就要进行结构体的返回了。这里不是简单的<code>mov x0, sp</code>之类的操作，而是一串和<code>X8</code>寄存器相关操作。</p>
-<p>其实原理差不多，转化成伪代码的话，基本上是这样：</p>
-<pre><code>void <span class="keyword">*</span>toSaveAddress = [x8];
-void <span class="keyword">*</span>valueNowAddress = [sp];
-
-<span class="keyword">*</span>(int64_t <span class="keyword">*</span>)(toSaveAddress) = <span class="keyword">*</span>valueNowAddress;
-<span class="keyword">*</span>(int64_t <span class="keyword">*</span>)(toSaveAddress + 8) = <span class="keyword">*</span>(valueNowAddress + 8);
-<span class="keyword">*</span>(int64_t <span class="keyword">*</span>)(toSaveAddress + 16) = <span class="keyword">*</span>(valueNowAddress + 16);
-</code></pre><p>操作完成后，释放空间即可。</p>
-<h3 id="补充">补充</h3><p>其实ARM64在汇编层面实现的这么复杂， 我们在编程层面只要按照如下方式理解即可：</p>
-<pre><code><span class="function">some_struct <span class="title">foo</span><span class="params">(<span class="keyword">int</span> arg1, <span class="keyword">int</span> arg2)</span></span>;
-some_struct s = foo(<span class="number">1</span>, <span class="number">2</span>);
-</code></pre><p>会被编译成：</p>
-<pre><code><span class="function">some_struct* <span class="title">foo</span><span class="params">(some_struct* ret_val, <span class="keyword">int</span> arg1, <span class="keyword">int</span> arg2)</span></span>;
-some_struct s; 
-foo(&amp;s, <span class="number">1</span>, <span class="number">2</span>);
-</code></pre><h3 id="后续">后续</h3><p>从本文中我们不难看出，ARM64针对不同大小的返回值都有着对应的<strong>Calling Convention</strong>。下次我准备来摸索下，处于<code>8 bytes - 16 bytes</code>之间的返回值究竟是怎么处理的。</p>
-]]></content>
-    <summary type="html">
-    <![CDATA[<h3 id="ARM64下Indirect_Result_Location摸索">ARM64下Indirect Result Location摸索</h3><p>之前学习汇编的时候，大概了解了一些ARM64下寄存器的用途，比如<code>x0 - x7</code>作为函数传递]]>
-    </summary>
-    
-      <category term="Reverse Engineering" scheme="http://satanwoo.github.io/tags/Reverse-Engineering/"/>
     
       <category term="iOS" scheme="http://satanwoo.github.io/tags/iOS/"/>
     

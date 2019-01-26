@@ -3,38 +3,21 @@
 <head>
   <meta charset="utf-8">
   
-  <title>LD-2 | SatanWoo</title>
+  <title>基于智能指针和RAII的对象内存管理设计 | SatanWoo</title>
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
-  <meta name="description" content="了解苹果的LD
-其实文章关于传统Section Based Linker那块我还没怎么读懂，有兴趣的欢迎互相探讨。
-
-之前研究Xcode 10兼容libstdc++的时候，稍微把玩了下苹果的LD，借这个机会正好通读了下苹果的LD设计，本文做一下总结。
-Atom &amp;amp; FixUp苹果的LD，核心理念就是基于Atom和FixUp，拿着两个术语是啥意思呢？
-
-Atom就是一块代码（函数）或者数据（">
+  <meta name="description" content="在从C++ std::shared_ptr 原理来看看栈溢出的危害，我提及了C++的智能指针指向被管理对象的raw ptr会被栈内存溢出而破坏，而利用智能指针进行对象构造的管理和设计，可以衍生出和RAII的结合，今天就来谈谈这项技术。
+什么是RAII？RAII是Resource Acquisition Is Initialization，简而言之就是将对一个资源的申请封装在一个对象的生命周期内的理">
 <meta property="og:type" content="article">
-<meta property="og:title" content="LD-2">
-<meta property="og:url" content="http://satanwoo.github.io/2019/01/26/LD-2/index.html">
+<meta property="og:title" content="基于智能指针和RAII的对象内存管理设计">
+<meta property="og:url" content="http://satanwoo.github.io/2019/01/26/RAII/index.html">
 <meta property="og:site_name" content="SatanWoo">
-<meta property="og:description" content="了解苹果的LD
-其实文章关于传统Section Based Linker那块我还没怎么读懂，有兴趣的欢迎互相探讨。
-
-之前研究Xcode 10兼容libstdc++的时候，稍微把玩了下苹果的LD，借这个机会正好通读了下苹果的LD设计，本文做一下总结。
-Atom &amp;amp; FixUp苹果的LD，核心理念就是基于Atom和FixUp，拿着两个术语是啥意思呢？
-
-Atom就是一块代码（函数）或者数据（">
-<meta property="og:image" content="https://opensource.apple.com/source/ld64/ld64-253.3/doc/design/hello.png">
-<meta property="og:image" content="https://opensource.apple.com/source/ld64/ld64-253.3/doc/design/bindings.png">
-<meta property="og:updated_time" content="2019-01-26T08:52:11.000Z">
+<meta property="og:description" content="在从C++ std::shared_ptr 原理来看看栈溢出的危害，我提及了C++的智能指针指向被管理对象的raw ptr会被栈内存溢出而破坏，而利用智能指针进行对象构造的管理和设计，可以衍生出和RAII的结合，今天就来谈谈这项技术。
+什么是RAII？RAII是Resource Acquisition Is Initialization，简而言之就是将对一个资源的申请封装在一个对象的生命周期内的理">
+<meta property="og:updated_time" content="2019-01-26T18:43:29.000Z">
 <meta name="twitter:card" content="summary">
-<meta name="twitter:title" content="LD-2">
-<meta name="twitter:description" content="了解苹果的LD
-其实文章关于传统Section Based Linker那块我还没怎么读懂，有兴趣的欢迎互相探讨。
-
-之前研究Xcode 10兼容libstdc++的时候，稍微把玩了下苹果的LD，借这个机会正好通读了下苹果的LD设计，本文做一下总结。
-Atom &amp;amp; FixUp苹果的LD，核心理念就是基于Atom和FixUp，拿着两个术语是啥意思呢？
-
-Atom就是一块代码（函数）或者数据（">
+<meta name="twitter:title" content="基于智能指针和RAII的对象内存管理设计">
+<meta name="twitter:description" content="在从C++ std::shared_ptr 原理来看看栈溢出的危害，我提及了C++的智能指针指向被管理对象的raw ptr会被栈内存溢出而破坏，而利用智能指针进行对象构造的管理和设计，可以衍生出和RAII的结合，今天就来谈谈这项技术。
+什么是RAII？RAII是Resource Acquisition Is Initialization，简而言之就是将对一个资源的申请封装在一个对象的生命周期内的理">
   
     <link rel="alternative" href="/atom.xml" title="SatanWoo" type="application/atom+xml">
   
@@ -81,10 +64,10 @@ Atom就是一块代码（函数）或者数据（">
   </div>
 </header>
       <div class="outer">
-        <section id="main"><article id="post-LD-2" class="article article-type-post" itemscope itemprop="blogPost">
+        <section id="main"><article id="post-RAII" class="article article-type-post" itemscope itemprop="blogPost">
   <div class="article-meta">
-    <a href="/2019/01/26/LD-2/" class="article-date">
-  <time datetime="2019-01-26T08:51:30.000Z" itemprop="datePublished">2019-01-26</time>
+    <a href="/2019/01/26/RAII/" class="article-date">
+  <time datetime="2019-01-26T15:13:23.000Z" itemprop="datePublished">2019-01-26</time>
 </a>
     
   </div>
@@ -95,7 +78,7 @@ Atom就是一块代码（函数）或者数据（">
         
   
     <h1 class="article-title" itemprop="name">
-      LD-2
+      基于智能指针和RAII的对象内存管理设计
     </h1>
   
 
@@ -103,62 +86,130 @@ Atom就是一块代码（函数）或者数据（">
     
     <div class="article-entry" itemprop="articleBody">
       
-        <h2 id="了解苹果的LD">了解苹果的LD</h2><blockquote>
-<p>其实文章关于传统<code>Section Based Linker</code>那块我还没怎么读懂，有兴趣的欢迎互相探讨。</p>
-</blockquote>
-<p>之前研究<code>Xcode 10</code>兼容<code>libstdc++</code>的时候，稍微把玩了下苹果的<code>LD</code>，借这个机会正好通读了下苹果的<code>LD</code>设计，本文做一下总结。</p>
-<h3 id="Atom_&amp;_FixUp">Atom &amp; FixUp</h3><p>苹果的<code>LD</code>，核心理念就是基于<code>Atom</code>和<code>FixUp</code>，拿着两个术语是啥意思呢？</p>
+        <p>在<a href="http://satanwoo.github.io/2019/01/26/shared-ptr/">从C++ std::shared_ptr 原理来看看栈溢出的危害</a>，我提及了<code>C++</code>的智能指针指向被管理对象的<code>raw ptr</code>会被栈内存溢出而破坏，而利用智能指针进行对象构造的管理和设计，可以衍生出和<code>RAII</code>的结合，今天就来谈谈这项技术。</p>
+<h3 id="什么是RAII？">什么是RAII？</h3><p><code>RAII</code>是<code>Resource Acquisition Is Initialization</code>，简而言之就是将对一个资源的申请封装在一个对象的生命周期内的理念。这样做的好处就是，C++的对象势必在创建的时候会经过构造函数，而在销毁的时候会触发析构函数。</p>
+<p>听起来有点绕是不是，让我们来简化一下其主要特点。</p>
 <ul>
-<li><code>Atom</code>就是一块代码（函数）或者数据（全局变量）之类的，每个<code>Atom</code>都有一些属性，比如名称、作用域、内容类型、字节对齐之类的。</li>
-<li><code>Fixup</code>可以理解为一个包含种类、便宜、辅助加数以及目标<code>Atom</code>的数据结构。</li>
+<li>所有的资源管理内聚在对象内部</li>
+<li>利用对象申请／释放的特性对资源同步进行对应的申请／释放</li>
+<li>自动管理对象</li>
 </ul>
-<p>有点抽象对吧？概要来说，苹果<code>LD</code>通过<code>Atom</code>和<code>FixUP</code>构建一张图，图中的节点都是<code>Atom</code>，连接<code>Atom</code>的则是<code>FixUP</code>。</p>
-<p><strong>通过构建这样一张图，苹果就可以在链接期间进行一系列的优化，比如死代码剔除，怎么做呢？比如一段代码也会被抽象成<code>Atom</code>，如果没有<code>FixUP</code>连接的<code>Atom</code>就可以进行剔除</strong></p>
-<p>举一个简单的小例子<code>main.c</code>：</p>
-<pre><code><span class="preprocessor">#<span class="keyword">include</span> <span class="string">&lt;stdio.h&gt;</span></span>
+<p>前两点都比较容易，那么第三点如何达到呢？</p>
+<p><b style="color:red">合理的利用局部变量。</b></p>
+<p>绝大多数语言，比如<code>C++</code>，都居于块级作用域。当在创建的变量离开其所在的块级时候，就会触发释放。而这就可以达到我们所说的自动管理对象。</p>
+<blockquote>
+<p>这其实就是压栈／出栈的高级语言表现。</p>
+</blockquote>
+<p>而在<code>C++</code>领域，有一个比较经典的利用<code>RAII</code>特性的设计就是<strong>ScopeLock</strong>。</p>
+<pre><code><span class="title">template</span>&lt;<span class="keyword">class</span> <span class="type">LockType</span>&gt;
+<span class="class">
+<span class="keyword">class</span> <span class="type">My_scope_lock</span>
+{
 
-<span class="function"><span class="keyword">int</span> <span class="title">main</span><span class="params">()</span>
-</span>{
-    <span class="built_in">printf</span>(<span class="string">"hello world"</span>);
-    <span class="keyword">return</span> <span class="number">0</span>;
+   public:
+
+   <span class="type">My_scope_lock</span><span class="container">(<span class="type">LockType</span>&amp; <span class="title">_lock</span>)</span>:m_lock<span class="container">(<span class="title">_lock</span>)</span>
+
+   {
+
+         m_lock.occupy<span class="container">()</span>;
+
+    }
+
+   ~<span class="type">My_scope_lock</span><span class="container">()</span>
+
+   {
+
+        m_lock.relase<span class="container">()</span>;
+
+   }
+
+   protected:
+
+   <span class="type">LockType</span>    m_lock;
+}</span>
+</code></pre><p>在这里，<b style="color:red">锁被看成是一种资源，他需要lock/unlock的配对操作，不然就会引发问题。</b></p>
+<p>而上述代码，将锁保留在对象的构造函数和西沟函数中。这样，当我们在某个函数中需要操作临界区域的时候，就可以简洁明了的使用局部变量来操作锁：</p>
+<pre><code><span class="keyword">void</span> Data::Update()
+{
+     <span class="function">My_scope_lock <span class="title">l_lock</span><span class="params">(m_mutex_lock)</span></span>;
+    <span class="comment">// do some operation</span>
 }
-</code></pre><p>会被抽象出如下行为：</p>
-<p><img src="https://opensource.apple.com/source/ld64/ld64-253.3/doc/design/hello.png" alt=""></p>
-<p>单独编译这个<code>.c</code>文件生成的<code>.o</code>会包含两个<code>atom</code>，一个是<code>main</code>函数，另外一个是<code>C</code>字符串<code>&quot;hello world&quot;</code></p>
-<blockquote>
-<p>printf 本质上也会一个<code>atom</code>，但是在这个编译单元内他还没加入图中。</p>
-</blockquote>
-<p>而<code>fixup</code>也存在两个，一个是去调用不知道在哪的函数<code>printf</code>的调用<code>fixup</code>，一个是去加载字符串的<code>fixup</code>。</p>
-<h3 id="链接过程">链接过程</h3><ul>
-<li><p>链接过程的第一步就是要处理输入文件，构建一张初始图。</p>
-<ul>
-<li>如果输入文件是<code>.o</code>，那么所有的<code>atom</code>都会被加入到初始图当中。</li>
-<li>如果输入文件是静态库(静态库基本上就是一组<code>.o</code>文件包含一个目录)，初始状态下这里面的<code>atom</code>都默认<b style="color:red">不会加入到里面</b>，当<code>LD</code>不断初始图中有没被决议的<code>fixup</code>，如果fixup对应的目标<code>atom</code>在这个静态库里面的话，就会把找到的<code>atom</code>的加入到图内。</li>
-<li>动态库其实在链接期间不会添加任何的<code>atom</code>，同静态库一样，如果有没被决议的<code>fixup</code>对应的<code>atom</code>在动态库内找到（比如<code>tbd</code>声明的那些），就就提供一个代理，<b style="color:red">这个代理标记了这个符号来自哪个动态库</b></li>
-</ul>
-</li>
-</ul>
-<blockquote>
-<p>本质上来说，链接期间动态库的作用就是参与标记一下。</p>
-</blockquote>
-<ul>
-<li><p>考虑完符号决议，还要考虑符号合并之类的，比如根据字符串表的设计，来自不同文件的相同字符串，比如<code>&quot;haha&quot;</code>，不可能保留两份，需要合并。此外还有诸如<code>C</code>中的<code>tentative definitions</code>，<code>C++ Weak Symbol</code>等</p>
-</li>
-<li><p>处理<code>fixup</code>的时候，也需要分几种类型，见下图：</p>
-</li>
-</ul>
-<p><img src="https://opensource.apple.com/source/ld64/ld64-253.3/doc/design/bindings.png" alt=""></p>
-<h3 id="其他">其他</h3><p>虽然苹果的<code>LD</code>已经抽象成了<code>Atom-FixUP</code>的架构，但是它的可执行文件<code>Mach-O</code>还是传统的基于<code>section</code>的结构，这限制了<code>Atom-FixUP</code>的能力。</p>
+</code></pre><h3 id="基于智能指针的RAII">基于智能指针的RAII</h3><p>上文我们用锁的例子来举例说明了<code>RAII</code>的设计理念，那什么又是基于智能指针的<code>RAII</code>呢？</p>
+<p>我们都知道，在编程过程中，我们必须和内存打交道，而内存分为了两种类型：栈上内存和堆上内存。栈上内存不仅和线程相关，同时空间大小也相对堆内存来说非常小。因此，当我们在处理一些大规模数据（以及对象规模不确定）的时候，比如使用几百个对象的数据等等，一般都采用堆上动态分配内存。</p>
+<p>但是堆上内存，在诸多的语言中，都需要手动管理，比如<code>C++</code>。而一般处理不当，比如（new []和delete搭配），或者遗忘了释放，那么就会产生内存泄漏等严重问题。</p>
+<p>为此，我们参考上节的设计，准备构建一个可以在对象的构造／析构函数中成对正确释放内存的设计思路。</p>
+<p>先假设一个需要在堆上频发操作的对象<code>Data</code></p>
+<pre><code><span class="class"><span class="keyword">class</span> <span class="title">Data</span> </span>{
+    <span class="comment">// 省略</span>
+}
+</code></pre><p>如果直接使用，一般情况下是这样的代码:</p>
+<pre><code><span class="type">Data</span> *<span class="typedef"><span class="keyword">data</span> = new <span class="type">Data</span><span class="container">()</span>;</span>
+<span class="title">delete</span> <span class="typedef"><span class="keyword">data</span>;</span>
+</code></pre><p>需要频繁的确认对堆内存的正确使用。现在我们给他加一个包装对象，<code>DataHandle</code></p>
+<pre><code><span class="class"><span class="keyword">class</span> <span class="title">DataHandle</span> </span>{
+    <span class="keyword">private</span>:
+        Data *m_data;
+}
 
+DataHandle::DataHandle():m_data(<span class="keyword">new</span> Data())
+{}
+
+DataHandle::~DataHandle()
+{
+    delete m_data;
+    m_data = NULL;
+}
+</code></pre><p>这样，我们后续每次使用，就可以简化成  </p>
+<pre><code><span class="collection">{
+    DataHandle handle;
+}</span>
+</code></pre><p>但是，别忘记了，<code>C++</code>中海油拷贝构造和重载赋值等操作，一旦我们写出如下代码，就会引发<code>double free</code>的问题。</p>
+<pre><code><span class="collection">{
+    DataHandle handle1<span class="list">(<span class="keyword">handle</span>)</span><span class="comment">;</span>
+    handle1 = handle;
+}</span>
+</code></pre><p>因此，我们需要对拷贝构造函数和重载赋值进行特别处理。这里有两种处理方式：</p>
+<ul>
+<li>对于拷贝／赋值，每次把内部指针<code>m_data</code>也拷贝<code>new</code>一次。</li>
+<li>对于<code>m_data</code>进行合理的计数记录。</li>
+</ul>
+<p><strong>一般情况下，我们期望<code>DataHandle</code>的行为和<code>Data</code>是一致的。</strong> 因此我们想使用第二种方式。</p>
+<p>这个时候，<code>C++</code>的<code>shared_ptr</code>就派上用场了。改写下<code>DataHanle</code></p>
+<pre><code><span class="keyword">class</span> DataHandle{
+    <span class="keyword">public</span>:
+        DataHandle();
+        DataHandle(<span class="keyword">const</span> DataHandle &amp;handle);
+        DataHandle&amp; <span class="keyword">operator</span>=(<span class="keyword">const</span> DataHanlde &amp;handle);
+    <span class="keyword">private</span>:
+        <span class="built_in">std</span>::<span class="built_in">shared_ptr</span>&lt;Data&gt; m_dataS;
+}
+</code></pre><p>对于重载后的拷贝／复制函数，我们只要利用智能指针自身重载过的赋值操作赋，即可解决引用计数问题。</p>
+<p><strong>最后要特别注意的是，下述两种情况的代码，是完全不相同的含义。</strong></p>
+<pre><code><span class="comment">// 第一种情况</span>
+Data *data = <span class="keyword">new</span> Data();
+
+<span class="built_in">std</span>::<span class="built_in">shared_ptr</span>&lt;Data&gt; s1 = <span class="built_in">std</span>::<span class="built_in">shared_ptr</span>(data);
+
+<span class="built_in">std</span>::<span class="built_in">shared_ptr</span>&lt;Data&gt; s2 = s1;
+
+<span class="comment">// 第二种情况</span>
+
+Data *data = <span class="keyword">new</span> Data();
+
+<span class="built_in">std</span>::<span class="built_in">shared_ptr</span>&lt;Data&gt; s1 = <span class="built_in">std</span>::<span class="built_in">shared_ptr</span>(data);
+
+<span class="built_in">std</span>::<span class="built_in">shared_ptr</span>&lt;Data&gt; s2 = <span class="built_in">std</span>::<span class="built_in">shared_ptr</span>(data);
+</code></pre>
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2019/01/26/LD-2/" data-id="cjrdtpu74002t54i12qu2wv5y" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2019/01/26/RAII/" data-id="cjrdtpu6c002554i15li39a2y" class="article-share-link">Share</a>
       
-        <a href="http://satanwoo.github.io/2019/01/26/LD-2/#disqus_thread" class="article-comment-link">Comments</a>
+        <a href="http://satanwoo.github.io/2019/01/26/RAII/#disqus_thread" class="article-comment-link">Comments</a>
       
       
-  <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
+  <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/C/">C++</a></li></ul>
 
     </footer>
   </div>
@@ -166,19 +217,10 @@ Atom就是一块代码（函数）或者数据（">
     
 <nav id="article-nav">
   
-    <a href="/2019/01/26/RAII/" id="article-nav-newer" class="article-nav-link-wrap">
-      <strong class="article-nav-caption">Newer</strong>
-      <div class="article-nav-title">
-        
-          基于智能指针和RAII的对象内存管理设计
-        
-      </div>
-    </a>
   
-  
-    <a href="/2019/01/26/shared-ptr/" id="article-nav-older" class="article-nav-link-wrap">
+    <a href="/2019/01/26/LD-2/" id="article-nav-older" class="article-nav-link-wrap">
       <strong class="article-nav-caption">Older</strong>
-      <div class="article-nav-title">从C++ std::shared_ptr 原理来看看栈溢出的危害</div>
+      <div class="article-nav-title">LD-2</div>
     </a>
   
 </nav>
@@ -302,7 +344,7 @@ s.setAttribute('data-timestamp', +new Date());
 <script>
   var disqus_shortname = 'satanwoo-2';
   
-  var disqus_url = 'http://satanwoo.github.io/2019/01/26/LD-2/';
+  var disqus_url = 'http://satanwoo.github.io/2019/01/26/RAII/';
   
   (function(){
     var dsq = document.createElement('script');
