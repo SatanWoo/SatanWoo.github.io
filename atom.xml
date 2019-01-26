@@ -83,7 +83,7 @@
     <link href="http://satanwoo.github.io/2019/01/26/shared-ptr/"/>
     <id>http://satanwoo.github.io/2019/01/26/shared-ptr/</id>
     <published>2019-01-26T08:48:20.000Z</published>
-    <updated>2019-01-26T08:51:10.000Z</updated>
+    <updated>2019-01-26T08:54:53.000Z</updated>
     <content type="html"><![CDATA[<h2 id="C++_std::shared_ptr_实现原理">C++ std::shared_ptr 实现原理</h2><p>上周五排查了一个由于<code>XXX模块</code>操作疏忽导致栈越界引发的<code>我的模块</code>的智能指针Crash问题，因此稍微研究了一下，以作参考：</p>
 <blockquote>
 <p>shared_ptr共享被管理对象，同一时刻可以有多个shared_ptr拥有对象的所有权，当最后一个shared_ptr对象销毁时，被管理对象自动销毁</p>
