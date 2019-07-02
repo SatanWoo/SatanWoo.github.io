@@ -1,0 +1,554 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  
+  <title>Revisit iOS Autorelease 之不经意间可能被影响的优化 | SatanWoo</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+  <meta name="description" content="本文的硬核在第二段
+
+之前在做某项目的时候，自建了基于NSThread的私有线程池，在线程池分配了固定个数的常驻工作线程，在工作线程里面运行相关任务；这个方案取代了原先直接无脑使用GCD的方式，在各方面效果都还不错。
+但是在一次偶然的情况下，通过Memory Graph发现很多任务对象却在本该早就销毁的时候仍然存活着。持有其的对象是autorelease content，如下图所示：
+
+
+我把数据">
+<meta property="og:type" content="article">
+<meta property="og:title" content="Revisit iOS Autorelease 之不经意间可能被影响的优化">
+<meta property="og:url" content="http://satanwoo.github.io/2019/07/02/RevisitAutorelease/index.html">
+<meta property="og:site_name" content="SatanWoo">
+<meta property="og:description" content="本文的硬核在第二段
+
+之前在做某项目的时候，自建了基于NSThread的私有线程池，在线程池分配了固定个数的常驻工作线程，在工作线程里面运行相关任务；这个方案取代了原先直接无脑使用GCD的方式，在各方面效果都还不错。
+但是在一次偶然的情况下，通过Memory Graph发现很多任务对象却在本该早就销毁的时候仍然存活着。持有其的对象是autorelease content，如下图所示：
+
+
+我把数据">
+<meta property="og:image" content="https://github.com/SatanWoo/BeeHive/blob/master/autorelease_r1.png?raw=true">
+<meta property="og:image" content="https://github.com/SatanWoo/BeeHive/blob/master/autorelease_r2.png?raw=true">
+<meta property="og:image" content="https://github.com/SatanWoo/BeeHive/blob/master/autorelease_r3.png?raw=true">
+<meta property="og:image" content="https://github.com/SatanWoo/BeeHive/blob/master/autorelease_r4.png?raw=true">
+<meta property="og:updated_time" content="2019-07-02T13:57:58.000Z">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="Revisit iOS Autorelease 之不经意间可能被影响的优化">
+<meta name="twitter:description" content="本文的硬核在第二段
+
+之前在做某项目的时候，自建了基于NSThread的私有线程池，在线程池分配了固定个数的常驻工作线程，在工作线程里面运行相关任务；这个方案取代了原先直接无脑使用GCD的方式，在各方面效果都还不错。
+但是在一次偶然的情况下，通过Memory Graph发现很多任务对象却在本该早就销毁的时候仍然存活着。持有其的对象是autorelease content，如下图所示：
+
+
+我把数据">
+  
+    <link rel="alternative" href="/atom.xml" title="SatanWoo" type="application/atom+xml">
+  
+  
+    <link rel="icon" href="/favicon.png">
+  
+  <link rel="stylesheet" href="/css/style.css" type="text/css">
+  
+
+</head>
+<body>
+  <div id="container">
+    <div id="wrap">
+      <header id="header">
+  <div id="banner"></div>
+  <div id="header-outer" class="outer">
+    <div id="header-title" class="inner">
+      <h1 id="logo-wrap">
+        <a href="/" id="logo">SatanWoo</a>
+      </h1>
+      
+    </div>
+    <div id="header-inner" class="inner">
+      <nav id="main-nav">
+        <a id="main-nav-toggle" class="nav-icon"></a>
+        
+          <a class="main-nav-link" href="/">Home</a>
+        
+          <a class="main-nav-link" href="/archives">Archives</a>
+        
+          <a class="main-nav-link" href="/sitemap.xml">map</a>
+        
+      </nav>
+      <nav id="sub-nav">
+        
+          <a id="nav-rss-link" class="nav-icon" href="/atom.xml" title="RSS Feed"></a>
+        
+        <a id="nav-search-btn" class="nav-icon" title="Search"></a>
+      </nav>
+      <div id="search-form-wrap">
+        <form action="//google.com/search" method="get" accept-charset="UTF-8" class="search-form"><input type="search" name="q" results="0" class="search-form-input" placeholder="Search"><button type="submit" class="search-form-submit">&#xF002;</button><input type="hidden" name="sitesearch" value="http://satanwoo.github.io"></form>
+      </div>
+    </div>
+  </div>
+</header>
+      <div class="outer">
+        <section id="main"><article id="post-RevisitAutorelease" class="article article-type-post" itemscope itemprop="blogPost">
+  <div class="article-meta">
+    <a href="/2019/07/02/RevisitAutorelease/" class="article-date">
+  <time datetime="2019-07-02T13:53:12.000Z" itemprop="datePublished">2019-07-02</time>
+</a>
+    
+  </div>
+  <div class="article-inner">
+    
+    
+      <header class="article-header">
+        
+  
+    <h1 class="article-title" itemprop="name">
+      Revisit iOS Autorelease 之不经意间可能被影响的优化
+    </h1>
+  
+
+      </header>
+    
+    <div class="article-entry" itemprop="articleBody">
+      
+        <blockquote>
+<p>本文的硬核在第二段</p>
+</blockquote>
+<p>之前在做某项目的时候，自建了基于<code>NSThread</code>的私有线程池，在线程池分配了固定个数的常驻工作线程，在工作线程里面运行相关任务；这个方案取代了原先直接无脑使用<code>GCD</code>的方式，在各方面效果都还不错。</p>
+<p>但是在一次偶然的情况下，通过<code>Memory Graph</code>发现很多<strong>任务</strong>对象却在<strong>本该早就销毁的时候</strong>仍然存活着。持有其的对象是<code>autorelease content</code>，如下图所示：</p>
+<p><img src="https://github.com/SatanWoo/BeeHive/blob/master/autorelease_r1.png?raw=true" alt="屏幕快照 2019-06-20 下午8.22.39"></p>
+<blockquote>
+<p>我把数据对象类型隐藏了，公司数据还是要保密。</p>
+</blockquote>
+<p>那这个东西究竟是个啥呢？</p>
+<blockquote>
+<p>由于其是<strong>黄色图标</strong>，基本上是一个容器类型或其子类。</p>
+</blockquote>
+<p>这个类型<code>@autoreleasepool content</code>先不管，先从右边的堆栈来看：</p>
+<ul>
+<li>某个方法调用了<code>autorelease</code>相关的API</li>
+<li>由于我是在子线程触发的，<b style="color:red">没有显示创建的<code>autoreleasepool</code>。因此需要调用<code>autoreleaseNoPage</code></b></li>
+</ul>
+<p>而<code>autoreleaseNoPage</code>其实本质上就是在当前线程没有<code>autoreleasePage</code>的时候，创建一个。然后通过<code>Thread Local Storage</code>存入线程相关上下文中。</p>
+<pre><code><span class="keyword">static</span> __attribute__((noinline))
+    <span class="keyword">id</span> *autoreleaseNoPage(<span class="keyword">id</span> obj)
+    {
+        <span class="comment">// "No page" could mean no pool has been pushed</span>
+        <span class="comment">// or an empty placeholder pool has been pushed and has no contents yet</span>
+        assert(!hotPage());
+
+        <span class="keyword">bool</span> pushExtraBoundary = <span class="literal">false</span>;
+        <span class="keyword">if</span> (haveEmptyPoolPlaceholder()) {
+            <span class="comment">// We are pushing a second pool over the empty placeholder pool</span>
+            <span class="comment">// or pushing the first object into the empty placeholder pool.</span>
+            <span class="comment">// Before doing that, push a pool boundary on behalf of the pool </span>
+            <span class="comment">// that is currently represented by the empty placeholder.</span>
+            pushExtraBoundary = <span class="literal">true</span>;
+        }
+        <span class="keyword">else</span> <span class="keyword">if</span> (obj != POOL_BOUNDARY  &amp;&amp;  DebugMissingPools) {
+            <span class="comment">// We are pushing an object with no pool in place, </span>
+            <span class="comment">// and no-pool debugging was requested by environment.</span>
+            _objc_inform(<span class="string">"MISSING POOLS: (%p) Object %p of class %s "</span>
+                         <span class="string">"autoreleased with no pool in place - "</span>
+                         <span class="string">"just leaking - break on "</span>
+                         <span class="string">"objc_autoreleaseNoPool() to debug"</span>, 
+                         pthread_self(), (<span class="keyword">void</span>*)obj, object_getClassName(obj));
+            objc_autoreleaseNoPool(obj);
+            <span class="keyword">return</span> <span class="literal">nil</span>;
+        }
+        <span class="keyword">else</span> <span class="keyword">if</span> (obj == POOL_BOUNDARY  &amp;&amp;  !DebugPoolAllocation) {
+            <span class="comment">// We are pushing a pool with no pool in place,</span>
+            <span class="comment">// and alloc-per-pool debugging was not requested.</span>
+            <span class="comment">// Install and return the empty pool placeholder.</span>
+            <span class="keyword">return</span> setEmptyPoolPlaceholder();
+        }
+
+        <span class="comment">// We are pushing an object or a non-placeholder'd pool.</span>
+
+        <span class="comment">// Install the first page.</span>
+        AutoreleasePoolPage *page = new AutoreleasePoolPage(<span class="literal">nil</span>);
+        setHotPage(page);
+
+        <span class="comment">// Push a boundary on behalf of the previously-placeholder'd pool.</span>
+        <span class="keyword">if</span> (pushExtraBoundary) {
+            page-&gt;add(POOL_BOUNDARY);
+        }
+
+        <span class="comment">// Push the requested object or pool.</span>
+        <span class="keyword">return</span> page-&gt;add(obj);
+    }
+</code></pre><p>同时由于是第一个<code>page</code>，连父子关系都不用串联，非常简单。</p>
+<p><b style="color:red">但是，其他线程有一点相对主线程比较坑的就是子线程默认没有<code>runloop</code>，导致在释放被<code>autoreleasepool</code>的对象的时候产生着问题。</b></p>
+<p>那么子线程的<code>autoreleasepool</code>在没有<code>runloop</code>的情况下何时释放呢？</p>
+<ul>
+<li>线程退出的时候</li>
+<li>局部<code>autoreleasepool drain</code>的时候</li>
+</ul>
+<p>第二点比较好理解，就是常规的<code>page push</code>以及对应的<code>page pop</code>。</p>
+<p>那么线程退出释放是如何确定的呢？我们在线程退出的时候下个断点：</p>
+<pre><code>static <span class="literal">void</span> tls_dealloc(<span class="literal">void</span> *p) 
+{
+    <span class="keyword">if</span> (p == (<span class="literal">void</span>*)EMPTY_POOL_PLACEHOLDER) {
+        <span class="comment">// No objects or pool pages to clean up here.</span>
+        <span class="keyword">return</span>;
+    }
+
+    <span class="comment">// reinstate TLS value while we work</span>
+    setHotPage((AutoreleasePoolPage *)p);
+
+    <span class="keyword">if</span> (AutoreleasePoolPage *page = coldPage()) {
+        <span class="keyword">if</span> (<span class="subst">!</span>page<span class="subst">-&gt;</span>empty()) pop(page<span class="subst">-&gt;</span>begin());  <span class="comment">// pop all of the pools</span>
+        <span class="keyword">if</span> (DebugMissingPools <span class="subst">||</span> DebugPoolAllocation) {
+            <span class="comment">// pop() killed the pages already</span>
+        } <span class="keyword">else</span> {
+            page<span class="subst">-&gt;</span>kill();  <span class="comment">// free all of the pages</span>
+        }
+    }
+
+    <span class="comment">// clear TLS value so TLS destruction doesn't loop</span>
+    setHotPage(nil);
+}
+</code></pre><p>而在<code>runtime</code>初始化的过程中，会调用<code>AutoReleasePoolPage::init</code>方法注册<code>tls_dealloc</code>：</p>
+<pre><code><span class="function"><span class="keyword">static</span> <span class="keyword">void</span> <span class="title">init</span><span class="params">()</span>
+</span>{
+    <span class="keyword">int</span> r __unused = pthread_key_init_np(AutoreleasePoolPage::key, 
+                                         AutoreleasePoolPage::tls_dealloc);
+    assert(r == <span class="number">0</span>);
+}
+</code></pre><p>结合这两段代码，我们大致可以猜测下<code>phtread_key_init_np</code>是将<code>tls_dealloc</code>注册给某个回调使用。那具体是干嘛的？</p>
+<p>实际上<code>phtread_key_init_np</code>时给<code>thread</code>注册了线程销毁时的自定义析构函数，这里我们可以一起来看看<code>darwin-apple</code>的<code>libpthread</code>代码，这里我直接简化掉流程，输出大致的过程：</p>
+<p><code>_pthread_exit</code> 在线程销毁时调用 -&gt; <code>_pthread_tsd_cleanup</code> -&gt; <code>_pthread_tsd_cleanup_new</code> -&gt; <code>_pthread_tsd_cleanup_key</code>。</p>
+<p>在最终的函数里，会遍历所有的自定义销毁函数，逐个触发：</p>
+<pre><code><span class="keyword">static</span> <span class="keyword">void</span>
+_pthread_tsd_cleanup_key(<span class="keyword">pthread_t</span> self, <span class="keyword">pthread_key_t</span> key)
+{
+    <span class="keyword">void</span> (*destructor)(<span class="keyword">void</span> *);
+    <span class="keyword">if</span> (_pthread_key_get_destructor(key, &amp;destructor)) {
+        <span class="keyword">void</span> **ptr = &amp;self-&gt;tsd[key];
+        <span class="keyword">void</span> *value = *ptr;
+        <span class="keyword">if</span> (value) {
+            *ptr = <span class="literal">NULL</span>;
+            <span class="keyword">if</span> (destructor) {
+                destructor(value);
+            }
+        }
+    }
+}
+</code></pre><p><b style="color:red">因此，对于我这样设计了常驻线程的“不死线程”来说，无法指望线程销毁时候的释放，必须自己引入<code>autoreleasepool</code>来修正内存没释放干净！</b></p>
+<h3 id="到底哪些东西会触发autorelease持有?">到底哪些东西会触发<code>autorelease</code>持有?</h3><p><b style="color:red">本文的重点来了。</b></p>
+<p>其实网上关于<code>autoreleasepage</code>相关的文章分析的很多了，<b style="color:red">我这篇文章的主要目的还是想思考下，看看平常无奇的代码，究竟会在什么情况下触发<code>autorelease</code>及其相关行为。</b>如果说所有的东西都是直接了当的引用计数相加减如<code>objc_storeStrong / objc_storeStrong(nil)</code>，何须多此一举引入<code>autorelease</code>呢？</p>
+<p>网上许多的文章的结论基本上都是：</p>
+<blockquote>
+<p>编译器为判断方法名是否是以<code>alloc/new/copy/mutableCopy</code>开头，如果不是，就自动将返回的对象注册到池子中。<br>编译器会在<code>objc_autoreleaseReturnValue</code>和<code>objc_retainAutoreleasedReturnValue</code>进行基于TLS的判断优化，本质上也不会走入autorelease的环节。</p>
+</blockquote>
+<p>为了验证这些结论，我首先重温了下《iOS 内存高级编程》一书，它所阐述的都是内存管理的思想，以<code>alloc/mew/copy/mutableCopy</code>驼峰命名开头的方法，方法的对象由调用者自己持有；而其他方法是<strong>取得非自己生成并持有的对象</strong></p>
+<blockquote>
+<p>卧槽，真拗口。</p>
+</blockquote>
+<p>写个Demo验证下，</p>
+<pre><code>@interface <span class="keyword">Model</span> : NSObject
+- (<span class="keyword">Model</span> *)haha;
+@end
+
+- (<span class="keyword">Model</span> *)haha
+{
+    // 这里是为了避免调用系统库的对象可能在存在某些MRC的情况导致无法优化。
+    return [[<span class="keyword">Model</span> alloc] init];
+}
+
+// 调用
+<span class="keyword">Model</span> *<span class="keyword">model</span> = [[<span class="keyword">Model</span> alloc] init];
+<span class="keyword">Model</span> *m2 = [<span class="keyword">model</span> haha];
+</code></pre><p><strong>万变不如汇编</strong>，让我们先来看第一条调用的汇编代码。</p>
+<pre><code><span class="number">0x100046768</span> &lt;+<span class="number">96</span>&gt;:  bl     <span class="number">0x100046b80</span>               ; symbol stub <span class="keyword">for</span>: objc_msgSend
+<span class="number">0x10004676c</span> &lt;+<span class="number">100</span>&gt;: adrp   x8, <span class="number">2</span>
+<span class="number">0x100046770</span> &lt;+<span class="number">104</span>&gt;: add    x8, x8, <span class="preprocessor">#<span class="number">0xd38</span>            ; =<span class="number">0xd38</span> </span>
+<span class="number">0x100046774</span> &lt;+<span class="number">108</span>&gt;: ldr    x1, [x8]
+<span class="number">0x100046778</span> &lt;+<span class="number">112</span>&gt;: bl     <span class="number">0x100046b80</span>               ; symbol stub <span class="keyword">for</span>: objc_msgSend
+<span class="number">0x10004677c</span> &lt;+<span class="number">116</span>&gt;: mov    x8, <span class="preprocessor">#<span class="number">0x0</span></span>
+<span class="number">0x100046780</span> &lt;+<span class="number">120</span>&gt;: add    x9, sp, <span class="preprocessor">#<span class="number">0x8</span>              ; =<span class="number">0x8</span> </span>
+<span class="number">0x100046784</span> &lt;+<span class="number">124</span>&gt;: str    x0, [sp, <span class="preprocessor">#<span class="number">0x8</span>]</span>
+<span class="number">0x100046788</span> &lt;+<span class="number">128</span>&gt;: mov    x0, x9
+<span class="number">0x10004678c</span> &lt;+<span class="number">132</span>&gt;: mov    x1, x8
+<span class="number">0x100046790</span> &lt;+<span class="number">136</span>&gt;: bl     <span class="number">0x100046bb0</span>               ; symbol stub <span class="keyword">for</span>: objc_storeStrong
+</code></pre><p>很明显的，并没有涉及到任何的和<code>retainAutorelease/autorelease</code>相关的调用。</p>
+<blockquote>
+<p>需要注意：在release优化下这里的<code>objc_storeStrong(nil)</code>会直接优化成<code>objc_release</code></p>
+</blockquote>
+<p>而对于第二条调用，汇编如下：</p>
+<pre><code><span class="number">0x10006275c</span> &lt;+<span class="number">140</span>&gt;: bl     <span class="number">0x100062b80</span>               ; symbol stub <span class="keyword">for</span>: objc_msgSend
+<span class="number">0x100062760</span> &lt;+<span class="number">144</span>&gt;: mov    x29, x29
+<span class="number">0x100062764</span> &lt;+<span class="number">148</span>&gt;: bl     <span class="number">0x100062ba4</span>               ; symbol stub <span class="keyword">for</span>: objc_retainAutoreleasedReturnValue
+</code></pre><p>关键字出现了，当然具体会不会进入autorelease的环节，还需要看优化的效果，我们进入<code>haha</code>函数看一看：</p>
+<pre><code> <span class="number">0x100096b28</span> &lt;+<span class="number">36</span>&gt;: bl     <span class="number">0x100096b80</span>               ; symbol stub <span class="keyword">for</span>: objc_msgSend
+<span class="number">0x100096b2c</span> &lt;+<span class="number">40</span>&gt;: adrp   x1, <span class="number">2</span>
+<span class="number">0x100096b30</span> &lt;+<span class="number">44</span>&gt;: ldr    x1, [x1, <span class="preprocessor">#<span class="number">0xd38</span>]</span>
+<span class="number">0x100096b34</span> &lt;+<span class="number">48</span>&gt;: bl     <span class="number">0x100096b80</span>               ; symbol stub <span class="keyword">for</span>: objc_msgSend
+<span class="number">0x100096b38</span> &lt;+<span class="number">52</span>&gt;: ldp    x29, x30, [sp, <span class="preprocessor">#<span class="number">0x10</span>]</span>
+<span class="number">0x100096b3c</span> &lt;+<span class="number">56</span>&gt;: add    sp, sp, <span class="preprocessor">#<span class="number">0x20</span>             ; =<span class="number">0x20</span> </span>
+<span class="number">0x100096b40</span> &lt;+<span class="number">60</span>&gt;: b      <span class="number">0x100096b74</span>               ; symbol stub <span class="keyword">for</span>: objc_autoreleaseReturnValue
+</code></pre><p>也和我们预测的一样，确实有着<code>objc_autoreleaseReturnValue</code>，那么究竟会不会有基于TLS的优化行为呢？对<code>objc_autoreleaseReturnValue</code>下个符号断点：</p>
+<pre><code>libobjc.A.dylib`objc_autoreleaseReturnValue:
+-&gt;  <span class="number">0x18563e528</span> &lt;+<span class="number">0</span>&gt;:  ldr    w8, [x30]
+    <span class="number">0x18563e52c</span> &lt;+<span class="number">4</span>&gt;:  mov    w9, <span class="preprocessor">#-<span class="number">0x55e30000</span></span>
+    <span class="number">0x18563e530</span> &lt;+<span class="number">8</span>&gt;:  movk   w9, <span class="preprocessor">#<span class="number">0x3fd</span></span>
+    <span class="number">0x18563e534</span> &lt;+<span class="number">12</span>&gt;: cmp    w8, w9
+    <span class="number">0x18563e538</span> &lt;+<span class="number">16</span>&gt;: b.ne   <span class="number">0x18563e550</span>               ; &lt;+<span class="number">40</span>&gt;
+    <span class="number">0x18563e53c</span> &lt;+<span class="number">20</span>&gt;: mrs    x8, TPIDRRO_EL0
+    <span class="number">0x18563e540</span> &lt;+<span class="number">24</span>&gt;: and    x8, x8, <span class="preprocessor">#<span class="number">0xfffffffffffffff8</span></span>
+    <span class="number">0x18563e544</span> &lt;+<span class="number">28</span>&gt;: orr    w9, wzr, <span class="preprocessor">#<span class="number">0x1</span></span>
+    <span class="number">0x18563e548</span> &lt;+<span class="number">32</span>&gt;: str    x9, [x8, <span class="preprocessor">#<span class="number">0x160</span>]</span>
+    <span class="number">0x18563e54c</span> &lt;+<span class="number">36</span>&gt;: ret    
+    <span class="number">0x18563e550</span> &lt;+<span class="number">40</span>&gt;: b      <span class="number">0x18563c130</span>               ; objc_autorelease
+</code></pre><p>这里，偏移 +16的地方的<code>b.ne</code>就是对优化的判断，判断的条件是<code>w8</code>和<code>w9</code>的相等与否，不等就走传统的<code>objc_autorelease</code>。</p>
+<p>这里经过断点我们发现确实走了优化。</p>
+<p><b style="color:red">那按照这个思路，难道真的在如今的ARC下，没有东西要进<code>autoreleasepool</code>了？那为什么还会在<code>MemoryGraph</code>中出现大量<code>autorelease content</code>呢？</b></p>
+<p><b style="color:red">答案可能出乎你的意料，<code>for</code>会影响这个<code>autorelease</code>优化逻辑。</b></p>
+<p>我们构建一个两个线程的场景，<code>Model</code>类型如上述文章段落不变。构建一个符合类型<code>Container</code>，包含一个<code>NSMutableArray</code>的数组：</p>
+<pre><code><span class="class"><span class="keyword">@interface</span> <span class="title">Container</span>()</span>
+<span class="keyword">@property</span> (<span class="keyword">nonatomic</span>, <span class="keyword">strong</span>) <span class="built_in">NSMutableArray</span> *models;
+<span class="keyword">@end</span>
+
+<span class="class"><span class="keyword">@implementation</span> <span class="title">Container</span></span>
+
+- (instancetype)init
+{
+    <span class="keyword">self</span> = [<span class="keyword">super</span> init];
+    <span class="keyword">if</span> (<span class="keyword">self</span>) {
+        _models = @[]<span class="variable">.mutableCopy</span>;
+
+    }
+    <span class="keyword">return</span> <span class="keyword">self</span>;
+}
+
+- (<span class="keyword">void</span>)addModel:(Model *)model
+{
+    <span class="keyword">if</span> (!model) <span class="keyword">return</span>;
+    [<span class="keyword">self</span><span class="variable">.models</span> addObject:model];
+}
+
+- (Model *)takeModel
+{
+    <span class="comment">//NSMutableArray *toOperateArray = self.models;</span>
+    <span class="keyword">for</span> (Model *model <span class="keyword">in</span> <span class="keyword">self</span><span class="variable">.models</span>) {
+    }
+
+    Model *model = [<span class="keyword">self</span><span class="variable">.models</span> firstObject];
+    [<span class="keyword">self</span><span class="variable">.models</span> removeObject:model];
+
+    <span class="keyword">return</span> model;
+}
+</code></pre><p>为了简化场景，我先在<code>ViewController viewDidLoad</code>塞入几个<code>Model</code>到<code>Container</code>，然后再启动第二个线程从<code>Container</code>中取<code>Model</code>。</p>
+<p>测试场景如下：</p>
+<pre><code>- (<span class="keyword">void</span>)viewDidLoad {
+    [<span class="keyword">super</span> viewDidLoad];
+
+    <span class="keyword">self</span><span class="variable">.container</span> = [[Container alloc] init];
+
+    <span class="keyword">for</span> (<span class="keyword">int</span> i = <span class="number">0</span>; i &lt; <span class="number">10</span>; i++) {
+        [<span class="keyword">self</span><span class="variable">.container</span> addModel:[[Model alloc] initWithCount:i]];
+    }
+
+    <span class="keyword">self</span><span class="variable">.thread</span> = [[<span class="built_in">NSThread</span> alloc] initWithTarget:<span class="keyword">self</span> selector:<span class="keyword">@selector</span>(loop) object:<span class="literal">nil</span>];
+    [<span class="keyword">self</span><span class="variable">.thread</span> setName:<span class="string">@"com.walle.test"</span>];
+    [<span class="keyword">self</span><span class="variable">.thread</span> start];
+}
+
+- (<span class="keyword">void</span>)loop
+{
+    <span class="keyword">while</span> (<span class="literal">true</span>) {
+        Model *m = [<span class="keyword">self</span><span class="variable">.container</span> takeModel];        
+        [m increment];
+    }
+}
+</code></pre><p>如果你执行我这段代码，你会发现的确如文章一开头所示，<code>MemoryGraph</code>中存在大量被<code>@autoreleasepool content</code>持有的<code>Model</code>。</p>
+<p>那罪魁祸首是什么呢？<b style="color:red">从表象上看</b>是这段并不起眼的代码：</p>
+<pre><code><span class="keyword">for</span> (<span class="constant">Model </span>*model <span class="keyword">in</span> <span class="keyword">self</span>.models) {
+}
+</code></pre><p>可具体原因是为啥呢？还是从汇编上来摸索下：</p>
+<p>首先先回到没有汇编的场景上，调用的函数是<code>-[ViewController loop]</code>，被调用者是<code>-[Container takeModel:]</code></p>
+<p>如果要进行优化，按照<code>objc_autoreleaseReturnValue：</code>的逻辑，在<code>loop</code>调用<code>takeModel:</code>的地方必须有对应的暗示：这个暗示在<code>arm64</code>中如下代码所示：</p>
+<pre><code><span class="function"><span class="keyword">static</span> ALWAYS_INLINE <span class="keyword">bool</span> 
+<span class="title">callerAcceptsOptimizedReturn</span><span class="params">(<span class="keyword">const</span> <span class="keyword">void</span> *ra)</span>
+</span>{
+    <span class="comment">// fd 03 1d aa    mov fp, fp</span>
+    <span class="comment">// arm64 instructions are well-aligned</span>
+    <span class="keyword">if</span> (*(<span class="keyword">uint32_t</span> *)ra == <span class="number">0xaa1d03fd</span>) {
+        <span class="keyword">return</span> <span class="literal">true</span>;
+    }
+    <span class="keyword">return</span> <span class="literal">false</span>;
+}
+</code></pre><p>简单来说，要有<code>mov fp, fp</code>，而<code>fp</code>就是<code>x29</code>寄存器。那我们来看看<code>loop</code>的对应汇编：</p>
+<p><img src="https://github.com/SatanWoo/BeeHive/blob/master/autorelease_r2.png?raw=true" alt="屏幕快照 2019-07-01 下午1.15.11"></p>
+<p><strong>哈哈，0x62b0</strong>的地方果然是<code>mov x29, x29</code>。</p>
+<p>如果你对静态分析的结果不熟悉，可以动态进入汇编。在<code>obc_autoreleaseReturnValue</code>下符号断点，得到</p>
+<p><img src="https://github.com/SatanWoo/BeeHive/blob/master/autorelease_r3.png?raw=true" alt="屏幕快照 2019-07-01 下午1.16.57"></p>
+<p>如果你输出<code>x30</code>寄存器的值（注意不是把寄存器的值当地址再取值）然后再减去所在二进制的基地址，会发现<strong>偏移正正好好也是<code>0x62b0</code></strong></p>
+<p>而如果你加上之前提到的<code>for</code>循环代码，再断到<code>obc_autoreleaseReturnValue</code>去查看<code>x30</code>的值，计算偏移量会得到：<code>0x0000000000005e98</code>。</p>
+<p>而对应到二进制里是：</p>
+<p><img src="https://github.com/SatanWoo/BeeHive/blob/master/autorelease_r4.png?raw=true" alt="屏幕快照 2019-07-01 下午1.46.10"></p>
+<p>看到没，这里调用<code>objc_autoreleaseReturnValue</code>走的是<code>bl</code>，也就是会修改<code>LR</code>寄存器，而<code>LR</code>寄存器的值就是调用后的返回地址<code>5e98</code>。而<code>LR</code>寄存器本身就是<code>x30</code>，导致<code>autorelease</code>的优化失效。</p>
+<p><b style="color:red">至此，我们终于发现了为什么我们的数据会被所谓的<code>@autoreleasepool content</code>持有。</b></p>
+<h3 id="后记">后记</h3><p>虽然正如网上很多文章所述，子线程确实会对<code>autoreleasepool</code>进行自动的管理避免内存泄漏。但是，由于诸多场景导致的释放时机变更，会产生诸多的<b style="color:red">内存不释放（并非是内存泄漏，<code>Leaks</code>是查不出来的）</b>，也会对<code>App</code>的稳定性造成巨大的影响。</p>
+<p><b style="color:red">更重要的是，基于这种TLS的优化很有可能被我们不知情下编写的代码所改变，产生奇怪的问题，因此要特别注意。</b></p>
+<p>下文我会从<strong>编译以及代码生成的层面</strong>来探讨为什么会产生这种不同的汇编代码。</p>
+
+      
+    </div>
+    <footer class="article-footer">
+      <a data-url="http://satanwoo.github.io/2019/07/02/RevisitAutorelease/" data-id="cjxlvndsj0000bfi1htjn6b2o" class="article-share-link">Share</a>
+      
+        <a href="http://satanwoo.github.io/2019/07/02/RevisitAutorelease/#disqus_thread" class="article-comment-link">Comments</a>
+      
+      
+  <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
+
+    </footer>
+  </div>
+  
+    
+<nav id="article-nav">
+  
+  
+    <a href="/2019/01/26/RAII/" id="article-nav-older" class="article-nav-link-wrap">
+      <strong class="article-nav-caption">Older</strong>
+      <div class="article-nav-title">基于智能指针和RAII的对象内存管理设计</div>
+    </a>
+  
+</nav>
+
+  
+</article>
+
+<div id="disqus_thread"></div>
+<script>
+
+/**
+*  RECOMMENDED CONFIGURATION VARIABLES: EDIT AND UNCOMMENT THE SECTION BELOW TO INSERT DYNAMIC VALUES FROM YOUR PLATFORM OR CMS.
+*  LEARN WHY DEFINING THESE VARIABLES IS IMPORTANT: https://disqus.com/admin/universalcode/#configuration-variables*/
+/*
+var disqus_config = function () {
+this.page.url = PAGE_URL;  // Replace PAGE_URL with your page's canonical URL variable
+this.page.identifier = PAGE_IDENTIFIER; // Replace PAGE_IDENTIFIER with your page's unique identifier variable
+};
+*/
+(function() { // DON'T EDIT BELOW THIS LINE
+var d = document, s = d.createElement('script');
+s.src = 'https://satanwoo-2.disqus.com/embed.js';
+s.setAttribute('data-timestamp', +new Date());
+(d.head || d.body).appendChild(s);
+})();
+</script>
+<noscript>Please enable JavaScript to view the <a href="https://disqus.com/?ref_noscript">comments powered by Disqus.</a></noscript>
+                                
+  <section id="comments">
+    <div id="disqus_thread">
+      <noscript>Please enable JavaScript to view the <a href="//disqus.com/?ref_noscript">comments powered by Disqus.</a></noscript>
+    </div>
+  </section>
+</section>
+        
+          <aside id="sidebar">
+  
+    
+  
+    
+  <div class="widget-wrap">
+    <h3 class="widget-title">Tags</h3>
+    <div class="widget">
+      <ul class="tag-list"><li class="tag-list-item"><a class="tag-list-link" href="/tags/Android/">Android</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/C/">C</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/C/">C++</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Growth/">Growth</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/JavaScript/">JavaScript</a><span class="tag-list-count">3</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Machine-Learning/">Machine Learning</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Math/">Math</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Performance/">Performance</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/R/">R</a><span class="tag-list-count">2</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Reverse-Engineering/">Reverse Engineering</a><span class="tag-list-count">6</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Swift/">Swift</a><span class="tag-list-count">6</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/XNU/">XNU</a><span class="tag-list-count">2</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/c/">c++</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/iOS/">iOS</a><span class="tag-list-count">40</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/shell/">shell</a><span class="tag-list-count">1</span></li></ul>
+    </div>
+  </div>
+
+  
+    
+  <div class="widget-wrap">
+    <h3 class="widget-title">Tag Cloud</h3>
+    <div class="widget tagcloud">
+      <a href="/tags/Android/" style="font-size: 10px;">Android</a> <a href="/tags/C/" style="font-size: 10px;">C</a> <a href="/tags/C/" style="font-size: 10px;">C++</a> <a href="/tags/Growth/" style="font-size: 10px;">Growth</a> <a href="/tags/JavaScript/" style="font-size: 15px;">JavaScript</a> <a href="/tags/Machine-Learning/" style="font-size: 10px;">Machine Learning</a> <a href="/tags/Math/" style="font-size: 10px;">Math</a> <a href="/tags/Performance/" style="font-size: 10px;">Performance</a> <a href="/tags/R/" style="font-size: 12.5px;">R</a> <a href="/tags/Reverse-Engineering/" style="font-size: 17.5px;">Reverse Engineering</a> <a href="/tags/Swift/" style="font-size: 17.5px;">Swift</a> <a href="/tags/XNU/" style="font-size: 12.5px;">XNU</a> <a href="/tags/c/" style="font-size: 10px;">c++</a> <a href="/tags/iOS/" style="font-size: 20px;">iOS</a> <a href="/tags/shell/" style="font-size: 10px;">shell</a>
+    </div>
+  </div>
+
+  
+    
+  <div class="widget-wrap">
+    <h3 class="widget-title">Archives</h3>
+    <div class="widget">
+      <ul class="archive-list"><li class="archive-list-item"><a class="archive-list-link" href="/archives/2019/07/">July 2019</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2019/01/">January 2019</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2018/12/">December 2018</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2018/10/">October 2018</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2018/05/">May 2018</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2018/04/">April 2018</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2018/02/">February 2018</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2018/01/">January 2018</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/11/">November 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/10/">October 2017</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/09/">September 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/08/">August 2017</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/07/">July 2017</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/06/">June 2017</a><span class="archive-list-count">3</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/04/">April 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/01/">January 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/10/">October 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/09/">September 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/07/">July 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/05/">May 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/04/">April 2016</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/03/">March 2016</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/02/">February 2016</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/12/">December 2015</a><span class="archive-list-count">6</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/11/">November 2015</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/10/">October 2015</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/09/">September 2015</a><span class="archive-list-count">4</span></li></ul>
+    </div>
+  </div>
+
+  
+    
+  <div class="widget-wrap">
+    <h3 class="widget-title">Recents</h3>
+    <div class="widget">
+      <ul>
+        
+          <li>
+            <a href="/2019/07/02/RevisitAutorelease/">Revisit iOS Autorelease 之不经意间可能被影响的优化</a>
+          </li>
+        
+          <li>
+            <a href="/2019/01/26/RAII/">基于智能指针和RAII的对象内存管理设计</a>
+          </li>
+        
+          <li>
+            <a href="/2019/01/26/LD-2/">LD-2</a>
+          </li>
+        
+          <li>
+            <a href="/2019/01/26/shared-ptr/">从C++ std::shared_ptr 原理来看看栈溢出的危害</a>
+          </li>
+        
+          <li>
+            <a href="/2019/01/01/Synchronized/">抛开性能，谈谈不该用@Synchronized的原因</a>
+          </li>
+        
+      </ul>
+    </div>
+  </div>
+
+  
+</aside>
+        
+      </div>
+      <footer id="footer">
+  
+  <div class="outer">
+    <div id="footer-info" class="inner">
+      &copy; 2019 SatanWoo<br>
+      Powered by <a href="http://hexo.io/" target="_blank">Hexo</a>
+    </div>
+  </div>
+</footer>
+    </div>
+    <nav id="mobile-nav">
+  
+    <a href="/" class="mobile-nav-link">Home</a>
+  
+    <a href="/archives" class="mobile-nav-link">Archives</a>
+  
+    <a href="/sitemap.xml" class="mobile-nav-link">map</a>
+  
+</nav>
+    
+<script>
+  var disqus_shortname = 'satanwoo-2';
+  
+  var disqus_url = 'http://satanwoo.github.io/2019/07/02/RevisitAutorelease/';
+  
+  (function(){
+    var dsq = document.createElement('script');
+    dsq.type = 'text/javascript';
+    dsq.async = true;
+    dsq.src = '//' + disqus_shortname + '.disqus.com/embed.js';
+    (document.getElementsByTagName('head')[0] || document.getElementsByTagName('body')[0]).appendChild(dsq);
+  })();
+</script>
+
+
+
+  <link rel="stylesheet" href="/fancybox/jquery.fancybox.css" type="text/css">
+  <script src="/fancybox/jquery.fancybox.pack.js" type="text/javascript"></script>
+
+
+<script src="/js/script.js" type="text/javascript"></script>
+
+  </div>
+</body>
+</html>

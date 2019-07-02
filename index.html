@@ -62,6 +62,347 @@
       <div class="outer">
         <section id="main">
   
+    <article id="post-RevisitAutorelease" class="article article-type-post" itemscope itemprop="blogPost">
+  <div class="article-meta">
+    <a href="/2019/07/02/RevisitAutorelease/" class="article-date">
+  <time datetime="2019-07-02T13:53:12.000Z" itemprop="datePublished">2019-07-02</time>
+</a>
+    
+  </div>
+  <div class="article-inner">
+    
+    
+      <header class="article-header">
+        
+  
+    <h1 itemprop="name">
+      <a class="article-title" href="/2019/07/02/RevisitAutorelease/">Revisit iOS Autorelease 之不经意间可能被影响的优化</a>
+    </h1>
+  
+
+      </header>
+    
+    <div class="article-entry" itemprop="articleBody">
+      
+        <blockquote>
+<p>本文的硬核在第二段</p>
+</blockquote>
+<p>之前在做某项目的时候，自建了基于<code>NSThread</code>的私有线程池，在线程池分配了固定个数的常驻工作线程，在工作线程里面运行相关任务；这个方案取代了原先直接无脑使用<code>GCD</code>的方式，在各方面效果都还不错。</p>
+<p>但是在一次偶然的情况下，通过<code>Memory Graph</code>发现很多<strong>任务</strong>对象却在<strong>本该早就销毁的时候</strong>仍然存活着。持有其的对象是<code>autorelease content</code>，如下图所示：</p>
+<p><img src="https://github.com/SatanWoo/BeeHive/blob/master/autorelease_r1.png?raw=true" alt="屏幕快照 2019-06-20 下午8.22.39"></p>
+<blockquote>
+<p>我把数据对象类型隐藏了，公司数据还是要保密。</p>
+</blockquote>
+<p>那这个东西究竟是个啥呢？</p>
+<blockquote>
+<p>由于其是<strong>黄色图标</strong>，基本上是一个容器类型或其子类。</p>
+</blockquote>
+<p>这个类型<code>@autoreleasepool content</code>先不管，先从右边的堆栈来看：</p>
+<ul>
+<li>某个方法调用了<code>autorelease</code>相关的API</li>
+<li>由于我是在子线程触发的，<b style="color:red">没有显示创建的<code>autoreleasepool</code>。因此需要调用<code>autoreleaseNoPage</code></b></li>
+</ul>
+<p>而<code>autoreleaseNoPage</code>其实本质上就是在当前线程没有<code>autoreleasePage</code>的时候，创建一个。然后通过<code>Thread Local Storage</code>存入线程相关上下文中。</p>
+<pre><code><span class="keyword">static</span> __attribute__((noinline))
+    <span class="keyword">id</span> *autoreleaseNoPage(<span class="keyword">id</span> obj)
+    {
+        <span class="comment">// "No page" could mean no pool has been pushed</span>
+        <span class="comment">// or an empty placeholder pool has been pushed and has no contents yet</span>
+        assert(!hotPage());
+
+        <span class="keyword">bool</span> pushExtraBoundary = <span class="literal">false</span>;
+        <span class="keyword">if</span> (haveEmptyPoolPlaceholder()) {
+            <span class="comment">// We are pushing a second pool over the empty placeholder pool</span>
+            <span class="comment">// or pushing the first object into the empty placeholder pool.</span>
+            <span class="comment">// Before doing that, push a pool boundary on behalf of the pool </span>
+            <span class="comment">// that is currently represented by the empty placeholder.</span>
+            pushExtraBoundary = <span class="literal">true</span>;
+        }
+        <span class="keyword">else</span> <span class="keyword">if</span> (obj != POOL_BOUNDARY  &amp;&amp;  DebugMissingPools) {
+            <span class="comment">// We are pushing an object with no pool in place, </span>
+            <span class="comment">// and no-pool debugging was requested by environment.</span>
+            _objc_inform(<span class="string">"MISSING POOLS: (%p) Object %p of class %s "</span>
+                         <span class="string">"autoreleased with no pool in place - "</span>
+                         <span class="string">"just leaking - break on "</span>
+                         <span class="string">"objc_autoreleaseNoPool() to debug"</span>, 
+                         pthread_self(), (<span class="keyword">void</span>*)obj, object_getClassName(obj));
+            objc_autoreleaseNoPool(obj);
+            <span class="keyword">return</span> <span class="literal">nil</span>;
+        }
+        <span class="keyword">else</span> <span class="keyword">if</span> (obj == POOL_BOUNDARY  &amp;&amp;  !DebugPoolAllocation) {
+            <span class="comment">// We are pushing a pool with no pool in place,</span>
+            <span class="comment">// and alloc-per-pool debugging was not requested.</span>
+            <span class="comment">// Install and return the empty pool placeholder.</span>
+            <span class="keyword">return</span> setEmptyPoolPlaceholder();
+        }
+
+        <span class="comment">// We are pushing an object or a non-placeholder'd pool.</span>
+
+        <span class="comment">// Install the first page.</span>
+        AutoreleasePoolPage *page = new AutoreleasePoolPage(<span class="literal">nil</span>);
+        setHotPage(page);
+
+        <span class="comment">// Push a boundary on behalf of the previously-placeholder'd pool.</span>
+        <span class="keyword">if</span> (pushExtraBoundary) {
+            page-&gt;add(POOL_BOUNDARY);
+        }
+
+        <span class="comment">// Push the requested object or pool.</span>
+        <span class="keyword">return</span> page-&gt;add(obj);
+    }
+</code></pre><p>同时由于是第一个<code>page</code>，连父子关系都不用串联，非常简单。</p>
+<p><b style="color:red">但是，其他线程有一点相对主线程比较坑的就是子线程默认没有<code>runloop</code>，导致在释放被<code>autoreleasepool</code>的对象的时候产生着问题。</b></p>
+<p>那么子线程的<code>autoreleasepool</code>在没有<code>runloop</code>的情况下何时释放呢？</p>
+<ul>
+<li>线程退出的时候</li>
+<li>局部<code>autoreleasepool drain</code>的时候</li>
+</ul>
+<p>第二点比较好理解，就是常规的<code>page push</code>以及对应的<code>page pop</code>。</p>
+<p>那么线程退出释放是如何确定的呢？我们在线程退出的时候下个断点：</p>
+<pre><code>static <span class="literal">void</span> tls_dealloc(<span class="literal">void</span> *p) 
+{
+    <span class="keyword">if</span> (p == (<span class="literal">void</span>*)EMPTY_POOL_PLACEHOLDER) {
+        <span class="comment">// No objects or pool pages to clean up here.</span>
+        <span class="keyword">return</span>;
+    }
+
+    <span class="comment">// reinstate TLS value while we work</span>
+    setHotPage((AutoreleasePoolPage *)p);
+
+    <span class="keyword">if</span> (AutoreleasePoolPage *page = coldPage()) {
+        <span class="keyword">if</span> (<span class="subst">!</span>page<span class="subst">-&gt;</span>empty()) pop(page<span class="subst">-&gt;</span>begin());  <span class="comment">// pop all of the pools</span>
+        <span class="keyword">if</span> (DebugMissingPools <span class="subst">||</span> DebugPoolAllocation) {
+            <span class="comment">// pop() killed the pages already</span>
+        } <span class="keyword">else</span> {
+            page<span class="subst">-&gt;</span>kill();  <span class="comment">// free all of the pages</span>
+        }
+    }
+
+    <span class="comment">// clear TLS value so TLS destruction doesn't loop</span>
+    setHotPage(nil);
+}
+</code></pre><p>而在<code>runtime</code>初始化的过程中，会调用<code>AutoReleasePoolPage::init</code>方法注册<code>tls_dealloc</code>：</p>
+<pre><code><span class="function"><span class="keyword">static</span> <span class="keyword">void</span> <span class="title">init</span><span class="params">()</span>
+</span>{
+    <span class="keyword">int</span> r __unused = pthread_key_init_np(AutoreleasePoolPage::key, 
+                                         AutoreleasePoolPage::tls_dealloc);
+    assert(r == <span class="number">0</span>);
+}
+</code></pre><p>结合这两段代码，我们大致可以猜测下<code>phtread_key_init_np</code>是将<code>tls_dealloc</code>注册给某个回调使用。那具体是干嘛的？</p>
+<p>实际上<code>phtread_key_init_np</code>时给<code>thread</code>注册了线程销毁时的自定义析构函数，这里我们可以一起来看看<code>darwin-apple</code>的<code>libpthread</code>代码，这里我直接简化掉流程，输出大致的过程：</p>
+<p><code>_pthread_exit</code> 在线程销毁时调用 -&gt; <code>_pthread_tsd_cleanup</code> -&gt; <code>_pthread_tsd_cleanup_new</code> -&gt; <code>_pthread_tsd_cleanup_key</code>。</p>
+<p>在最终的函数里，会遍历所有的自定义销毁函数，逐个触发：</p>
+<pre><code><span class="keyword">static</span> <span class="keyword">void</span>
+_pthread_tsd_cleanup_key(<span class="keyword">pthread_t</span> self, <span class="keyword">pthread_key_t</span> key)
+{
+    <span class="keyword">void</span> (*destructor)(<span class="keyword">void</span> *);
+    <span class="keyword">if</span> (_pthread_key_get_destructor(key, &amp;destructor)) {
+        <span class="keyword">void</span> **ptr = &amp;self-&gt;tsd[key];
+        <span class="keyword">void</span> *value = *ptr;
+        <span class="keyword">if</span> (value) {
+            *ptr = <span class="literal">NULL</span>;
+            <span class="keyword">if</span> (destructor) {
+                destructor(value);
+            }
+        }
+    }
+}
+</code></pre><p><b style="color:red">因此，对于我这样设计了常驻线程的“不死线程”来说，无法指望线程销毁时候的释放，必须自己引入<code>autoreleasepool</code>来修正内存没释放干净！</b></p>
+<h3 id="到底哪些东西会触发autorelease持有?">到底哪些东西会触发<code>autorelease</code>持有?</h3><p><b style="color:red">本文的重点来了。</b></p>
+<p>其实网上关于<code>autoreleasepage</code>相关的文章分析的很多了，<b style="color:red">我这篇文章的主要目的还是想思考下，看看平常无奇的代码，究竟会在什么情况下触发<code>autorelease</code>及其相关行为。</b>如果说所有的东西都是直接了当的引用计数相加减如<code>objc_storeStrong / objc_storeStrong(nil)</code>，何须多此一举引入<code>autorelease</code>呢？</p>
+<p>网上许多的文章的结论基本上都是：</p>
+<blockquote>
+<p>编译器为判断方法名是否是以<code>alloc/new/copy/mutableCopy</code>开头，如果不是，就自动将返回的对象注册到池子中。<br>编译器会在<code>objc_autoreleaseReturnValue</code>和<code>objc_retainAutoreleasedReturnValue</code>进行基于TLS的判断优化，本质上也不会走入autorelease的环节。</p>
+</blockquote>
+<p>为了验证这些结论，我首先重温了下《iOS 内存高级编程》一书，它所阐述的都是内存管理的思想，以<code>alloc/mew/copy/mutableCopy</code>驼峰命名开头的方法，方法的对象由调用者自己持有；而其他方法是<strong>取得非自己生成并持有的对象</strong></p>
+<blockquote>
+<p>卧槽，真拗口。</p>
+</blockquote>
+<p>写个Demo验证下，</p>
+<pre><code>@interface <span class="keyword">Model</span> : NSObject
+- (<span class="keyword">Model</span> *)haha;
+@end
+
+- (<span class="keyword">Model</span> *)haha
+{
+    // 这里是为了避免调用系统库的对象可能在存在某些MRC的情况导致无法优化。
+    return [[<span class="keyword">Model</span> alloc] init];
+}
+
+// 调用
+<span class="keyword">Model</span> *<span class="keyword">model</span> = [[<span class="keyword">Model</span> alloc] init];
+<span class="keyword">Model</span> *m2 = [<span class="keyword">model</span> haha];
+</code></pre><p><strong>万变不如汇编</strong>，让我们先来看第一条调用的汇编代码。</p>
+<pre><code><span class="number">0x100046768</span> &lt;+<span class="number">96</span>&gt;:  bl     <span class="number">0x100046b80</span>               ; symbol stub <span class="keyword">for</span>: objc_msgSend
+<span class="number">0x10004676c</span> &lt;+<span class="number">100</span>&gt;: adrp   x8, <span class="number">2</span>
+<span class="number">0x100046770</span> &lt;+<span class="number">104</span>&gt;: add    x8, x8, <span class="preprocessor">#<span class="number">0xd38</span>            ; =<span class="number">0xd38</span> </span>
+<span class="number">0x100046774</span> &lt;+<span class="number">108</span>&gt;: ldr    x1, [x8]
+<span class="number">0x100046778</span> &lt;+<span class="number">112</span>&gt;: bl     <span class="number">0x100046b80</span>               ; symbol stub <span class="keyword">for</span>: objc_msgSend
+<span class="number">0x10004677c</span> &lt;+<span class="number">116</span>&gt;: mov    x8, <span class="preprocessor">#<span class="number">0x0</span></span>
+<span class="number">0x100046780</span> &lt;+<span class="number">120</span>&gt;: add    x9, sp, <span class="preprocessor">#<span class="number">0x8</span>              ; =<span class="number">0x8</span> </span>
+<span class="number">0x100046784</span> &lt;+<span class="number">124</span>&gt;: str    x0, [sp, <span class="preprocessor">#<span class="number">0x8</span>]</span>
+<span class="number">0x100046788</span> &lt;+<span class="number">128</span>&gt;: mov    x0, x9
+<span class="number">0x10004678c</span> &lt;+<span class="number">132</span>&gt;: mov    x1, x8
+<span class="number">0x100046790</span> &lt;+<span class="number">136</span>&gt;: bl     <span class="number">0x100046bb0</span>               ; symbol stub <span class="keyword">for</span>: objc_storeStrong
+</code></pre><p>很明显的，并没有涉及到任何的和<code>retainAutorelease/autorelease</code>相关的调用。</p>
+<blockquote>
+<p>需要注意：在release优化下这里的<code>objc_storeStrong(nil)</code>会直接优化成<code>objc_release</code></p>
+</blockquote>
+<p>而对于第二条调用，汇编如下：</p>
+<pre><code><span class="number">0x10006275c</span> &lt;+<span class="number">140</span>&gt;: bl     <span class="number">0x100062b80</span>               ; symbol stub <span class="keyword">for</span>: objc_msgSend
+<span class="number">0x100062760</span> &lt;+<span class="number">144</span>&gt;: mov    x29, x29
+<span class="number">0x100062764</span> &lt;+<span class="number">148</span>&gt;: bl     <span class="number">0x100062ba4</span>               ; symbol stub <span class="keyword">for</span>: objc_retainAutoreleasedReturnValue
+</code></pre><p>关键字出现了，当然具体会不会进入autorelease的环节，还需要看优化的效果，我们进入<code>haha</code>函数看一看：</p>
+<pre><code> <span class="number">0x100096b28</span> &lt;+<span class="number">36</span>&gt;: bl     <span class="number">0x100096b80</span>               ; symbol stub <span class="keyword">for</span>: objc_msgSend
+<span class="number">0x100096b2c</span> &lt;+<span class="number">40</span>&gt;: adrp   x1, <span class="number">2</span>
+<span class="number">0x100096b30</span> &lt;+<span class="number">44</span>&gt;: ldr    x1, [x1, <span class="preprocessor">#<span class="number">0xd38</span>]</span>
+<span class="number">0x100096b34</span> &lt;+<span class="number">48</span>&gt;: bl     <span class="number">0x100096b80</span>               ; symbol stub <span class="keyword">for</span>: objc_msgSend
+<span class="number">0x100096b38</span> &lt;+<span class="number">52</span>&gt;: ldp    x29, x30, [sp, <span class="preprocessor">#<span class="number">0x10</span>]</span>
+<span class="number">0x100096b3c</span> &lt;+<span class="number">56</span>&gt;: add    sp, sp, <span class="preprocessor">#<span class="number">0x20</span>             ; =<span class="number">0x20</span> </span>
+<span class="number">0x100096b40</span> &lt;+<span class="number">60</span>&gt;: b      <span class="number">0x100096b74</span>               ; symbol stub <span class="keyword">for</span>: objc_autoreleaseReturnValue
+</code></pre><p>也和我们预测的一样，确实有着<code>objc_autoreleaseReturnValue</code>，那么究竟会不会有基于TLS的优化行为呢？对<code>objc_autoreleaseReturnValue</code>下个符号断点：</p>
+<pre><code>libobjc.A.dylib`objc_autoreleaseReturnValue:
+-&gt;  <span class="number">0x18563e528</span> &lt;+<span class="number">0</span>&gt;:  ldr    w8, [x30]
+    <span class="number">0x18563e52c</span> &lt;+<span class="number">4</span>&gt;:  mov    w9, <span class="preprocessor">#-<span class="number">0x55e30000</span></span>
+    <span class="number">0x18563e530</span> &lt;+<span class="number">8</span>&gt;:  movk   w9, <span class="preprocessor">#<span class="number">0x3fd</span></span>
+    <span class="number">0x18563e534</span> &lt;+<span class="number">12</span>&gt;: cmp    w8, w9
+    <span class="number">0x18563e538</span> &lt;+<span class="number">16</span>&gt;: b.ne   <span class="number">0x18563e550</span>               ; &lt;+<span class="number">40</span>&gt;
+    <span class="number">0x18563e53c</span> &lt;+<span class="number">20</span>&gt;: mrs    x8, TPIDRRO_EL0
+    <span class="number">0x18563e540</span> &lt;+<span class="number">24</span>&gt;: and    x8, x8, <span class="preprocessor">#<span class="number">0xfffffffffffffff8</span></span>
+    <span class="number">0x18563e544</span> &lt;+<span class="number">28</span>&gt;: orr    w9, wzr, <span class="preprocessor">#<span class="number">0x1</span></span>
+    <span class="number">0x18563e548</span> &lt;+<span class="number">32</span>&gt;: str    x9, [x8, <span class="preprocessor">#<span class="number">0x160</span>]</span>
+    <span class="number">0x18563e54c</span> &lt;+<span class="number">36</span>&gt;: ret    
+    <span class="number">0x18563e550</span> &lt;+<span class="number">40</span>&gt;: b      <span class="number">0x18563c130</span>               ; objc_autorelease
+</code></pre><p>这里，偏移 +16的地方的<code>b.ne</code>就是对优化的判断，判断的条件是<code>w8</code>和<code>w9</code>的相等与否，不等就走传统的<code>objc_autorelease</code>。</p>
+<p>这里经过断点我们发现确实走了优化。</p>
+<p><b style="color:red">那按照这个思路，难道真的在如今的ARC下，没有东西要进<code>autoreleasepool</code>了？那为什么还会在<code>MemoryGraph</code>中出现大量<code>autorelease content</code>呢？</b></p>
+<p><b style="color:red">答案可能出乎你的意料，<code>for</code>会影响这个<code>autorelease</code>优化逻辑。</b></p>
+<p>我们构建一个两个线程的场景，<code>Model</code>类型如上述文章段落不变。构建一个符合类型<code>Container</code>，包含一个<code>NSMutableArray</code>的数组：</p>
+<pre><code><span class="class"><span class="keyword">@interface</span> <span class="title">Container</span>()</span>
+<span class="keyword">@property</span> (<span class="keyword">nonatomic</span>, <span class="keyword">strong</span>) <span class="built_in">NSMutableArray</span> *models;
+<span class="keyword">@end</span>
+
+<span class="class"><span class="keyword">@implementation</span> <span class="title">Container</span></span>
+
+- (instancetype)init
+{
+    <span class="keyword">self</span> = [<span class="keyword">super</span> init];
+    <span class="keyword">if</span> (<span class="keyword">self</span>) {
+        _models = @[]<span class="variable">.mutableCopy</span>;
+
+    }
+    <span class="keyword">return</span> <span class="keyword">self</span>;
+}
+
+- (<span class="keyword">void</span>)addModel:(Model *)model
+{
+    <span class="keyword">if</span> (!model) <span class="keyword">return</span>;
+    [<span class="keyword">self</span><span class="variable">.models</span> addObject:model];
+}
+
+- (Model *)takeModel
+{
+    <span class="comment">//NSMutableArray *toOperateArray = self.models;</span>
+    <span class="keyword">for</span> (Model *model <span class="keyword">in</span> <span class="keyword">self</span><span class="variable">.models</span>) {
+    }
+
+    Model *model = [<span class="keyword">self</span><span class="variable">.models</span> firstObject];
+    [<span class="keyword">self</span><span class="variable">.models</span> removeObject:model];
+
+    <span class="keyword">return</span> model;
+}
+</code></pre><p>为了简化场景，我先在<code>ViewController viewDidLoad</code>塞入几个<code>Model</code>到<code>Container</code>，然后再启动第二个线程从<code>Container</code>中取<code>Model</code>。</p>
+<p>测试场景如下：</p>
+<pre><code>- (<span class="keyword">void</span>)viewDidLoad {
+    [<span class="keyword">super</span> viewDidLoad];
+
+    <span class="keyword">self</span><span class="variable">.container</span> = [[Container alloc] init];
+
+    <span class="keyword">for</span> (<span class="keyword">int</span> i = <span class="number">0</span>; i &lt; <span class="number">10</span>; i++) {
+        [<span class="keyword">self</span><span class="variable">.container</span> addModel:[[Model alloc] initWithCount:i]];
+    }
+
+    <span class="keyword">self</span><span class="variable">.thread</span> = [[<span class="built_in">NSThread</span> alloc] initWithTarget:<span class="keyword">self</span> selector:<span class="keyword">@selector</span>(loop) object:<span class="literal">nil</span>];
+    [<span class="keyword">self</span><span class="variable">.thread</span> setName:<span class="string">@"com.walle.test"</span>];
+    [<span class="keyword">self</span><span class="variable">.thread</span> start];
+}
+
+- (<span class="keyword">void</span>)loop
+{
+    <span class="keyword">while</span> (<span class="literal">true</span>) {
+        Model *m = [<span class="keyword">self</span><span class="variable">.container</span> takeModel];        
+        [m increment];
+    }
+}
+</code></pre><p>如果你执行我这段代码，你会发现的确如文章一开头所示，<code>MemoryGraph</code>中存在大量被<code>@autoreleasepool content</code>持有的<code>Model</code>。</p>
+<p>那罪魁祸首是什么呢？<b style="color:red">从表象上看</b>是这段并不起眼的代码：</p>
+<pre><code><span class="keyword">for</span> (<span class="constant">Model </span>*model <span class="keyword">in</span> <span class="keyword">self</span>.models) {
+}
+</code></pre><p>可具体原因是为啥呢？还是从汇编上来摸索下：</p>
+<p>首先先回到没有汇编的场景上，调用的函数是<code>-[ViewController loop]</code>，被调用者是<code>-[Container takeModel:]</code></p>
+<p>如果要进行优化，按照<code>objc_autoreleaseReturnValue：</code>的逻辑，在<code>loop</code>调用<code>takeModel:</code>的地方必须有对应的暗示：这个暗示在<code>arm64</code>中如下代码所示：</p>
+<pre><code><span class="function"><span class="keyword">static</span> ALWAYS_INLINE <span class="keyword">bool</span> 
+<span class="title">callerAcceptsOptimizedReturn</span><span class="params">(<span class="keyword">const</span> <span class="keyword">void</span> *ra)</span>
+</span>{
+    <span class="comment">// fd 03 1d aa    mov fp, fp</span>
+    <span class="comment">// arm64 instructions are well-aligned</span>
+    <span class="keyword">if</span> (*(<span class="keyword">uint32_t</span> *)ra == <span class="number">0xaa1d03fd</span>) {
+        <span class="keyword">return</span> <span class="literal">true</span>;
+    }
+    <span class="keyword">return</span> <span class="literal">false</span>;
+}
+</code></pre><p>简单来说，要有<code>mov fp, fp</code>，而<code>fp</code>就是<code>x29</code>寄存器。那我们来看看<code>loop</code>的对应汇编：</p>
+<p><img src="https://github.com/SatanWoo/BeeHive/blob/master/autorelease_r2.png?raw=true" alt="屏幕快照 2019-07-01 下午1.15.11"></p>
+<p><strong>哈哈，0x62b0</strong>的地方果然是<code>mov x29, x29</code>。</p>
+<p>如果你对静态分析的结果不熟悉，可以动态进入汇编。在<code>obc_autoreleaseReturnValue</code>下符号断点，得到</p>
+<p><img src="https://github.com/SatanWoo/BeeHive/blob/master/autorelease_r3.png?raw=true" alt="屏幕快照 2019-07-01 下午1.16.57"></p>
+<p>如果你输出<code>x30</code>寄存器的值（注意不是把寄存器的值当地址再取值）然后再减去所在二进制的基地址，会发现<strong>偏移正正好好也是<code>0x62b0</code></strong></p>
+<p>而如果你加上之前提到的<code>for</code>循环代码，再断到<code>obc_autoreleaseReturnValue</code>去查看<code>x30</code>的值，计算偏移量会得到：<code>0x0000000000005e98</code>。</p>
+<p>而对应到二进制里是：</p>
+<p><img src="https://github.com/SatanWoo/BeeHive/blob/master/autorelease_r4.png?raw=true" alt="屏幕快照 2019-07-01 下午1.46.10"></p>
+<p>看到没，这里调用<code>objc_autoreleaseReturnValue</code>走的是<code>bl</code>，也就是会修改<code>LR</code>寄存器，而<code>LR</code>寄存器的值就是调用后的返回地址<code>5e98</code>。而<code>LR</code>寄存器本身就是<code>x30</code>，导致<code>autorelease</code>的优化失效。</p>
+<p><b style="color:red">至此，我们终于发现了为什么我们的数据会被所谓的<code>@autoreleasepool content</code>持有。</b></p>
+<h3 id="后记">后记</h3><p>虽然正如网上很多文章所述，子线程确实会对<code>autoreleasepool</code>进行自动的管理避免内存泄漏。但是，由于诸多场景导致的释放时机变更，会产生诸多的<b style="color:red">内存不释放（并非是内存泄漏，<code>Leaks</code>是查不出来的）</b>，也会对<code>App</code>的稳定性造成巨大的影响。</p>
+<p><b style="color:red">更重要的是，基于这种TLS的优化很有可能被我们不知情下编写的代码所改变，产生奇怪的问题，因此要特别注意。</b></p>
+<p>下文我会从<strong>编译以及代码生成的层面</strong>来探讨为什么会产生这种不同的汇编代码。</p>
+
+      
+    </div>
+    <footer class="article-footer">
+      <a data-url="http://satanwoo.github.io/2019/07/02/RevisitAutorelease/" data-id="cjxlvndsj0000bfi1htjn6b2o" class="article-share-link">Share</a>
+      
+        <a href="http://satanwoo.github.io/2019/07/02/RevisitAutorelease/#disqus_thread" class="article-comment-link">Comments</a>
+      
+      
+  <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
+
+    </footer>
+  </div>
+  
+</article>
+
+<div id="disqus_thread"></div>
+<script>
+
+/**
+*  RECOMMENDED CONFIGURATION VARIABLES: EDIT AND UNCOMMENT THE SECTION BELOW TO INSERT DYNAMIC VALUES FROM YOUR PLATFORM OR CMS.
+*  LEARN WHY DEFINING THESE VARIABLES IS IMPORTANT: https://disqus.com/admin/universalcode/#configuration-variables*/
+/*
+var disqus_config = function () {
+this.page.url = PAGE_URL;  // Replace PAGE_URL with your page's canonical URL variable
+this.page.identifier = PAGE_IDENTIFIER; // Replace PAGE_IDENTIFIER with your page's unique identifier variable
+};
+*/
+(function() { // DON'T EDIT BELOW THIS LINE
+var d = document, s = d.createElement('script');
+s.src = 'https://satanwoo-2.disqus.com/embed.js';
+s.setAttribute('data-timestamp', +new Date());
+(d.head || d.body).appendChild(s);
+})();
+</script>
+<noscript>Please enable JavaScript to view the <a href="https://disqus.com/?ref_noscript">comments powered by Disqus.</a></noscript>
+                                
+  
     <article id="post-RAII" class="article article-type-post" itemscope itemprop="blogPost">
   <div class="article-meta">
     <a href="/2019/01/26/RAII/" class="article-date">
@@ -202,7 +543,7 @@ Data *data = <span class="keyword">new</span> Data();
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2019/01/26/RAII/" data-id="cjrdtpu6c002554i15li39a2y" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2019/01/26/RAII/" data-id="cjxlvlzcd002563i1l14j95d1" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2019/01/26/RAII/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -308,7 +649,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2019/01/26/LD-2/" data-id="cjrdtpu74002t54i12qu2wv5y" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2019/01/26/LD-2/" data-id="cjxlvlzd8002t63i1l5nb1tfk" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2019/01/26/LD-2/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -406,7 +747,7 @@ NSLog(@<span class="string">"haha"</span>);
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2019/01/26/shared-ptr/" data-id="cjrdtpu31000954i1u6tapzo2" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2019/01/26/shared-ptr/" data-id="cjxlvlz96000963i107oy7pm5" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2019/01/26/shared-ptr/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -798,7 +1139,7 @@ lockp-&gt;unlock();
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2019/01/01/Synchronized/" data-id="cjrdtpu5b001l54i12n6dxr01" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2019/01/01/Synchronized/" data-id="cjxlvlzaz001l63i1a4jvl086" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2019/01/01/Synchronized/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -1038,7 +1379,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2018/12/22/LD-1/" data-id="cjrdtpu78002v54i1b9wpt321" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2018/12/22/LD-1/" data-id="cjxlvlzdb002v63i1fjan1kua" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2018/12/22/LD-1/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -1161,7 +1502,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2018/10/06/JSDebugger-INTRO/" data-id="cjrdtpu7j003454i1ttoqcn02" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2018/10/06/JSDebugger-INTRO/" data-id="cjxlvlzdp003463i1tfvxayvj" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2018/10/06/JSDebugger-INTRO/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -1297,7 +1638,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2018/05/09/MNIST/" data-id="cjrdtpu6q002g54i10j8mi3pd" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2018/05/09/MNIST/" data-id="cjxlvlzcr002g63i1031hc05f" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2018/05/09/MNIST/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -1509,7 +1850,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2018/04/01/jsengine/" data-id="cjrdtpu3j000m54i13m82r2nf" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2018/04/01/jsengine/" data-id="cjxlvlz9j000m63i1zp4cfx0i" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2018/04/01/jsengine/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -1755,7 +2096,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2018/02/04/iOS-iVar/" data-id="cjrdtpu40000u54i1qjpty8jo" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2018/02/04/iOS-iVar/" data-id="cjxlvlza0000u63i1pyv2yidl" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2018/02/04/iOS-iVar/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -2380,7 +2721,7 @@ StartAgain: ;
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2018/01/14/iOS-virtual/" data-id="cjrdtpu3w000q54i1fnppar6a" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2018/01/14/iOS-virtual/" data-id="cjxlvlz9v000q63i1pfx9haq1" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2018/01/14/iOS-virtual/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -2591,7 +2932,7 @@ remover.keyPath = identifier.copy<span class="comment">;</span>
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2017/11/27/KVO-Swizzle/" data-id="cjrdtpu7a002x54i1c17eqjyf" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2017/11/27/KVO-Swizzle/" data-id="cjxlvlzdd002x63i1mkauro5z" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2017/11/27/KVO-Swizzle/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -2753,7 +3094,7 @@ frame <span class="preprocessor">#<span class="number">14</span>: <span class="n
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2017/11/02/load-twice/" data-id="cjrdtpu3g000k54i1j04nhka6" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2017/11/02/load-twice/" data-id="cjxlvlz9h000k63i1uv61qcv2" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2017/11/02/load-twice/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -3154,7 +3495,7 @@ NSDate* bootTime = [NSDate dateWithTimeIntervalSince1970:timestamp];
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2017/10/18/abort/" data-id="cjrdtpu4s001b54i11gt4l9eg" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2017/10/18/abort/" data-id="cjxlvlzak001b63i1lvghdnrf" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2017/10/18/abort/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -3540,7 +3881,7 @@ WKContentExtensionStore
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2017/09/24/mainthreadchecker1/" data-id="cjrdtpu3c000g54i1sbp98r4b" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2017/09/24/mainthreadchecker1/" data-id="cjxlvlz9e000g63i1w7r3ixu5" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2017/09/24/mainthreadchecker1/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -3867,7 +4208,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2017/09/11/KVO-CRASH/" data-id="cjrdtpu7d002z54i1bq3s58rj" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2017/09/11/KVO-CRASH/" data-id="cjxlvlzdj002z63i1l54gtm39" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2017/09/11/KVO-CRASH/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -4163,7 +4504,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2017/08/06/UITableViewController/" data-id="cjrdtpu52001g54i1g3nf39wc" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2017/08/06/UITableViewController/" data-id="cjxlvlzas001g63i1tofi6g8c" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2017/08/06/UITableViewController/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -4454,7 +4795,7 @@ BOOT_RUN_EXIT(appender_close);
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2017/07/30/xlog/" data-id="cjrdtpu2g000354i1libtld6s" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2017/07/30/xlog/" data-id="cjxlvlz8p000363i1z3hdl4xp" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2017/07/30/xlog/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -4757,7 +5098,7 @@ ldp    x9, x17, [x12]        <span class="comment">// {x9, x17} = *bucket</span>
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2017/06/29/Macho-2/" data-id="cjrdtpu6m002c54i1gls59hh7" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2017/06/29/Macho-2/" data-id="cjxlvlzcn002c63i1wa840vl9" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2017/06/29/Macho-2/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -5046,7 +5387,7 @@ _magic = [cursor readBigInt32];
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2017/06/13/Macho-1/" data-id="cjrdtpu6o002e54i1t4oidqvr" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2017/06/13/Macho-1/" data-id="cjxlvlzco002e63i1hy0zoyct" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2017/06/13/Macho-1/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -5308,7 +5649,7 @@ _attribute__((section (<span class="string">"__DATA, MinyiSpecific"</span>))) <s
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2017/06/01/FBTweak/" data-id="cjrdtpu86003c54i10oguednb" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2017/06/01/FBTweak/" data-id="cjxlvlze4003c63i1ftrld83p" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2017/06/01/FBTweak/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -5448,7 +5789,7 @@ foo(&amp;s, <span class="number">1</span>, <span class="number">2</span>);
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2017/04/23/ARM64IndirectReturn/" data-id="cjrdtpu8w003t54i1opoib1ab" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2017/04/23/ARM64IndirectReturn/" data-id="cjxlvlzes003t63i1k1qjqul4" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2017/04/23/ARM64IndirectReturn/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -5619,7 +5960,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2017/04/18/CalculateTwoArrayDiff/" data-id="cjrdtpu8t003p54i12zo6thly" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2017/04/18/CalculateTwoArrayDiff/" data-id="cjxlvlzeo003p63i1lpaoe29j" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2017/04/18/CalculateTwoArrayDiff/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -5809,7 +6150,7 @@ dispatch_group_create(<span class="keyword">void</span>)
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2017/01/07/DispatchGroupCrash/" data-id="cjrdtpu8d003g54i1w5w7rhtx" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2017/01/07/DispatchGroupCrash/" data-id="cjxlvlzeb003g63i1fi8h8a6l" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2017/01/07/DispatchGroupCrash/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -6057,7 +6398,7 @@ func <span class="function"><span class="title">resultFromBatchObjects</span><sp
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2017/01/07/JSONRPCKit/" data-id="cjrdtpu7h003254i1gev95ej8" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2017/01/07/JSONRPCKit/" data-id="cjxlvlzdm003263i1dfvas6sq" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2017/01/07/JSONRPCKit/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -6341,7 +6682,7 @@ dispatch_sync(dq, ^{
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/10/23/multithread-dangling-pointer/" data-id="cjrdtpu38000e54i189wjlye4" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/10/23/multithread-dangling-pointer/" data-id="cjxlvlz9c000e63i1e9qd152y" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/10/23/multithread-dangling-pointer/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -6497,7 +6838,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/09/17/uiwindow-iOS/" data-id="cjrdtpu2x000754i1hs46c9tk" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/09/17/uiwindow-iOS/" data-id="cjxlvlz93000763i1bufute0g" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/09/17/uiwindow-iOS/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -6657,7 +6998,7 @@ OSSpinUnlock(&amp;_lock)<span class="comment">;</span>
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/07/10/immutable-thread/" data-id="cjrdtpu3m000o54i1w897d10y" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/07/10/immutable-thread/" data-id="cjxlvlz9n000o63i1kz1hxmbu" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/07/10/immutable-thread/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -6781,7 +7122,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/05/02/Spotify/" data-id="cjrdtpu5t001t54i1aq40gw43" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/05/02/Spotify/" data-id="cjxlvlzbo001t63i1dqh648k4" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/05/02/Spotify/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -6909,7 +7250,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/04/26/blank-space-in-html/" data-id="cjrdtpu4p001954i15bj6lrh8" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/04/26/blank-space-in-html/" data-id="cjxlvlzai001963i1vrsuooh8" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/04/26/blank-space-in-html/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -7167,7 +7508,7 @@ Elapsed application CPU <span class="keyword">time</span> (seconds): <span class
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/04/11/dispatch-once/" data-id="cjrdtpu48000z54i1bdx8v9dn" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/04/11/dispatch-once/" data-id="cjxlvlza5000z63i10bz8kssa" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/04/11/dispatch-once/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -7384,7 +7725,7 @@ a4.<span class="function"><span class="title">staticInfo</span><span class="para
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/03/22/dispatch-in-swift/" data-id="cjrdtpu4c001154i1hdumtlkv" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/03/22/dispatch-in-swift/" data-id="cjxlvlzaa001163i1nyuw4gid" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/03/22/dispatch-in-swift/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -7498,7 +7839,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/03/14/RxSwift/" data-id="cjrdtpu61001y54i1awgy69rr" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/03/14/RxSwift/" data-id="cjxlvlzbv001y63i138xfjabz" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/03/14/RxSwift/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -7608,7 +7949,7 @@ val = edx(<span class="literal">true</span>)
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/03/14/SizeUp/" data-id="cjrdtpu5y001w54i1jlubolcs" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/03/14/SizeUp/" data-id="cjxlvlzbt001w63i1iadpdky7" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/03/14/SizeUp/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -7770,7 +8111,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/03/14/DXXcodeConsoleUnicodePlugin/" data-id="cjrdtpu8l003l54i19jh58389" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/03/14/DXXcodeConsoleUnicodePlugin/" data-id="cjxlvlzeg003l63i1sgj689fj" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/03/14/DXXcodeConsoleUnicodePlugin/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -7869,7 +8210,7 @@ fi
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/02/27/check-manifest/" data-id="cjrdtpu4k001654i13mu0b4sm" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/02/27/check-manifest/" data-id="cjxlvlzag001663i1qn73albk" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/02/27/check-manifest/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -8001,7 +8342,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/02/27/pod-install-plugin/" data-id="cjrdtpu34000c54i16rdx3m9f" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/02/27/pod-install-plugin/" data-id="cjxlvlz98000c63i11jtmfn80" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/02/27/pod-install-plugin/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -8279,7 +8620,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/02/27/FBKVOController/" data-id="cjrdtpu89003e54i18xn8n1fu" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/02/27/FBKVOController/" data-id="cjxlvlze7003e63i1mkaehtun" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/02/27/FBKVOController/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -8415,7 +8756,7 @@ selectedTitleLabelsContentView<span class="class">.layer</span><span class="clas
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/02/05/DGRunKeeperSwitch/" data-id="cjrdtpu8o003n54i1yssgpa76" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/02/05/DGRunKeeperSwitch/" data-id="cjxlvlzek003n63i13p4v4css" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/02/05/DGRunKeeperSwitch/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -8693,7 +9034,7 @@ NSLayoutConstraint *constraint = [NSLayoutConstraint <span class="string">constr
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/02/05/PureLayout/" data-id="cjrdtpu6h002854i1byjqqmzp" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/02/05/PureLayout/" data-id="cjxlvlzci002863i1qm7vymn6" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/02/05/PureLayout/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -9041,7 +9382,7 @@ extension Task {
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/12/30/Refactor-Mega-ViewController/" data-id="cjrdtpu69002354i1k958yxez" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/12/30/Refactor-Mega-ViewController/" data-id="cjxlvlzca002363i1jt71ugq5" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2015/12/30/Refactor-Mega-ViewController/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -9214,7 +9555,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/12/20/Learn-R-2/" data-id="cjrdtpu6t002j54i15ueq5iy2" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/12/20/Learn-R-2/" data-id="cjxlvlzcv002j63i13bi6n7jw" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2015/12/20/Learn-R-2/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -9290,7 +9631,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/12/15/Regression-Model-1/" data-id="cjrdtpu65002054i1pjia96cf" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/12/15/Regression-Model-1/" data-id="cjxlvlzc4002063i14mw2xjvu" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2015/12/15/Regression-Model-1/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -9455,7 +9796,7 @@ $foo
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/12/13/Learn-R-1/" data-id="cjrdtpu6w002m54i1ujv182qf" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/12/13/Learn-R-1/" data-id="cjxlvlzcz002m63i1gb7kai2w" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2015/12/13/Learn-R-1/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -9583,7 +9924,7 @@ frame <span class="preprocessor">#<span class="number">20</span>: libdyld.dylib`
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/12/11/LLDB-1/" data-id="cjrdtpu72002r54i149904msf" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/12/11/LLDB-1/" data-id="cjxlvlzd5002r63i194mfmsdi" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2015/12/11/LLDB-1/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -9904,7 +10245,7 @@ TBBoundingBox TBBoundingBoxMake(<span class="built_in">double</span> x0, <span c
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/12/11/TBAnnotationClustering/" data-id="cjrdtpu57001j54i1ob1zmn5g" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/12/11/TBAnnotationClustering/" data-id="cjxlvlzaw001j63i1sbohw42e" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2015/12/11/TBAnnotationClustering/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -10151,7 +10492,7 @@ BOOL success = class_addMethod(<span class="keyword">class</span>, originalSelec
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/11/26/FDFullScreenPopGesture-Source-Code/" data-id="cjrdtpu83003a54i1gunhygyu" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/11/26/FDFullScreenPopGesture-Source-Code/" data-id="cjxlvlze1003a63i1z5qyawb7" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2015/11/26/FDFullScreenPopGesture-Source-Code/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -10283,7 +10624,7 @@ replicationLayer.instanceDelay = <span class="number">0.3</span>
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/11/17/Fun-of-CAReplicationLayer/" data-id="cjrdtpu80003854i16bfhwkzj" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/11/17/Fun-of-CAReplicationLayer/" data-id="cjxlvlzdx003863i14ymgylty" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2015/11/17/Fun-of-CAReplicationLayer/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -10511,7 +10852,7 @@ modalVC<span class="class">.modalPresentationStyle</span> = <span class="class">
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/11/12/Swift-UITransition-iOS8/" data-id="cjrdtpu5g001n54i1t7905spi" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/11/12/Swift-UITransition-iOS8/" data-id="cjxlvlzbb001n63i19r3ukfem" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2015/11/12/Swift-UITransition-iOS8/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -10693,263 +11034,12 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/11/05/Understand-Viper/" data-id="cjrdtpu4x001e54i1gggjd0zl" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/11/05/Understand-Viper/" data-id="cjxlvlzao001e63i17div3quu" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2015/11/05/Understand-Viper/#disqus_thread" class="article-comment-link">Comments</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
-
-    </footer>
-  </div>
-  
-</article>
-
-<div id="disqus_thread"></div>
-<script>
-
-/**
-*  RECOMMENDED CONFIGURATION VARIABLES: EDIT AND UNCOMMENT THE SECTION BELOW TO INSERT DYNAMIC VALUES FROM YOUR PLATFORM OR CMS.
-*  LEARN WHY DEFINING THESE VARIABLES IS IMPORTANT: https://disqus.com/admin/universalcode/#configuration-variables*/
-/*
-var disqus_config = function () {
-this.page.url = PAGE_URL;  // Replace PAGE_URL with your page's canonical URL variable
-this.page.identifier = PAGE_IDENTIFIER; // Replace PAGE_IDENTIFIER with your page's unique identifier variable
-};
-*/
-(function() { // DON'T EDIT BELOW THIS LINE
-var d = document, s = d.createElement('script');
-s.src = 'https://satanwoo-2.disqus.com/embed.js';
-s.setAttribute('data-timestamp', +new Date());
-(d.head || d.body).appendChild(s);
-})();
-</script>
-<noscript>Please enable JavaScript to view the <a href="https://disqus.com/?ref_noscript">comments powered by Disqus.</a></noscript>
-                                
-  
-    <article id="post-Object-Path-Source-Code" class="article article-type-post" itemscope itemprop="blogPost">
-  <div class="article-meta">
-    <a href="/2015/11/05/Object-Path-Source-Code/" class="article-date">
-  <time datetime="2015-11-04T16:18:02.000Z" itemprop="datePublished">2015-11-05</time>
-</a>
-    
-  </div>
-  <div class="article-inner">
-    
-    
-      <header class="article-header">
-        
-  
-    <h1 itemprop="name">
-      <a class="article-title" href="/2015/11/05/Object-Path-Source-Code/">Object-Path 源码解读</a>
-    </h1>
-  
-
-      </header>
-    
-    <div class="article-entry" itemprop="articleBody">
-      
-        <h3 id="Object-Path">Object-Path</h3><p>今天看到了一个非常有意思的JavaScript库，乍一看有点iOS keypath chain的意思，名字叫Object-Path，<a href="https://github.com/mariocasciaro/object-path" target="_blank" rel="external">地址点我</a>，主要的功能包含了：</p>
-<ul>
-<li>Set</li>
-<li>Get</li>
-<li>Del</li>
-<li>Empty </li>
-<li>Insert </li>
-<li>EnsureExist</li>
-<li>Push</li>
-</ul>
-<p>从它的Example中我们可以先一览它的功能：</p>
-<pre><code><span class="keyword">var</span> obj = {
-  a: {
-    b: <span class="string">"d"</span>,
-    c: [<span class="string">"e"</span>, <span class="string">"f"</span>],
-    <span class="string">'\u1200'</span>: <span class="string">'unicode key'</span>,
-    <span class="string">'dot.dot'</span>: <span class="string">'key'</span>
-  }
-};
-
-<span class="keyword">var</span> objectPath = require(<span class="string">"object-path"</span>);
-
-<span class="comment">//get deep property</span>
-objectPath.<span class="keyword">get</span>(obj, <span class="string">"a.b"</span>);  <span class="comment">//returns "d"</span>
-objectPath.<span class="keyword">get</span>(obj, [<span class="string">"a"</span>, <span class="string">"dot.dot"</span>]);  <span class="comment">//returns "key"</span>
-objectPath.<span class="keyword">get</span>(obj, <span class="string">'a.\u1200'</span>);  <span class="comment">//returns "unicode key"</span>
-</code></pre><p>从这个例子中，我们可以发现对于一个Object <strong>obc</strong>，除了默认的直接通过点 <strong>.</strong>方式访问一个属性外， 如obj.a。我们还可以通过点 <strong>.</strong> 来进行<strong>“链式”</strong>访问其属性的属性（如果存在的话），如obj.a.b。这看起来真的和iOS中的keypath coding非常相似，所以，今天就让我们来分析下其实现吧！</p>
-<h3 id="源码解析">源码解析</h3><h4 id="Set方法">Set方法</h4><pre><code>例子：objectPath.<span class="keyword">set</span>(obj, <span class="string">"a.h"</span>, <span class="string">"m"</span>); 
-</code></pre><p>Set方法是用来给obj的某个<strong>“链式”</strong>属性进行赋值的，源码如下：</p>
-<pre><code><span class="function">function <span class="title">set</span><span class="params">(obj, path, value, doNotReplace)</span></span>{
-     <span class="comment">// 1. </span>
-    <span class="keyword">if</span> (isNumber(path)) {
-      path = [path];
-    }
-
-    <span class="comment">// 2.</span>
-    <span class="keyword">if</span> (isEmpty(path)) {
-      <span class="keyword">return</span> obj;
-    }
-
-    <span class="comment">// 3.</span>
-    <span class="keyword">if</span> (isString(path)) {
-      <span class="keyword">return</span> <span class="built_in">set</span>(obj, path.split(<span class="string">'.'</span>).<span class="built_in">map</span>(getKey), value, doNotReplace);
-    }
-
-    <span class="comment">// 4.</span>
-    var currentPath = path[<span class="number">0</span>];
-
-    <span class="keyword">if</span> (path.length === <span class="number">1</span>) {
-      var oldVal = obj[currentPath];
-      <span class="keyword">if</span> (oldVal === <span class="keyword">void</span> <span class="number">0</span> || !doNotReplace) {
-        obj[currentPath] = value;
-      }
-      <span class="keyword">return</span> oldVal;
-    }
-
-     <span class="comment">// 5.</span>
-    <span class="keyword">if</span> (obj[currentPath] === <span class="keyword">void</span> <span class="number">0</span>) {
-      <span class="comment">//check if we assume an array</span>
-      <span class="keyword">if</span>(isNumber(path[<span class="number">1</span>])) {
-        obj[currentPath] = [];
-      } <span class="keyword">else</span> {
-        obj[currentPath] = {};
-      }
-    }
-
-    <span class="keyword">return</span> <span class="built_in">set</span>(obj[currentPath], path.slice(<span class="number">1</span>), value, doNotReplace);
-  }
-</code></pre><ul>
-<li><ol>
-<li>判断传入的path是否是Number类型，如果不是的话，构建一个包含这个pathde数组，这里为什么要这样处理，在下文解释。<strong>注：JavaScript中不存在浮点数、整数等等不同数值类型，统一为Number</strong></li>
-</ol>
-</li>
-<li><ol>
-<li>判断传入的path是不是“空”，空的情况包含：undefined，空数组，没有任何自身属性的对象。下文我们会详细查看<strong>isEmpty</strong>的实现。</li>
-</ol>
-</li>
-<li><ol>
-<li>判断是否是字符串，如果是字符串，就通过<strong>“.”</strong>进行分割，分割完成构建数组，然后进行set方法的重新调用。</li>
-</ol>
-</li>
-<li><ol>
-<li>判断是否当前path深度只为一层，<em>var currentPath = path[0]</em>，如果是一层的话，根据是否要doNotReplace进行值的替换。</li>
-</ol>
-</li>
-</ul>
-<p>这里有个很有意思的实现 <strong>oldVal === void 0</strong>，void 0是什么鬼，我们经常会看见<strong>JavaScript::void(0)代表网页的死链接</strong>，那么oldVal == void 0又是什么意思呢？</p>
-<p><strong>其实，void 0就是undefined！</strong>在现代的浏览器中，它们两已经完全的等同了。而写成void 0的形式，是为了兼容。在过去的浏览器中，undefined不是一个关键字，它是个全局变量。因此，你完全可以徒手改变它的含义，</p>
-<pre><code><span class="keyword">var</span> <span class="literal">undefined</span> = <span class="number">1</span>;
-<span class="built_in">console</span>.log(<span class="literal">undefined</span>);
-</code></pre><p>这样的改变，就会undefined原本的含义错乱。而<strong>由于void是一个操作符，你无法改写它的含义，因此void 0是一种更安全的写法！</strong></p>
-<p>在这里的含义就是，判断<strong>oldVal === void 0</strong>是不是未定义罢了。</p>
-<ul>
-<li><ol>
-<li>如果不是一层深度的path，并且当前的obj[currentPath]是未定义的。那么就需要判断path[1]，也就是path数组中的第二个属性是什么了。<strong>如果是数字，就将obj[currentPath]构建为数组［］，否则构建一个对象｛｝。</strong></li>
-</ol>
-</li>
-</ul>
-<p>为什么要分开处理呢？这里就需要提及JavaScript访问属性的一个特别的地方。对于如下这样一个对象，</p>
-<pre><code><span class="keyword">var</span> obj = <span class="comment">{a:5}</span>
-</code></pre><p>来说，我们实现<strong>obj.a 或者 obj[“a”]</strong>都可以获得正确的结果5，但是对于另一个对象，</p>
-<pre><code>var obj = {<span class="number">1</span>: <span class="number">5</span>}
-</code></pre><p>我们只能使用obj[“1”]的方式来访问结果5，而不能使用obj.1。如果使用obj.1，就能报错误：<div style="color:red">Uncaught SyntaxError: Unexpected number(…)</div></p>
-<p>究其原因，就在于JavaScript在处理对象的key的时候，都是将key当成字符串处理的。</p>
-<p>所以，在这里构建完相对应的下一层级obj[currrentPath]，递归调用set方法即可。</p>
-<h4 id="Del方法">Del方法</h4><pre><code><span class="function">function <span class="title">del</span><span class="params">(obj, path)</span> </span>{
-    <span class="keyword">if</span> (isNumber(path)) {
-     path = [path];
-    }
-
-    <span class="keyword">if</span> (isEmpty(obj)) {
-     <span class="keyword">return</span> <span class="keyword">void</span> <span class="number">0</span>;
-    }
-
-    <span class="keyword">if</span> (isEmpty(path)) {
-     <span class="keyword">return</span> obj;
-    }
-
-    <span class="keyword">if</span>(isString(path)) {
-     <span class="keyword">return</span> del(obj, path.split(<span class="string">'.'</span>));
-    }
-
-    <span class="comment">// 重点</span>
-    var currentPath = getKey(path[<span class="number">0</span>]);
-    var oldVal = obj[currentPath];
-
-    <span class="keyword">if</span>(path.length === <span class="number">1</span>) {
-     <span class="keyword">if</span> (oldVal !== <span class="keyword">void</span> <span class="number">0</span>) {
-       <span class="keyword">if</span> (isArray(obj)) {
-         obj.splice(currentPath, <span class="number">1</span>);
-       } <span class="keyword">else</span> {
-         <span class="keyword">delete</span> obj[currentPath];
-       }
-     }
-    } <span class="keyword">else</span> {
-     <span class="keyword">if</span> (obj[currentPath] !== <span class="keyword">void</span> <span class="number">0</span>) {
-       <span class="keyword">return</span> del(obj[currentPath], path.slice(<span class="number">1</span>));
-     }
-    }
-
-    <span class="keyword">return</span> obj;
-}
-</code></pre><p>让我们再来看看Del方法，这个方法用于“链式”删除一些属性对应的值。由于之前的逻辑和Set类似，我们直接从重点开始看起。</p>
-<ul>
-<li>首先先从path[0]中获取key，然后取出对应的oldVal。</li>
-<li><p>如果path深度为1，并且oldVal不是未定义的话，究进行删除，删除分为两种：</p>
-<p>（1）如果是数组的话,通过splice删除数组中currentPath位置上的属性值<br>（2）如果是object，直接进行删除即可</p>
-</li>
-<li><p>如果深度不为1，并且oldValue不是未定义，递归调用del函数即可。</p>
-</li>
-</ul>
-<p>这里有一点需要注意，我们看到在获取currentPath的过程中，调用了getKey这个函数，让我们赶紧去看看这个getKey的实现。</p>
-<pre><code><span class="function"><span class="keyword">function</span> <span class="title">getKey</span>(<span class="params">key</span>)</span>{
-    <span class="keyword">var</span> intKey = <span class="built_in">parseInt</span>(key);
-    <span class="keyword">if</span> (intKey.toString() === key) {
-      <span class="keyword">return</span> intKey;
-    }
-    <span class="keyword">return</span> key;
-} 
-</code></pre><p>这里的逻辑不难理解，通过parseInt将key转成整型，如果转换后的结果通过toString函数和原有的key一致，就直接返回整形，否则返回原有的key。<strong>通过===(强等于号)不难理解，这里if的满足条件当且仅当key本身是string类型，同时其值是个整数才可以满足，如”5”等，像类似”a.2”, “5.5”就不会满足。</strong></p>
-<p>剩下的诸如Get, Has方法，实现都大同小异，我们就不再一一解读了，大家有兴趣可以自行阅读。</p>
-<h3 id="补充知识：JavaScript类型判断">补充知识：JavaScript类型判断</h3><pre><code><span class="function"><span class="keyword">function</span> <span class="title">isNumber</span><span class="params">(value)</span></span>{
-  <span class="keyword">return</span> <span class="keyword">typeof</span> value === <span class="string">'number'</span> || toString(value) === <span class="string">"[object Number]"</span>;
-}
-
-<span class="function"><span class="keyword">function</span> <span class="title">isString</span><span class="params">(obj)</span></span>{
-  <span class="keyword">return</span> <span class="keyword">typeof</span> obj === <span class="string">'string'</span> || toString(obj) === <span class="string">"[object String]"</span>;
-}
-
-<span class="function"><span class="keyword">function</span> <span class="title">isObject</span><span class="params">(obj)</span></span>{
-  <span class="keyword">return</span> <span class="keyword">typeof</span> obj === <span class="string">'object'</span> &amp;&amp; toString(obj) === <span class="string">"[object Object]"</span>;
-}
-
-<span class="function"><span class="keyword">function</span> <span class="title">isArray</span><span class="params">(obj)</span></span>{
-  <span class="keyword">return</span> <span class="keyword">typeof</span> obj === <span class="string">'object'</span> &amp;&amp; <span class="keyword">typeof</span> obj.length === <span class="string">'number'</span> &amp;&amp; toString(obj) === <span class="string">'[object Array]'</span>;
-}
-
-<span class="function"><span class="keyword">function</span> <span class="title">isBoolean</span><span class="params">(obj)</span></span>{
-  <span class="keyword">return</span> <span class="keyword">typeof</span> obj === <span class="string">'boolean'</span> || toString(obj) === <span class="string">'[object Boolean]'</span>;
-}
-</code></pre><p>在Object-Path的实现中，大量的类型判断工作都是通过如上一些函数来搞定的。有人会问了，判断一个类型为啥要这么麻烦，直接用instanceOf或者typeof不可以吗？</p>
-<ul>
-<li>用instanceOf是肯定错误的，如果被判断的对象不处于同一个页面，那么instanceOf就肯定失效了。</li>
-</ul>
-<blockquote><br>比如，一个页面（父页面）有一个框架，框架中引用了一个页面（子页面），在子页面中声明了一个array，并将其赋值给父页面的一个变量，这时判断该变量是否是array类型，就是失败<br></blockquote>
-
-<ul>
-<li>用typeof的缺陷在于，JavaScript中存在基本类型和包装类型，对于数值5来说，它是基本类型Number，通过typeof可以准备的判断出。但是如果是包装对象<b>var k = new Number(5)</b>，在意义上其仍然应该是属于数值类型，但是通过typeof获得的结果是object，因此就不正确。</li>
-</ul>
-<p><strong>所以，在这里的实现，我们采用了Object.prototype.toString.call(obj)的方式来获取正确的类型。</strong></p>
-<p>嘿嘿，今天就到这里啦。</p>
-
-      
-    </div>
-    <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/11/05/Object-Path-Source-Code/" data-id="cjrdtpu6k002a54i1c44ykciu" class="article-share-link">Share</a>
-      
-        <a href="http://satanwoo.github.io/2015/11/05/Object-Path-Source-Code/#disqus_thread" class="article-comment-link">Comments</a>
-      
-      
-  <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/JavaScript/">JavaScript</a></li></ul>
 
     </footer>
   </div>
@@ -10993,7 +11083,7 @@ s.setAttribute('data-timestamp', +new Date());
   <div class="widget-wrap">
     <h3 class="widget-title">Tags</h3>
     <div class="widget">
-      <ul class="tag-list"><li class="tag-list-item"><a class="tag-list-link" href="/tags/Android/">Android</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/C/">C</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/C/">C++</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Growth/">Growth</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/JavaScript/">JavaScript</a><span class="tag-list-count">3</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Machine-Learning/">Machine Learning</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Math/">Math</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Performance/">Performance</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/R/">R</a><span class="tag-list-count">2</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Reverse-Engineering/">Reverse Engineering</a><span class="tag-list-count">6</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Swift/">Swift</a><span class="tag-list-count">6</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/XNU/">XNU</a><span class="tag-list-count">2</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/c/">c++</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/iOS/">iOS</a><span class="tag-list-count">39</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/shell/">shell</a><span class="tag-list-count">1</span></li></ul>
+      <ul class="tag-list"><li class="tag-list-item"><a class="tag-list-link" href="/tags/Android/">Android</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/C/">C</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/C/">C++</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Growth/">Growth</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/JavaScript/">JavaScript</a><span class="tag-list-count">3</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Machine-Learning/">Machine Learning</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Math/">Math</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Performance/">Performance</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/R/">R</a><span class="tag-list-count">2</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Reverse-Engineering/">Reverse Engineering</a><span class="tag-list-count">6</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Swift/">Swift</a><span class="tag-list-count">6</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/XNU/">XNU</a><span class="tag-list-count">2</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/c/">c++</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/iOS/">iOS</a><span class="tag-list-count">40</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/shell/">shell</a><span class="tag-list-count">1</span></li></ul>
     </div>
   </div>
 
@@ -11011,7 +11101,7 @@ s.setAttribute('data-timestamp', +new Date());
   <div class="widget-wrap">
     <h3 class="widget-title">Archives</h3>
     <div class="widget">
-      <ul class="archive-list"><li class="archive-list-item"><a class="archive-list-link" href="/archives/2019/01/">January 2019</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2018/12/">December 2018</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2018/10/">October 2018</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2018/05/">May 2018</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2018/04/">April 2018</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2018/02/">February 2018</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2018/01/">January 2018</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/11/">November 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/10/">October 2017</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/09/">September 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/08/">August 2017</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/07/">July 2017</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/06/">June 2017</a><span class="archive-list-count">3</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/04/">April 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/01/">January 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/10/">October 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/09/">September 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/07/">July 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/05/">May 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/04/">April 2016</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/03/">March 2016</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/02/">February 2016</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/12/">December 2015</a><span class="archive-list-count">6</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/11/">November 2015</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/10/">October 2015</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/09/">September 2015</a><span class="archive-list-count">4</span></li></ul>
+      <ul class="archive-list"><li class="archive-list-item"><a class="archive-list-link" href="/archives/2019/07/">July 2019</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2019/01/">January 2019</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2018/12/">December 2018</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2018/10/">October 2018</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2018/05/">May 2018</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2018/04/">April 2018</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2018/02/">February 2018</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2018/01/">January 2018</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/11/">November 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/10/">October 2017</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/09/">September 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/08/">August 2017</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/07/">July 2017</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/06/">June 2017</a><span class="archive-list-count">3</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/04/">April 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/01/">January 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/10/">October 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/09/">September 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/07/">July 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/05/">May 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/04/">April 2016</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/03/">March 2016</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/02/">February 2016</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/12/">December 2015</a><span class="archive-list-count">6</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/11/">November 2015</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/10/">October 2015</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/09/">September 2015</a><span class="archive-list-count">4</span></li></ul>
     </div>
   </div>
 
@@ -11021,6 +11111,10 @@ s.setAttribute('data-timestamp', +new Date());
     <h3 class="widget-title">Recents</h3>
     <div class="widget">
       <ul>
+        
+          <li>
+            <a href="/2019/07/02/RevisitAutorelease/">Revisit iOS Autorelease 之不经意间可能被影响的优化</a>
+          </li>
         
           <li>
             <a href="/2019/01/26/RAII/">基于智能指针和RAII的对象内存管理设计</a>
@@ -11036,10 +11130,6 @@ s.setAttribute('data-timestamp', +new Date());
         
           <li>
             <a href="/2019/01/01/Synchronized/">抛开性能，谈谈不该用@Synchronized的原因</a>
-          </li>
-        
-          <li>
-            <a href="/2018/12/22/LD-1/">通过Xcode 10链接libstdc++来深入分析tbd文件</a>
           </li>
         
       </ul>
