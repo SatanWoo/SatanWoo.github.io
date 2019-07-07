@@ -4,7 +4,7 @@
   
   <link href="/atom.xml" rel="self"/>
   <link href="http://satanwoo.github.io/"/>
-  <updated>2019-07-02T13:57:58.000Z</updated>
+  <updated>2019-07-07T14:45:24.000Z</updated>
   <id>http://satanwoo.github.io/</id>
   
   <author>
@@ -13,6 +13,166 @@
   </author>
   
   <generator uri="http://hexo.io/">Hexo</generator>
+  
+  <entry>
+    <title><![CDATA[Revisit iOS Autorelease之二]]></title>
+    <link href="http://satanwoo.github.io/2019/07/07/RevisitAutorelease2/"/>
+    <id>http://satanwoo.github.io/2019/07/07/RevisitAutorelease2/</id>
+    <published>2019-07-07T14:44:00.000Z</published>
+    <updated>2019-07-07T14:45:24.000Z</updated>
+    <content type="html"><![CDATA[<h2 id="Revisit_iOS_Autorelease（二）：为啥生成的优化没有了。">Revisit iOS Autorelease（二）：为啥生成的优化没有了。</h2><p>在<a href="">Revisit iOS Autorelease（一）</a>中，按照我的示例我提及，是如下这段代码对基于<code>TLS</code>的优化产生了影响：</p>
+<pre><code><span class="comment">// Debug 模式</span>
+<span class="keyword">for</span> (Model *m <span class="keyword">in</span> <span class="keyword">self</span><span class="variable">.models</span>) {      
+}
+</code></pre><p>这段看似平平无奇的代码为啥会造成优化失效，让我们还是从汇编角度来看看：</p>
+<pre><code><span class="number">0x100011e90</span> &lt;+<span class="number">568</span>&gt;: ldr    x0, [sp, <span class="preprocessor">#<span class="number">0x10</span>]</span>
+
+<span class="comment">// 【注意点】：正常情况下应该是b objc_autoreleaseReturnValue</span>
+<span class="number">0x100011e94</span> &lt;+<span class="number">572</span>&gt;: bl     <span class="number">0x100012904</span>               ; symbol stub <span class="keyword">for</span>: objc_autoreleaseReturnValue
+<span class="number">0x100011e98</span> &lt;+<span class="number">576</span>&gt;: adrp   x8, <span class="number">3</span>
+<span class="number">0x100011e9c</span> &lt;+<span class="number">580</span>&gt;: ldr    x8, [x8, <span class="preprocessor">#<span class="number">0x8</span>]</span>
+<span class="number">0x100011ea0</span> &lt;+<span class="number">584</span>&gt;: ldr    x8, [x8]
+<span class="number">0x100011ea4</span> &lt;+<span class="number">588</span>&gt;: ldur   x9, [x29, <span class="preprocessor">#-<span class="number">0x18</span>]</span>
+<span class="number">0x100011ea8</span> &lt;+<span class="number">592</span>&gt;: cmp    x8, x9
+<span class="number">0x100011eac</span> &lt;+<span class="number">596</span>&gt;: str    x0, [sp, <span class="preprocessor">#<span class="number">0x8</span>]</span>
+<span class="number">0x100011eb0</span> &lt;+<span class="number">600</span>&gt;: b.ne   <span class="number">0x100011ec8</span>               ; &lt;+<span class="number">624</span>&gt; at Container.m
+<span class="number">0x100011eb4</span> &lt;+<span class="number">604</span>&gt;: ldr    x0, [sp, <span class="preprocessor">#<span class="number">0x8</span>]</span>
+<span class="number">0x100011eb8</span> &lt;+<span class="number">608</span>&gt;: ldp    x29, x30, [sp, <span class="preprocessor">#<span class="number">0x170</span>]</span>
+<span class="number">0x100011ebc</span> &lt;+<span class="number">612</span>&gt;: ldp    x28, x27, [sp, <span class="preprocessor">#<span class="number">0x160</span>]</span>
+<span class="number">0x100011ec0</span> &lt;+<span class="number">616</span>&gt;: add    sp, sp, <span class="preprocessor">#<span class="number">0x180</span>            ; =<span class="number">0x180</span> </span>
+<span class="number">0x100011ec4</span> &lt;+<span class="number">620</span>&gt;: ret    
+<span class="number">0x100011ec8</span> &lt;+<span class="number">624</span>&gt;: bl     <span class="number">0x1000128d4</span>               ; symbol stub <span class="keyword">for</span>: __stack_chk_fail
+<span class="number">0x100011ecc</span> &lt;+<span class="number">628</span>&gt;: brk    <span class="preprocessor">#<span class="number">0x1</span></span>
+</code></pre><p>按照符号优化的场景，<code>LR</code>寄存器的地址需要指向获取<code>Model</code>的外部调用方才能产生正确的优化，因此<b style="color:red">正常情况下应该直接<code>b objc_autoreleaseReturnValue</code>即可</b>，而这里对应的汇编却是<code>bl</code>，说明执行完<code>objc_autoreleaseReturnValue</code>后还要继续从<code>0x100011e98 &lt;+576&gt;: adrp   x8, 3</code>往后执行。</p>
+<p>虽然这么一大段汇编很难具体了解做的每一件事的意义，但是从几个关键点上我们可以描绘出一个轮廓：</p>
+<ul>
+<li><code>cmp x8, x9</code>肯定在试图检查什么条件。</li>
+<li><code>b.ne   0x100011ec8</code>，如果条件满足，继续走（1），否则走（2）</li>
+<li>（1）最后是栈恢复和<code>ret</code>，说明这是正确的流程。</li>
+<li>（2）看到了一个比较陌生的符号<code>__stack_chk_fail</code>，暂且不管。但是紧跟着就是<code>brk</code>。而<code>brk</code>简单来讲，就是触发崩溃或者异常。</li>
+</ul>
+<p>整体轮廓搞定后，我们再来看看<code>stack_chk_fail</code>到底是啥。从<code>stack</code>中我们不难推断，这肯定是和栈相关的检查工作。那为什么会有这样的检查工作？主要还是害怕栈越界造成的危害。用下图来大致讲解吧。</p>
+<p><img src="https://bbsmax.ikafan.com/static/L3Byb3h5L2h0dHAvaW1hZ2VzMjAxNS5jbmJsb2dzLmNvbS9ibG9nLzc0MDk4OS8yMDE1MTEvNzQwOTg5LTIwMTUxMTA5MjIzMjAxNzU5LTQ2MTU2MDEwMy5wbmc=.jpg" alt=""></p>
+<blockquote>
+<p>这里抄了张<code>armv7</code>的图，大致意思没差别。</p>
+</blockquote>
+<p><strong>局部变量和保存函数调用上下文的<code>LR</code>, <code>FP</code>都存在栈上。假设我们的局部变量是个大小为2的数组，但是我如果不小心写出了*(addr + 3) = 5。是不是相当于数组越界，破坏了紧邻着的其他栈内容。如果这个栈内容是重要的上下文信息，那就完蛋了。</strong></p>
+<p><b style="color:red">那栈越界究竟有什么具体事例呢？嘿嘿，欢迎加入阿里巴巴来内网看我写的关于<code>xxx</code>问题的分析，你就知道了。</b></p>
+<p>所以，在LLVM::CodeGen里面，就帮我们做了这样的栈越界检查（当然对于很多动态的数组也是没法完全防护的），在<code>StackProtector.cpp</code>中：</p>
+<pre><code><span class="keyword">bool</span> StackProtector::InsertStackProtectors() {
+   <span class="comment">// Loop through the basic blocks that have return instructions. Convert this:</span>
+   <span class="comment">//</span>
+   <span class="comment">//   return:</span>
+   <span class="comment">//     ...</span>
+   <span class="comment">//     ret ...</span>
+   <span class="comment">//</span>
+   <span class="comment">// into this:</span>
+   <span class="comment">//</span>
+   <span class="comment">//   return:</span>
+   <span class="comment">//     ...</span>
+   <span class="comment">//     %1 = load __stack_chk_guard</span>
+   <span class="comment">//     %2 = load &lt;stored stack guard&gt;</span>
+   <span class="comment">//     %3 = cmp i1 %1, %2</span>
+   <span class="comment">//     br i1 %3, label %SP_return, label %CallStackCheckFailBlk</span>
+   <span class="comment">//</span>
+   <span class="comment">//   SP_return:</span>
+   <span class="comment">//     ret ...</span>
+   <span class="comment">//</span>
+   <span class="comment">//   CallStackCheckFailBlk:</span>
+   <span class="comment">//     call void @__stack_chk_fail()</span>
+   <span class="comment">//     unreachable</span>
+   <span class="comment">//</span>
+   BasicBlock *FailBB = <span class="number">0</span>;       <span class="comment">// The basic block to jump to if check fails.</span>
+   AllocaInst *AI = <span class="number">0</span>;           <span class="comment">// Place on stack that stores the stack guard.</span>
+   Constant *StackGuardVar = <span class="number">0</span>;  <span class="comment">// The stack guard variable.</span>
+
+   <span class="keyword">for</span> (<span class="function"><span class="keyword">Function</span>::<span class="title">iterator</span> <span class="title">I</span> = <span class="title">F</span>-&gt;<span class="title">begin</span><span class="params">()</span>, <span class="title">E</span> = <span class="title">F</span>-&gt;<span class="title">end</span><span class="params">()</span></span>; I != E; ) {
+     BasicBlock *BB = I;
+
+     <span class="keyword">if</span> (ReturnInst *RI = dyn_cast&lt;ReturnInst&gt;(BB-&gt;getTerminator())) {
+       <span class="keyword">if</span> (!FailBB) {
+         <span class="comment">// Insert code into the entry block that stores the __stack_chk_guard</span>
+         <span class="comment">// variable onto the stack.</span>
+         PointerType *PtrTy = PointerType::getUnqual(Type::Int8Ty);
+         StackGuardVar = M-&gt;getOrInsertGlobal(<span class="string">"__stack_chk_guard"</span>, PtrTy);
+
+         BasicBlock &amp;Entry = F-&gt;getEntryBlock();
+         Instruction *InsPt = &amp;Entry.front();
+
+         AI = <span class="keyword">new</span> AllocaInst(PtrTy, <span class="string">"StackGuardSlot"</span>, InsPt);
+         LoadInst *LI = <span class="keyword">new</span> LoadInst(StackGuardVar, <span class="string">"StackGuard"</span>, <span class="keyword">false</span>, InsPt);
+
+         Value *Args[] = { LI, AI };
+         CallInst::
+           Create(Intrinsic::getDeclaration(M, Intrinsic::stackprotector_create),
+                  &amp;Args[<span class="number">0</span>], array_endof(Args), <span class="string">""</span>, InsPt);
+
+         <span class="comment">// Create the basic block to jump to when the guard check fails.</span>
+         FailBB = CreateFailBB();
+       }
+
+-      <span class="function"><span class="keyword">Function</span>::<span class="title">iterator</span> <span class="title">InsPt</span> = <span class="title">BB</span></span>; ++InsPt; <span class="comment">// Insertion point for new BB.</span>
+       ++I; <span class="comment">// Skip to the next block so that we don't resplit the return block.</span>
+
+       <span class="comment">// Split the basic block before the return instruction.</span>
+       BasicBlock *NewBB = BB-&gt;splitBasicBlock(RI, <span class="string">"SP_return"</span>);
+
+-      <span class="comment">// Move the newly created basic block to the point right after the old basic</span>
+-      <span class="comment">// block so that it's in the "fall through" position.</span>
++      <span class="comment">// Move the newly created basic block to the point right after the old</span>
++      <span class="comment">// basic block so that it's in the "fall through" position.</span>
+       NewBB-&gt;removeFromParent();
+-      F-&gt;getBasicBlockList().insert(InsPt, NewBB);
++      F-&gt;getBasicBlockList().insert(I, NewBB);
+
+       <span class="comment">// Generate the stack protector instructions in the old basic block.</span>
+       LoadInst *LI1 = <span class="keyword">new</span> LoadInst(StackGuardVar, <span class="string">""</span>, <span class="keyword">false</span>, BB);
+       CallInst *CI = CallInst::
+         Create(Intrinsic::getDeclaration(M, Intrinsic::stackprotector_check),
+                AI, <span class="string">""</span>, BB);
+       ICmpInst *Cmp = <span class="keyword">new</span> ICmpInst(CmpInst::ICMP_EQ, CI, LI1, <span class="string">""</span>, BB);
+       BranchInst::Create(NewBB, FailBB, Cmp, BB);
+     } <span class="keyword">else</span> {
+       ++I;
+     }
+   }
+
+   <span class="comment">// Return if we didn't modify any basic blocks. I.e., there are no return</span>
+   <span class="comment">// statements in the function.</span>
+   <span class="keyword">if</span> (!FailBB) <span class="keyword">return</span> <span class="keyword">false</span>;
+
+   <span class="keyword">return</span> <span class="keyword">true</span>;
+ }
+
+ <span class="comment">/// CreateFailBB - Create a basic block to jump to when the stack protector</span>
+ <span class="comment">/// check fails.</span>
+ BasicBlock *StackProtector::CreateFailBB() {
+   BasicBlock *FailBB = BasicBlock::Create(<span class="string">"CallStackCheckFailBlk"</span>, F);
+   Constant *StackChkFail =
+     M-&gt;getOrInsertFunction(<span class="string">"__stack_chk_fail"</span>, Type::VoidTy, <span class="keyword">NULL</span>);
+   CallInst::Create(StackChkFail, <span class="string">""</span>, FailBB);
+   <span class="keyword">new</span> UnreachableInst(FailBB);
+   <span class="keyword">return</span> FailBB;
+ }
+</code></pre><p>还是比较容易看懂的，这里就不过多解释了。</p>
+<h3 id="后记">后记</h3><p><code>autorelease</code>相关的文章网上不在少数，但是大多数都大同小异，只是在讲<code>libobjc</code>中的代码实现。但是深究我们日常编码过程中的<code>autorelease</code>，其实有不少被我们所忽视的细节值得深挖研究。（不挖还容易踩坑）</p>
+<p>最后按照惯例，以一首诗致敬伟大的90后<code>iOS</code>第一人Y帝：</p>
+<p>吾辈有Y帝，技术特牛逼。</p>
+<p>胸有中国情，一人虐美帝。</p>
+<p>Google服务器，Y帝轻松逆。</p>
+<p>苹果App，他天天Patch。</p>
+<p>微软的程序，总被他蓝屏。</p>
+<p>川普各手机，监听so easy。</p>
+<p>为躲粉丝迷，转行写程序。</p>
+<p>90后第一，当代方世玉！</p>
+]]></content>
+    <summary type="html">
+    <![CDATA[<h2 id="Revisit_iOS_Autorelease（二）：为啥生成的优化没有了。">Revisit iOS Autorelease（二）：为啥生成的优化没有了。</h2><p>在<a href="">Revisit iOS Autorelease（一）</a>中，按照]]>
+    </summary>
+    
+      <category term="iOS" scheme="http://satanwoo.github.io/tags/iOS/"/>
+    
+  </entry>
   
   <entry>
     <title><![CDATA[Revisit iOS Autorelease 之不经意间可能被影响的优化]]></title>
@@ -4259,251 +4419,6 @@ ldp    x9, x17, [x12]        <span class="comment">// {x9, x17} = *bucket</span>
     <summary type="html">
     <![CDATA[<p>在上文中，我们提到了有个神秘的<code>__OBJC</code>段，Runtime的许多机制就是依赖于它。但是无论我怎么搜索网上相关的资料、苹果的官方文档，都发现找不到这个段了。</p>
 <p>一脸懵逼。没事，打开class-dump，看看它怎么处理的。嘿嘿，果不其然，]]>
-    </summary>
-    
-      <category term="iOS" scheme="http://satanwoo.github.io/tags/iOS/"/>
-    
-  </entry>
-  
-  <entry>
-    <title><![CDATA[深入剖析Macho (1)]]></title>
-    <link href="http://satanwoo.github.io/2017/06/13/Macho-1/"/>
-    <id>http://satanwoo.github.io/2017/06/13/Macho-1/</id>
-    <published>2017-06-13T15:25:34.000Z</published>
-    <updated>2017-06-13T15:34:48.000Z</updated>
-    <content type="html"><![CDATA[<h3 id="起因">起因</h3><p>最近在公司里和一些同事搞了一些东西，略微底层。于是希望借这个机会好好把<code>Macho</code>相关的知识点梳理下。</p>
-<p>虽然网上关于<code>Macho</code>的文章介绍一大堆，但是我希望能够从<code>Macho</code>的构成，加载过程以及需要了解的相关背景角度去进行分析，每一个点都力图深入。也会在这篇文章最后打造一个类似<code>class-dump</code>的小型工具。</p>
-<h3 id="程序启动加载的过程">程序启动加载的过程</h3><p>当你点击一个icon启动应用程序的时候，系统在内部大致做了如下几件事：</p>
-<ul>
-<li>内核（OS Kernel）创建一个进程，分配虚拟的进程空间等等，加载动态链接器。</li>
-<li>通过动态链接器加载主二进制程序引用的库、绑定符号。</li>
-<li>启动程序</li>
-</ul>
-<p>虽然简要概述很简单，但是有几个需要特别主要的地方：</p>
-<ol>
-<li>二进制程序的格式是怎么样的？内核是如何加载它的？</li>
-<li>内核是如何得知要使用哪种动态链接器的？</li>
-<li>动态链接器和静态链接器的区别是啥？</li>
-<li>程序在运行前究竟要做哪些步骤？顺序是怎么样的？</li>
-</ol>
-<p><strong>带着这些问题，我将一步步来剖析整个过程</strong></p>
-<h3 id="二进制程序格式">二进制程序格式</h3><p>在MacOS或者iOS上可执行的程序格式叫做<code>Macho-O</code>，它的主要成分如下图所示：</p>
-<p><img src="http://cc.cocimg.com/api/uploads/20150122/1421892661838860.gif" alt=""></p>
-<ul>
-<li>一个<code>mach_header</code>标记一些元信息，比如架构、CPU、大小端等等</li>
-<li>多个<code>Load Command</code>告诉你究竟如何加载每个段的信息。</li>
-<li>多个<code>Segement</code>及<code>Section</code>，包含了每个段自身的信息。包括一些数据、代码以及<del>段的执行权限</del>等等。</li>
-</ul>
-<p><strong><div style="color:red">需要注意的是，不仅仅是可执行文件是<code>Macho-O</code>，目标文件(.o)以及动态库，静态库都是<code>Mach-O</code>格式。</div></strong></p>
-<p>所以，下面我们就用64位的定义从每个部分来介绍一下具体的数据结构：</p>
-<h3 id="mach_header_64">mach_header_64</h3><p>这个结构体代表的都是<code>Mach-O</code>文件的一些元信息，它的作用是让内核在读取该文件创建虚拟进程空间的时候，检查文件的合法性以及当前硬件的特性是否能支持程序的运行。</p>
-<p>从源码中可以看出，整个结构题定义如下：</p>
-<pre><code><span class="keyword">struct</span> mach_header_64 {
-    <span class="keyword">uint32_t</span>    magic;        <span class="comment">/* mach magic number identifier */</span>
-    <span class="keyword">cpu_type_t</span>    cputype;    <span class="comment">/* cpu specifier */</span>
-    <span class="keyword">cpu_subtype_t</span>    cpusubtype;    <span class="comment">/* machine specifier */</span>
-    <span class="keyword">uint32_t</span>    filetype;    <span class="comment">/* type of file */</span>
-    <span class="keyword">uint32_t</span>    ncmds;        <span class="comment">/* number of load commands */</span>
-    <span class="keyword">uint32_t</span>    sizeofcmds;    <span class="comment">/* the size of all the load commands */</span>
-    <span class="keyword">uint32_t</span>    flags;        <span class="comment">/* flags */</span>
-    <span class="keyword">uint32_t</span>    reserved;    <span class="comment">/* reserved */</span>
-};
-</code></pre><ul>
-<li><strong>magic</strong> 用于标识当前设备的是大端序还是小端序。如果是<code>0xfeedfacf(MH_MAGIC_64)</code>就是大端序，而<code>0xcffaedfe(MH_CIGAM_64)</code>是小端序，iOS系统上是小端序。</li>
-<li><strong>cputype</strong> 标识CPU的架构，比如ARM，X86，i386等等，进行了宏观划分。</li>
-<li><strong>cpusubtype</strong> 具体的CPU类型，区分不同版本的处理器。</li>
-<li><strong>filetype</strong> 划分之前我们提到的文件类型，比如是可执行文件还是目标文件。</li>
-<li><strong>ncmds</strong> 有几个<code>LoadCommands</code>，每个<code>LoadCommands</code>代表了一种<code>Segment</code>的加载方式。</li>
-<li><strong>sizeofcmds</strong> <code>LoadCommand</code>的大小，主要用于划分Mach-O文件的‘区域’。</li>
-<li><strong>flags</strong> 标记了一些dyld过程中的参数。</li>
-<li><strong>reversed</strong> 没用。</li>
-</ul>
-<p>这里有个比较有意思的问题是，我为了验证大端序小端序的问题的时候，用了MacOS上的计算器进行<br>验证，本质上这应该是个小端序的应用程序，其二进制如下：</p>
-<p><img src="https://github.com/SatanWoo/BeeHive/blob/master/%E5%B1%8F%E5%B9%95%E5%BF%AB%E7%85%A7%202017-06-11%20%E4%B8%8B%E5%8D%883.12.33.png?raw=true" alt="屏幕快照 2017-06-11 下午3.12.33.png"> </p>
-<p>但是在<code>otool</code>和<code>MachoView</code>上看出来都是<code>MH_MAGIC_64</code>，如下所示：</p>
-<p><img src="https://github.com/SatanWoo/BeeHive/blob/master/%E5%B1%8F%E5%B9%95%E5%BF%AB%E7%85%A7%202017-06-11%20%E4%B8%8B%E5%8D%883.13.47.png?raw=true" alt="屏幕快照 2017-06-11 下午3.13.47.png"> </p>
-<p>我擦，这下看了懵逼，难道是我理解错了？于是赶紧翻了下<code>class-dump</code>代码，其解析header部分代码如下：</p>
-<pre><code>// 解析部分代码
-_byteOrder = <span class="type">CDByteOrder_LittleEndian</span>;
-
-<span class="type">CDDataCursor</span> *cursor = [[<span class="type">CDDataCursor</span> alloc] initWithData:data];
-_magic = [cursor readBigInt32];
-<span class="keyword">if</span> (_magic == <span class="type">MH_MAGIC</span> || _magic == <span class="type">MH_MAGIC_64</span>) {
-    _byteOrder = <span class="type">CDByteOrder_BigEndian</span>;
-} <span class="keyword">else</span> <span class="keyword">if</span> (_magic == <span class="type">MH_CIGAM</span> || _magic == <span class="type">MH_CIGAM_64</span>) {
-    _byteOrder = <span class="type">CDByteOrder_LittleEndian</span>;
-} <span class="keyword">else</span> {
-    <span class="keyword">return</span> <span class="keyword">nil</span>;
-}
-
-// readBigInt32的代码
-- (uint32_t)readBigInt32;
-{
-    uint32_t <span class="literal">result</span>;
-
-    <span class="keyword">if</span> (_offset + sizeof(<span class="literal">result</span>) &lt;= [_data length]) {
-        <span class="literal">result</span> = <span class="type">OSReadBigInt32</span>([_data bytes], _offset);
-        _offset += sizeof(<span class="literal">result</span>);
-    } <span class="keyword">else</span> {
-        [<span class="type">NSException</span> <span class="keyword">raise</span>:<span class="type">NSRangeException</span> format:@<span class="string">"Trying to read past end in %s"</span>, __cmd];
-        <span class="literal">result</span> = <span class="number">0</span>;
-    }
-
-    <span class="keyword">return</span> <span class="literal">result</span>;
-}
-</code></pre><p>我们在用LLDB看下<code>_data</code>里面的内容指向的内存地址：</p>
-<pre><code>(lldb) po _<span class="preprocessor">data</span>
-&lt;OS_dispatch_data: <span class="preprocessor">data</span>[<span class="number">0x100600b40</span>] = { leaf, size = <span class="number">199520</span>, <span class="keyword">buf </span>= <span class="number">0x100281000</span> }&gt;
-</code></pre><p>用<code>Xcode Memory</code>看下：</p>
-<p><img src="https://github.com/SatanWoo/BeeHive/blob/master/%E5%B1%8F%E5%B9%95%E5%BF%AB%E7%85%A7%202017-06-11%20%E4%B8%8B%E5%8D%883.25.06.png?raw=true" alt="屏幕快照 2017-06-11 下午3.25.06.png"> </p>
-<p>看起来是没错的。然后由于MacOSX本身是小端序的，<code>CFFAEDFE</code>这样的数据会被自动解析成<code>FE ED FA CF</code>。所以这样是有问题的。因此，<code>class-dump</code>采用了<code>OSReadBigInt32</code>的方式去解析：</p>
-<pre><code><span class="constant">OS_INLINE</span>
-<span class="constant">UInt32</span>
-<span class="constant">OSReadSwapInt32</span>(
-    volatile void               * base,
-    volatile <span class="constant">UInt</span>                 offset
-)
-{
-    <span class="class"><span class="keyword">union</span> <span class="title">lconv</span> {</span>
-    <span class="constant">UInt32</span> ul;
-    <span class="constant">UInt8</span>  uc[<span class="number">4</span>];
-    } *inp, outv;
-
-    <span class="regexp">//</span> 步骤<span class="number">1</span>
-    inp = (<span class="class"><span class="keyword">union</span> <span class="title">lconv</span> *)((<span class="title">UInt8</span> *)<span class="title">base</span> + <span class="title">offset</span>);</span>
-
-    /<span class="regexp">/ 步骤2
-    outv.uc[0] = inp-&gt;uc[3];
-    outv.uc[1] = inp-&gt;uc[2];
-    outv.uc[2] = inp-&gt;uc[1];
-    outv.uc[3] = inp-&gt;uc[0];
-
-    ／／ 步骤3
-    return (outv.ul);
-}</span>
-</code></pre><p>这个方法会利用<code>union</code>的特性，进行数据交换。我们还是用刚刚的例子来验证：</p>
-<ul>
-<li>步骤1按照默认方式读出数据：<code>FE ED FA CF</code>。</li>
-<li>步骤2进行交换，地址从低到高，分别是<code>FE ED FA CF</code>。</li>
-<li>步骤3利用<code>union</code>的特性，当成一个32的数输出，按照默认小端序解析，会成为<code>CF FA ED FE</code>。也即是<code>MH_CIGAM_64</code>，是小端序。</li>
-</ul>
-<p><strong>其实按照MachoView的解析方式，将<code>MH_CIGAM_64</code>和<code>MH_MAGIC_64</code>理解成MACHO文件和当前平台的编码顺序是否一致更好，如果解析出来是<code>MH_CIGAM_64</code>则表示不一致；否则一致。</strong></p>
-<h3 id="Segment（段）">Segment（段）</h3><p>讲完了<code>Mach-O</code>文件的header部分，我们需要进行Load Commands部分。但是在这之前，我想先大致介绍下Mach-O中的Segment及其下属的Section（节），让大家能更好的理解Load Commands。</p>
-<p>从整体上来说，<code>Mach-O</code>里面包含的段有以下这些：</p>
-<ul>
-<li><strong>__TEXT</strong> 代码段/只读数据段</li>
-<li><strong>__PAGEZERO</strong> Catch访问NULL指针的非法操作的段</li>
-<li><strong>__DATA</strong> 数据段</li>
-<li><strong>__LINKEDIT</strong> 包含需要被动态链接器使用的信息，包括符号表、字符串表、重定位项表等。</li>
-<li><strong>__OBJC</strong> 包含会被<code>Objective Runtime</code>使用到的一些数据。</li>
-</ul>
-<blockquote>
-<p>关于<code>__OBJC</code>这个段，我是一脸懵逼的，从Macho文档上看，他包含了一些编译器私有的节。没有任何公开的资料描述，具体让我研究研究再说。</p>
-</blockquote>
-<h4 id="Section（节）">Section（节）</h4><p>刚刚我们提到的<code>__TEXT</code>和<code>__DATA</code>段都分别有下属的节。</p>
-<p><strong><div style="color:red">之所以按照段-&gt;节的方式组织，是因为同一个段下的节，在内存的权限相同，可以不完全按照页大小进行对齐，节省内存空间。而对外整体暴露段，在装载程序的时候完整映射成一个vma，可以更好的做内存对齐。</div></strong></p>
-<table>
-<thead>
-<tr>
-<th>名称</th>
-<th>作用</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><strong>TEXT.</strong>text</td>
-<td><strong>只有</strong>可执行的机器码</td>
-</tr>
-<tr>
-<td><strong>TEXT.</strong>cstring</td>
-<td>去重后的C字符串</td>
-</tr>
-<tr>
-<td><strong>TEXT.</strong>const</td>
-<td>初始化过的常量</td>
-</tr>
-<tr>
-<td><strong>TEXT.</strong>stubs</td>
-<td>符号桩。本质上是一小段会直接跳入lazybinding的表对应项指针指向的地址的代码。</td>
-</tr>
-<tr>
-<td><strong>TEXT.</strong>stub_helper</td>
-<td>辅助函数。上述提到的lazybinding的表中对应项的指针在没有找到真正的符号地址的时候，都指向这。</td>
-</tr>
-<tr>
-<td><strong>TEXT.</strong>unwind_info</td>
-<td>用于存储处理异常情况信息</td>
-</tr>
-<tr>
-<td><strong>TEXT.</strong>eh_frame</td>
-<td>调试辅助信息</td>
-</tr>
-<tr>
-<td><strong>DATA.</strong>data</td>
-<td>初始化过的可变的数据</td>
-</tr>
-<tr>
-<td><strong>DATA.</strong>nl_symbol_ptr</td>
-<td>非lazy-binding的指针表，每个表项中的指针都指向一个在装载过程中，被动态链机器搜索完成的符号</td>
-</tr>
-<tr>
-<td><strong>DATA.</strong>la_symbol_ptr</td>
-<td>lazy-binding的指针表，每个表项中的指针一开始指向stub_helper</td>
-</tr>
-<tr>
-<td><strong>DATA.</strong>const</td>
-<td>没有初始化过的常量</td>
-</tr>
-<tr>
-<td><strong>DATA.</strong>mod_init_func</td>
-<td>初始化函数，在main之前调用</td>
-</tr>
-<tr>
-<td><strong>DATA.</strong>mod_term_func</td>
-<td>终止函数，在main返回之后调用</td>
-</tr>
-<tr>
-<td><strong>DATA.</strong>bss</td>
-<td>没有初始化的静态变量</td>
-</tr>
-<tr>
-<td><strong>DATA.</strong>common</td>
-<td>没有初始化过的符号声明</td>
-</tr>
-</tbody>
-</table>
-<p>其中，比较难以理解的可能是<code>__la_symbol_ptr</code>，让我们还是来以计算器的例子来理解：</p>
-<ul>
-<li>我们先从MachoView上找一个<code>stub</code>，比如[xxxx -&gt; _CFRelease]。</li>
-<li>其数据是<strong>FF256A7C0000</strong>，结合这个节是在__TEXT段中，我猜测是应该一段汇编代码的16进制表示。</li>
-</ul>
-<p><img src="https://github.com/SatanWoo/BeeHive/blob/master/%E5%B1%8F%E5%B9%95%E5%BF%AB%E7%85%A7%202017-06-12%20%E4%B8%8A%E5%8D%8810.48.21.png?raw=true" alt="屏幕快照 2017-06-12 上午10.48.21.png"> </p>
-<ul>
-<li>从Hopper中打开，查看对应偏移量的stub含义：</li>
-</ul>
-<p><img src="https://github.com/SatanWoo/BeeHive/blob/master/%E5%B1%8F%E5%B9%95%E5%BF%AB%E7%85%A7%202017-06-12%20%E4%B8%8A%E5%8D%8810.40.50.png?raw=true" alt="屏幕快照 2017-06-12 上午10.40.50.png"> </p>
-<p>我们可以看到这段代码的16进制表达就是：</p>
-<p><img src="https://github.com/SatanWoo/BeeHive/blob/master/%E5%B1%8F%E5%B9%95%E5%BF%AB%E7%85%A7%202017-06-13%20%E4%B8%8B%E5%8D%883.47.50.png?raw=true" alt="屏幕快照 2017-06-13 下午3.47.50.png"> </p>
-<p>从上图不难看出，stub的含义就是跳转到以<code>__la_symbol_ptr</code>对应表项数据所指向地址的代码。</p>
-<ul>
-<li>跳入以后，我们可以看到如下代码：</li>
-</ul>
-<p><img src="https://github.com/SatanWoo/BeeHive/blob/master/%E5%B1%8F%E5%B9%95%E5%BF%AB%E7%85%A7%202017-06-12%20%E4%B8%8A%E5%8D%8810.41.02.png?raw=true" alt="屏幕快照 2017-06-12 上午10.41.02.png"> </p>
-<p>可以看到，在还没加载程序的时候，对应表项的数据还是<code>dq _CFRelease</code>。双击点进去看一下：</p>
-<p><img src="https://github.com/SatanWoo/BeeHive/blob/master/%E5%B1%8F%E5%B9%95%E5%BF%AB%E7%85%A7%202017-06-13%20%E4%B8%8B%E5%8D%883.51.34.png?raw=true" alt="屏幕快照 2017-06-13 下午3.51.34.png"> </p>
-<p>这里显示的应该是有点问题，如果全0的话是不可能使用lazy binding的。</p>
-<p>我们还是用MachOView来看一下：</p>
-<p><img src="https://github.com/SatanWoo/BeeHive/blob/master/%E5%B1%8F%E5%B9%95%E5%BF%AB%E7%85%A7%202017-06-13%20%E4%B8%8B%E5%8D%884.04.04.png?raw=true" alt="屏幕快照 2017-06-13 下午4.04.04.png"> </p>
-<p>跳转到这个地址看看，没错了，处于stub_helper节里了：</p>
-<p><img src="https://github.com/SatanWoo/BeeHive/blob/master/%E5%B1%8F%E5%B9%95%E5%BF%AB%E7%85%A7%202017-06-13%20%E4%B8%8B%E5%8D%884.04.28.png?raw=true" alt="屏幕快照 2017-06-13 下午4.04.28.png"> </p>
-<p><img src="https://github.com/SatanWoo/BeeHive/blob/master/%E5%B1%8F%E5%B9%95%E5%BF%AB%E7%85%A7%202017-06-13%20%E4%B8%8B%E5%8D%884.04.33.png?raw=true" alt="屏幕快照 2017-06-13 下午4.04.33.png"> </p>
-<blockquote>
-<p><code>__la_symbol_ptr</code> 里面所有表项的数据都会被bind成<code>dyld_stub_helper</code>。</p>
-</blockquote>
-]]></content>
-    <summary type="html">
-    <![CDATA[<h3 id="起因">起因</h3><p>最近在公司里和一些同事搞了一些东西，略微底层。于是希望借这个机会好好把<code>Macho</code>相关的知识点梳理下。</p>
-<p>虽然网上关于<code>Macho</code>的文章介绍一大堆，但是我希望能够从<code>]]>
     </summary>
     
       <category term="iOS" scheme="http://satanwoo.github.io/tags/iOS/"/>
