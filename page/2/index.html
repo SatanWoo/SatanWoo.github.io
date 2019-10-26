@@ -62,6 +62,234 @@
       <div class="outer">
         <section id="main">
   
+    <article id="post-Swift-UITransition-iOS8" class="article article-type-post" itemscope itemprop="blogPost">
+  <div class="article-meta">
+    <a href="/2015/11/12/Swift-UITransition-iOS8/" class="article-date">
+  <time datetime="2015-11-11T18:33:50.000Z" itemprop="datePublished">2015-11-12</time>
+</a>
+    
+  </div>
+  <div class="article-inner">
+    
+    
+      <header class="article-header">
+        
+  
+    <h1 itemprop="name">
+      <a class="article-title" href="/2015/11/12/Swift-UITransition-iOS8/">Swift每日一练：自定义转场在iOS8中的那些坑</a>
+    </h1>
+  
+
+      </header>
+    
+    <div class="article-entry" itemprop="articleBody">
+      
+        <p>之前因为面试的缘故发现了自己在自定义转场这块有点欠缺，今天拿Swift练下手，实现一个自定义转场的效果。<em>没耐心的话请直接翻到最后吧，我前面都是铺垫呢。</em></p>
+<p>首先让我们先来看看最后实现的效果：<br><img src="http://7lrzqz.com1.z0.glb.clouddn.com/WZCustomTransition.gif"></p>
+<p>下面就让我们一步步来看看是如何实现这个效果的。</p>
+<h3 id="自定义转场">自定义转场</h3><p>要实现自定义转场动画，比较重要的就是三个部分。</p>
+<ul>
+<li><p>UIViewControllerContextTransition</p>
+<p>这个接口主要用来提供切换上下文给开发者使用，包含了从哪个VC到哪个VC等各类信息，一般不需要开发者自己实现。</p>
+<p>本文关注的包含了如下一些内容：</p>
+<pre><code><span class="number">1.</span> - (<span class="built_in">UIView</span> *)containerView; 
+<span class="comment">// VC切换所发生的view容器    </span>
+
+<span class="number">2.</span> - (<span class="built_in">UIViewController</span> *)viewControllerForKey:(<span class="built_in">NSString</span> *)key;
+<span class="comment">// 根据UITransitionContextFromViewControllerKey和UITransitionContextToViewControllerKey两种，分别返回将要切出和切入的ViewController。</span>
+
+<span class="number">3.</span> - (<span class="keyword">void</span>)completeTransition:(<span class="built_in">BOOL</span>)didComplete; 
+<span class="comment">// 报告切换已经完成。</span>
+</code></pre></li>
+<li><p>UIViewControllerAnimatedTransition</p>
+<p>这个接口主要用来定义如何完成转场动画，同时定义转场动画的持续时间。（在本文中我们不考虑交互式的转场）</p>
+<pre><code><span class="number">1.</span> - (<span class="built_in">NSTimeInterval</span>)transitionDuration:(<span class="keyword">id</span> &lt; <span class="built_in">UIViewControllerContextTransitioning</span> &gt;)transitionContext; 
+<span class="comment">// 返回转场动画持续的时间</span>
+
+<span class="number">2.</span> - (<span class="keyword">void</span>)animateTransition:(<span class="keyword">id</span> &lt; <span class="built_in">UIViewControllerContextTransitioning</span> &gt;)transitionContext; 
+<span class="comment">// 我们自定义的转场要在这里完成</span>
+</code></pre></li>
+<li><p>UIViewControllerTransitionDelegate    </p>
+<p>这个接口主要用于指定，我们希望采用哪种转场效果（比如你可以根据不同的状态，切换不同的自定义专场效果）</p>
+<pre><code><span class="number">1.</span> - (<span class="keyword">id</span>&lt; <span class="built_in">UIViewControllerAnimatedTransitioning</span> &gt;)animationControllerForPresentedController:(<span class="built_in">UIViewController</span> *)presented presentingController:(<span class="built_in">UIViewController</span> *)presenting sourceController:(<span class="built_in">UIViewController</span> *)source;
+<span class="comment">// 当弹出模态窗口的时候，使用什么转场效果</span>
+
+<span class="number">2.</span> - (<span class="keyword">id</span>&lt; <span class="built_in">UIViewControllerAnimatedTransitioning</span> &gt;)animationControllerForDismissedController:(<span class="built_in">UIViewController</span> *)dismissed;
+<span class="comment">// 当关闭模态窗口的时候，使用什么转场效果</span>
+</code></pre></li>
+</ul>
+<h3 id="实现">实现</h3><p>知道了转场动画需要的必要条件，我们可以很轻松分别实现三个部分。</p>
+<p>第一部分UIViewControllerContextTransition在本文中并没有特殊定制化的地方，直接完成。</p>
+<p>第二部分关于UIViewControllerAnimatedTransition的代码如下：</p>
+<pre><code>class SwipeAnimator: <span class="built_in">NSObject</span>, <span class="built_in">UIViewControllerAnimatedTransitioning</span> {
+    <span class="keyword">enum</span> SwipeTo {
+        <span class="keyword">case</span> Main
+        <span class="keyword">case</span> Modal
+    };
+
+    var transitonTo:SwipeTo = <span class="variable">.Main</span>
+
+    <span class="comment">// 0. 返回动画时间</span>
+    func transitionDuration(transitionContext: <span class="built_in">UIViewControllerContextTransitioning</span>) -&gt; <span class="built_in">NSTimeInterval</span> {
+        <span class="keyword">return</span> <span class="number">1.0</span>
+    }
+
+    func animateTransition(transitionContext: <span class="built_in">UIViewControllerContextTransitioning</span>) {
+        <span class="comment">// 1. 获取相关资源</span>
+        let fromVC = transitionContext<span class="variable">.viewControllerForKey</span>(<span class="built_in">UITransitionContextFromViewControllerKey</span>)!
+
+        let toView = transitionContext<span class="variable">.viewForKey</span>(<span class="built_in">UITransitionContextToViewKey</span>)
+
+        <span class="comment">// 2. 弹出模态</span>
+        <span class="keyword">if</span> (<span class="keyword">self</span><span class="variable">.transitonTo</span> == <span class="variable">.Modal</span>) {
+            <span class="keyword">if</span> toView != <span class="literal">nil</span> {
+                transitionContext<span class="variable">.containerView</span>()<span class="variable">.addSubview</span>(toView!)
+
+                toView!<span class="variable">.alpha</span> = <span class="number">0.0</span>
+
+                <span class="comment">// 2.1 以左上角为锚点旋转</span>
+                fromVC<span class="variable">.view</span><span class="variable">.layer</span><span class="variable">.anchorPoint</span> = <span class="built_in">CGPoint</span>(x: <span class="number">0</span>, y: <span class="number">0</span>)
+                fromVC<span class="variable">.view</span><span class="variable">.layer</span><span class="variable">.position</span> = <span class="built_in">CGPointMake</span>(<span class="number">0</span>, <span class="number">0</span>)
+
+                <span class="built_in">UIView</span><span class="variable">.animateWithDuration</span>(<span class="number">1.0</span>, animations: { () -&gt; Void <span class="keyword">in</span>
+                    fromVC<span class="variable">.view</span><span class="variable">.transform</span> = <span class="built_in">CGAffineTransformMakeRotation</span>(<span class="built_in">CGFloat</span>(-M_PI/<span class="number">2</span>))
+                    toView!<span class="variable">.alpha</span> = <span class="number">1.0</span>
+                }, completion: { (completion:Bool) -&gt; Void <span class="keyword">in</span>
+                    <span class="comment">// 2.2 报告转场动画完成</span>
+                    transitionContext<span class="variable">.completeTransition</span>(!transitionContext<span class="variable">.transitionWasCancelled</span>())
+                })
+            }
+        } <span class="keyword">else</span> {
+            <span class="comment">// 3. 关闭模态</span>
+            <span class="keyword">if</span> fromView != <span class="literal">nil</span> {
+                fromView!<span class="variable">.alpha</span> = <span class="number">1.0</span>
+                <span class="built_in">UIView</span><span class="variable">.animateWithDuration</span>(<span class="number">1.0</span>, animations: { () -&gt; Void <span class="keyword">in</span>
+                    toVC<span class="variable">.view</span><span class="variable">.transform</span> = <span class="built_in">CGAffineTransformMakeRotation</span>(<span class="number">0</span>)
+                    fromView!<span class="variable">.alpha</span> = <span class="number">0.0</span>
+                }, completion: { (completion:Bool) -&gt; Void <span class="keyword">in</span>
+                    transitionContext<span class="variable">.completeTransition</span>(!transitionContext<span class="variable">.transitionWasCancelled</span>())
+                })
+            }
+        }
+    }
+}
+</code></pre><p>实现非常简单，我们来一步步看下。</p>
+<ul>
+<li><ol>
+<li>根据UIViewControllerAnimatedTransition协议返回动画时间</li>
+</ol>
+</li>
+<li><ol>
+<li>根据UIViewControllerContextTransition获取我们需要操作的即将切出的ViewController(fromVC)以及即将切入的页面(toView)，<strong>为什么要用这种获取方式，稍微在重点分析会指出</strong></li>
+</ol>
+</li>
+<li><ol>
+<li>当遇到是弹出模态窗口转场的时候，我们首先将toView加入到转场过程提供的一个containView中，然后改变fromVC的锚点，进行旋转，同时我们对toView进行了一个淡入淡出。当转场动画完成以后，<strong>在回调的closure中报告转场动画已经完成</strong>。</li>
+</ol>
+</li>
+<li><ol>
+<li>当关闭模态转场的时候，这个时候转场的出和入就正好和弹出的时候截然相反。原先的fromVC成了现在的toVC，因此我们在这里将toVC旋转回原来的位置。当然别忘了我们的淡入淡出啦，原理是一样的，只要改变fromView的alpha即可。动画完成后，依然要报告我们的转场完成了。</li>
+</ol>
+</li>
+</ul>
+<p>第三部分，UIViewControllerTransitionDelegate的实现依然非常简单，我们仅仅需要告知转场发生时，我们具体要采用哪种转场效果就好了。</p>
+<pre><code><span class="func"><span class="keyword">func</span> <span class="title">animationControllerForPresentedController</span><span class="params">(presented: UIViewController, presentingController presenting: UIViewController, sourceController source: UIViewController)</span></span> -&gt; <span class="type">UIViewControllerAnimatedTransitioning</span>? {
+    <span class="keyword">self</span>.animator.transitonTo = .<span class="type">Modal</span>
+    <span class="keyword">return</span> <span class="keyword">self</span>.animator
+}
+
+<span class="func"><span class="keyword">func</span> <span class="title">animationControllerForDismissedController</span><span class="params">(dismissed: UIViewController)</span></span> -&gt; <span class="type">UIViewControllerAnimatedTransitioning</span>? {
+    <span class="keyword">self</span>.animator.transitonTo = .<span class="type">Main</span>
+    <span class="keyword">return</span> <span class="keyword">self</span>.animator
+}
+</code></pre><p>在这里，我们复用了同一个转场效果，通过不同的transitionTo参数进行控制。你当然也可以给两个转场分别生成对应不同的转场效果。</p>
+<h3 id="iOS8的坑">iOS8的坑</h3><p>嘿嘿，重头戏来了，千万别错过。</p>
+<p>一开始实现这个转场效果的时候，压根没想到这么复杂，但是，突然发现了一个很大的问题：</p>
+<p><strong>当弹出模态窗口的时候，转场效果正常，最后成功显示模态界面。但是当关闭模态窗口的时候，转场效果依然正确，但是转场结束后，整个屏幕都黑了。</strong></p>
+<p><em>What the F*ck!!!</em></p>
+<p>我以为是我自己实现有问题，但是我去Github上找了几个著名的转场效果跑了下，都存在这个问题，那我就百思不得其解了呀！！！</p>
+<h4 id="误打误撞">误打误撞</h4><p>从网上搜寻了很久之后，我还是没有头绪，于是我首先尝试将如下代码中</p>
+<pre><code><span class="tag">var</span> modalVC = <span class="function"><span class="title">UIStoryboard</span><span class="params">(name: <span class="string">"Main"</span>, bundle: nil)</span></span>.<span class="function"><span class="title">instantiateViewControllerWithIdentifier</span><span class="params">(<span class="string">"ModalViewController"</span>)</span></span> as! UIViewController
+modalVC<span class="class">.transitioningDelegate</span> = self
+modalVC<span class="class">.modalPresentationStyle</span> = <span class="class">.Custom</span>
+<span class="function"><span class="title">presentViewController</span><span class="params">(modalVC, animated: true, completion: nil)</span></span>
+</code></pre><p><strong>modalVC.modalPresentationStyle = .Custom</strong>中的.Custom改成了.FullScreen。<br>这一下子就给我整好了！</p>
+<p>所以，给大家提个醒，如果遇到相似的问题，解决方法很简单，就是.FullScreen即可。</p>
+<h4 id="深层原因">深层原因</h4><p>作为一个站在红旗下的三好学生，弄懂问题的深层原因才是最主要的，通过不过的debug，我终于弄懂了。</p>
+<p><strong>首先，我们要强调一个基本知识。一个UIView的superview最多只能由一个。当一个本身处于别的UIView下的subView被添加到另一个UIView上的时候，它就自动被从前一个UIView的Hierarchy中移除了。</strong></p>
+<p>还记得我们之前一个很奇怪的写法吗？<br>根据UIViewControllerContextTransition获取我们需要操作的即将切出的ViewController(fromVC)以及即将切入的页面(toView)</p>
+<p>我们这么写的原因就是因为我们刚刚强调的基本知识，别急，让我们一步步来解析。</p>
+<p>在iOS8中，苹果提供了一个新的API：</p>
+<pre><code><span class="constant">@availability</span>(iOS, introduced=<span class="number">8.0</span>)
+<span class="function"><span class="keyword">func</span> <span class="title">viewForKey</span><span class="params">(key: String)</span> -&gt; <span class="title">UIView</span>?</span>
+</code></pre><p>并且在文档中明确强调了一点：</p>
+<pre><code><span class="comment">// Currently only two keys are defined by the</span>
+<span class="comment">// system - UITransitionContextToViewControllerKey, and</span>
+<span class="comment">// UITransitionContextFromViewControllerKey. </span>
+<span class="comment">// Animators should not directly manipulate a view controller's views and should</span>
+<span class="comment">// use viewForKey: to get views instead.</span>
+<span class="func"><span class="keyword">func</span> <span class="title">viewControllerForKey</span><span class="params">(key: String)</span></span> -&gt; <span class="type">UIViewController</span>?
+</code></pre><p>什么意思呢？<br>之前在iOS7中，开发者需要通过<strong>viewControllerForKey</strong>这个方法获取切入切出的ViewController，并直接操作ViewController对应的View来编写转场动画。而在iOS8以后，苹果规定必须使用<strong>viewForKey</strong>来获取fromView和toView来进行转场动画的操作。</p>
+<p>那这个API的更改和黑屏有什么关联呢？</p>
+<ul>
+<li>在整个转场过程中，我们都依赖于转场上下文transitonContext提供的containerView容器进行view动画的操作。这是因为在转场完成前，即将<strong>切入</strong>的viewcontroller都不存在于当前的可视界面的视图层级内(View Hierarchy)。因此，苹果提供了一个过渡的容器给我们使用（如果大家debug下的话，就会发现在转场过程之中，UIWindow上多了一个UITransitionView，就是切换上下文的containerView）。</li>
+<li>在iOS7的实现中，我们需要将fromVC.view和toVC.view都通过addSubView的方式添加到容器View上进行动画展示。<strong>由于是直接操作了ViewController的view，因此，fromVC的view会被从当前的视图层级中移除</strong></li>
+<li><strong>但是，iOS7中，会在转场动画完成后，自动将fromVC的view添加回原先fromVC从属的父视图中</strong></li>
+<li>iOS8中不会</li>
+<li>在本文的初版实现中，在转场过程中当判断transitionTo == .Main的时候，将此时toViewController.view (也就是原先的主窗口) 添加到了containerView上。因此，当转场结束的时候，containerView从window可见视图层级中移除了，因此就变得不可见，从而变成黑屏了。</li>
+</ul>
+<p>那么为什么模态窗口在转场过程后可见呢？</p>
+<ul>
+<li>因为这个特性依然正确。</li>
+</ul>
+<p>containerView到底是啥?</p>
+<ul>
+<li>就是一个过渡的UITransitionView，一个转场效果对应生成一个（会复用）。</li>
+<li>在转场结束后自动从视图层级中移除，因此不需要大家手动进行removeFromSuperView。</li>
+</ul>
+<p>那么viewForKey和viewControlelrForKey直接操纵view的区别呢？</p>
+<ul>
+<li>viewForKey很可能返回的是一个完全克隆VC的view的对象。</li>
+</ul>
+<p>到这，相信大家都弄懂了吧，我真是太佩服我自己了。</p>
+
+      
+    </div>
+    <footer class="article-footer">
+      <a data-url="http://satanwoo.github.io/2015/11/12/Swift-UITransition-iOS8/" data-id="ck27uu1bi001n18i1encmjenr" class="article-share-link">Share</a>
+      
+        <a href="http://satanwoo.github.io/2015/11/12/Swift-UITransition-iOS8/#disqus_thread" class="article-comment-link">Comments</a>
+      
+      
+  <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Swift/">Swift</a></li></ul>
+
+    </footer>
+  </div>
+  
+</article>
+
+<div id="disqus_thread"></div>
+<script>
+
+/**
+*  RECOMMENDED CONFIGURATION VARIABLES: EDIT AND UNCOMMENT THE SECTION BELOW TO INSERT DYNAMIC VALUES FROM YOUR PLATFORM OR CMS.
+*  LEARN WHY DEFINING THESE VARIABLES IS IMPORTANT: https://disqus.com/admin/universalcode/#configuration-variables*/
+/*
+var disqus_config = function () {
+this.page.url = PAGE_URL;  // Replace PAGE_URL with your page's canonical URL variable
+this.page.identifier = PAGE_IDENTIFIER; // Replace PAGE_IDENTIFIER with your page's unique identifier variable
+};
+*/
+(function() { // DON'T EDIT BELOW THIS LINE
+var d = document, s = d.createElement('script');
+s.src = 'https://satanwoo-2.disqus.com/embed.js';
+s.setAttribute('data-timestamp', +new Date());
+(d.head || d.body).appendChild(s);
+})();
+</script>
+<noscript>Please enable JavaScript to view the <a href="https://disqus.com/?ref_noscript">comments powered by Disqus.</a></noscript>
+                                
+  
     <article id="post-Understand-Viper" class="article article-type-post" itemscope itemprop="blogPost">
   <div class="article-meta">
     <a href="/2015/11/05/Understand-Viper/" class="article-date">
@@ -210,7 +438,7 @@
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/11/05/Understand-Viper/" data-id="cjxt2lvns001eu2i1kyyh1qz6" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/11/05/Understand-Viper/" data-id="ck27uu1b4001e18i150ydgb1r" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2015/11/05/Understand-Viper/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -461,7 +689,7 @@ objectPath.<span class="keyword">get</span>(obj, <span class="string">'a.\u1200'
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/11/05/Object-Path-Source-Code/" data-id="cjxt2lvpe002eu2i1s9cjcxez" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/11/05/Object-Path-Source-Code/" data-id="ck27uu1cs002e18i17eeg5i2d" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2015/11/05/Object-Path-Source-Code/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -546,7 +774,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/10/29/Learn-Android-Day-by-Day/" data-id="cjxt2lvpt002su2i15nlyr59c" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/10/29/Learn-Android-Day-by-Day/" data-id="ck27uu1d7002v18i1p6qyqtm6" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2015/10/29/Learn-Android-Day-by-Day/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -780,7 +1008,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/10/29/Swift-Count-Down-Label/" data-id="cjxt2lvob001pu2i11dof8rkx" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/10/29/Swift-Count-Down-Label/" data-id="ck27uu1bt001p18i10v4av6vl" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2015/10/29/Swift-Count-Down-Label/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -933,7 +1161,7 @@ func computeAngle(p1:<span class="type">CGPoint</span> , p2:<span class="type">C
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/10/27/Swift-Circle-Slider/" data-id="cjxt2lvoe001ru2i1r83raa65" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/10/27/Swift-Circle-Slider/" data-id="ck27uu1bx001r18i1vuva9ddc" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2015/10/27/Swift-Circle-Slider/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -1177,7 +1405,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/10/14/GLCalendarView/" data-id="cjxt2lvqm003au2i1yqpby12i" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/10/14/GLCalendarView/" data-id="ck27uu1dw003d18i1n33g5lwp" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2015/10/14/GLCalendarView/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -1420,7 +1648,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/09/30/Debounce-and-Throttle-in-iOS/" data-id="cjxt2lvr4003nu2i1km87tjo1" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/09/30/Debounce-and-Throttle-in-iOS/" data-id="ck27uu1ee003q18i1j2mgc1b5" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2015/09/30/Debounce-and-Throttle-in-iOS/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -1743,7 +1971,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/09/23/flux-js-part-one/" data-id="cjxt2lvn3000wu2i14z20wzwr" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/09/23/flux-js-part-one/" data-id="ck27uu1aj000w18i1yuua9ldw" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2015/09/23/flux-js-part-one/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -2437,7 +2665,7 @@ CountryModel<span class="keyword">*</span> country = [[CountryModel alloc] initW
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/09/17/code-of-JSONModel/" data-id="cjxt2lvne0014u2i105g4t9er" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/09/17/code-of-JSONModel/" data-id="ck27uu1at001418i1mr6084ow" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2015/09/17/code-of-JSONModel/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -2507,7 +2735,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/09/11/A-New-Start/" data-id="cjxt2lvks0000u2i199fsqtup" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/09/11/A-New-Start/" data-id="ck27uu18h000018i1x7acwti1" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2015/09/11/A-New-Start/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -2556,7 +2784,7 @@ s.setAttribute('data-timestamp', +new Date());
   <div class="widget-wrap">
     <h3 class="widget-title">Tags</h3>
     <div class="widget">
-      <ul class="tag-list"><li class="tag-list-item"><a class="tag-list-link" href="/tags/Android/">Android</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/C/">C</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/C/">C++</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Growth/">Growth</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/JavaScript/">JavaScript</a><span class="tag-list-count">3</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Machine-Learning/">Machine Learning</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Math/">Math</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Performance/">Performance</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/R/">R</a><span class="tag-list-count">2</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Reverse-Engineering/">Reverse Engineering</a><span class="tag-list-count">6</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Swift/">Swift</a><span class="tag-list-count">6</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/XNU/">XNU</a><span class="tag-list-count">2</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/c/">c++</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/iOS/">iOS</a><span class="tag-list-count">41</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/shell/">shell</a><span class="tag-list-count">1</span></li></ul>
+      <ul class="tag-list"><li class="tag-list-item"><a class="tag-list-link" href="/tags/Android/">Android</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/C/">C</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/C/">C++</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Growth/">Growth</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/JavaScript/">JavaScript</a><span class="tag-list-count">3</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Machine-Learning/">Machine Learning</a><span class="tag-list-count">2</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Math/">Math</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Performance/">Performance</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/R/">R</a><span class="tag-list-count">2</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Reverse-Engineering/">Reverse Engineering</a><span class="tag-list-count">6</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Swift/">Swift</a><span class="tag-list-count">6</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/XNU/">XNU</a><span class="tag-list-count">2</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/c/">c++</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/iOS/">iOS</a><span class="tag-list-count">42</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/shell/">shell</a><span class="tag-list-count">1</span></li></ul>
     </div>
   </div>
 
@@ -2565,7 +2793,7 @@ s.setAttribute('data-timestamp', +new Date());
   <div class="widget-wrap">
     <h3 class="widget-title">Tag Cloud</h3>
     <div class="widget tagcloud">
-      <a href="/tags/Android/" style="font-size: 10px;">Android</a> <a href="/tags/C/" style="font-size: 10px;">C</a> <a href="/tags/C/" style="font-size: 10px;">C++</a> <a href="/tags/Growth/" style="font-size: 10px;">Growth</a> <a href="/tags/JavaScript/" style="font-size: 15px;">JavaScript</a> <a href="/tags/Machine-Learning/" style="font-size: 10px;">Machine Learning</a> <a href="/tags/Math/" style="font-size: 10px;">Math</a> <a href="/tags/Performance/" style="font-size: 10px;">Performance</a> <a href="/tags/R/" style="font-size: 12.5px;">R</a> <a href="/tags/Reverse-Engineering/" style="font-size: 17.5px;">Reverse Engineering</a> <a href="/tags/Swift/" style="font-size: 17.5px;">Swift</a> <a href="/tags/XNU/" style="font-size: 12.5px;">XNU</a> <a href="/tags/c/" style="font-size: 10px;">c++</a> <a href="/tags/iOS/" style="font-size: 20px;">iOS</a> <a href="/tags/shell/" style="font-size: 10px;">shell</a>
+      <a href="/tags/Android/" style="font-size: 10px;">Android</a> <a href="/tags/C/" style="font-size: 10px;">C</a> <a href="/tags/C/" style="font-size: 10px;">C++</a> <a href="/tags/Growth/" style="font-size: 10px;">Growth</a> <a href="/tags/JavaScript/" style="font-size: 15px;">JavaScript</a> <a href="/tags/Machine-Learning/" style="font-size: 12.5px;">Machine Learning</a> <a href="/tags/Math/" style="font-size: 10px;">Math</a> <a href="/tags/Performance/" style="font-size: 10px;">Performance</a> <a href="/tags/R/" style="font-size: 12.5px;">R</a> <a href="/tags/Reverse-Engineering/" style="font-size: 17.5px;">Reverse Engineering</a> <a href="/tags/Swift/" style="font-size: 17.5px;">Swift</a> <a href="/tags/XNU/" style="font-size: 12.5px;">XNU</a> <a href="/tags/c/" style="font-size: 10px;">c++</a> <a href="/tags/iOS/" style="font-size: 20px;">iOS</a> <a href="/tags/shell/" style="font-size: 10px;">shell</a>
     </div>
   </div>
 
@@ -2574,7 +2802,7 @@ s.setAttribute('data-timestamp', +new Date());
   <div class="widget-wrap">
     <h3 class="widget-title">Archives</h3>
     <div class="widget">
-      <ul class="archive-list"><li class="archive-list-item"><a class="archive-list-link" href="/archives/2019/07/">July 2019</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2019/01/">January 2019</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2018/12/">December 2018</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2018/10/">October 2018</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2018/05/">May 2018</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2018/04/">April 2018</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2018/02/">February 2018</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2018/01/">January 2018</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/11/">November 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/10/">October 2017</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/09/">September 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/08/">August 2017</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/07/">July 2017</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/06/">June 2017</a><span class="archive-list-count">3</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/04/">April 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/01/">January 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/10/">October 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/09/">September 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/07/">July 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/05/">May 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/04/">April 2016</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/03/">March 2016</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/02/">February 2016</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/12/">December 2015</a><span class="archive-list-count">6</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/11/">November 2015</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/10/">October 2015</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/09/">September 2015</a><span class="archive-list-count">4</span></li></ul>
+      <ul class="archive-list"><li class="archive-list-item"><a class="archive-list-link" href="/archives/2019/10/">October 2019</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2019/07/">July 2019</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2019/01/">January 2019</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2018/12/">December 2018</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2018/10/">October 2018</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2018/05/">May 2018</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2018/04/">April 2018</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2018/02/">February 2018</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2018/01/">January 2018</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/11/">November 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/10/">October 2017</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/09/">September 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/08/">August 2017</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/07/">July 2017</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/06/">June 2017</a><span class="archive-list-count">3</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/04/">April 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/01/">January 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/10/">October 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/09/">September 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/07/">July 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/05/">May 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/04/">April 2016</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/03/">March 2016</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/02/">February 2016</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/12/">December 2015</a><span class="archive-list-count">6</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/11/">November 2015</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/10/">October 2015</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/09/">September 2015</a><span class="archive-list-count">4</span></li></ul>
     </div>
   </div>
 
@@ -2584,6 +2812,10 @@ s.setAttribute('data-timestamp', +new Date());
     <h3 class="widget-title">Recents</h3>
     <div class="widget">
       <ul>
+        
+          <li>
+            <a href="/2019/10/27/MNN1/">浅谈移动工程师跨界机器学习之路</a>
+          </li>
         
           <li>
             <a href="/2019/07/07/RevisitAutorelease2/">Revisit iOS Autorelease之二</a>
@@ -2599,10 +2831,6 @@ s.setAttribute('data-timestamp', +new Date());
         
           <li>
             <a href="/2019/01/26/LD-2/">LD-2</a>
-          </li>
-        
-          <li>
-            <a href="/2019/01/26/shared-ptr/">从C++ std::shared_ptr 原理来看看栈溢出的危害</a>
           </li>
         
       </ul>

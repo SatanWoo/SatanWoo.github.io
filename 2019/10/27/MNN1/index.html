@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  
+  <title>浅谈移动工程师跨界机器学习之路 | SatanWoo</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+  <meta name="description" content="题记相信从事移动开发的朋友们肯定看到过一个表情包：“iOS 开发没人要啦”。
+
+虽说是搞笑之图，却也反映了移动开发领域的部分焦虑感。网上甚至有文章贴出“难上加难”的数据，称：“相比于 2017 年，2018 年 Android 程序员人均面邀数减少40%，iOS 程序员降幅更高达57%，即平均每个移动端程序员在找工作时收到的面邀数比去年减少一半。”
+撇开玩笑之言，移动开发人员的焦虑感来自何处？我从">
+<meta property="og:type" content="article">
+<meta property="og:title" content="浅谈移动工程师跨界机器学习之路">
+<meta property="og:url" content="http://satanwoo.github.io/2019/10/27/MNN1/index.html">
+<meta property="og:site_name" content="SatanWoo">
+<meta property="og:description" content="题记相信从事移动开发的朋友们肯定看到过一个表情包：“iOS 开发没人要啦”。
+
+虽说是搞笑之图，却也反映了移动开发领域的部分焦虑感。网上甚至有文章贴出“难上加难”的数据，称：“相比于 2017 年，2018 年 Android 程序员人均面邀数减少40%，iOS 程序员降幅更高达57%，即平均每个移动端程序员在找工作时收到的面邀数比去年减少一半。”
+撇开玩笑之言，移动开发人员的焦虑感来自何处？我从">
+<meta property="og:image" content="https://github.com/SatanWoo/BeeHive/blob/master/mnn_1.jpeg?raw=true">
+<meta property="og:image" content="https://github.com/SatanWoo/BeeHive/blob/master/mnn_3.jpeg?raw=true">
+<meta property="og:image" content="https://github.com/SatanWoo/BeeHive/blob/master/mnn_2.png?raw=true">
+<meta property="og:image" content="https://github.com/SatanWoo/BeeHive/blob/master/mnn_4.png?raw=true">
+<meta property="og:image" content="https://github.com/SatanWoo/BeeHive/blob/master/mnn_5.jpeg?raw=true">
+<meta property="og:updated_time" content="2019-10-26T17:44:53.000Z">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="浅谈移动工程师跨界机器学习之路">
+<meta name="twitter:description" content="题记相信从事移动开发的朋友们肯定看到过一个表情包：“iOS 开发没人要啦”。
+
+虽说是搞笑之图，却也反映了移动开发领域的部分焦虑感。网上甚至有文章贴出“难上加难”的数据，称：“相比于 2017 年，2018 年 Android 程序员人均面邀数减少40%，iOS 程序员降幅更高达57%，即平均每个移动端程序员在找工作时收到的面邀数比去年减少一半。”
+撇开玩笑之言，移动开发人员的焦虑感来自何处？我从">
+  
+    <link rel="alternative" href="/atom.xml" title="SatanWoo" type="application/atom+xml">
+  
+  
+    <link rel="icon" href="/favicon.png">
+  
+  <link rel="stylesheet" href="/css/style.css" type="text/css">
+  
+
+</head>
+<body>
+  <div id="container">
+    <div id="wrap">
+      <header id="header">
+  <div id="banner"></div>
+  <div id="header-outer" class="outer">
+    <div id="header-title" class="inner">
+      <h1 id="logo-wrap">
+        <a href="/" id="logo">SatanWoo</a>
+      </h1>
+      
+    </div>
+    <div id="header-inner" class="inner">
+      <nav id="main-nav">
+        <a id="main-nav-toggle" class="nav-icon"></a>
+        
+          <a class="main-nav-link" href="/">Home</a>
+        
+          <a class="main-nav-link" href="/archives">Archives</a>
+        
+          <a class="main-nav-link" href="/sitemap.xml">map</a>
+        
+      </nav>
+      <nav id="sub-nav">
+        
+          <a id="nav-rss-link" class="nav-icon" href="/atom.xml" title="RSS Feed"></a>
+        
+        <a id="nav-search-btn" class="nav-icon" title="Search"></a>
+      </nav>
+      <div id="search-form-wrap">
+        <form action="//google.com/search" method="get" accept-charset="UTF-8" class="search-form"><input type="search" name="q" results="0" class="search-form-input" placeholder="Search"><button type="submit" class="search-form-submit">&#xF002;</button><input type="hidden" name="sitesearch" value="http://satanwoo.github.io"></form>
+      </div>
+    </div>
+  </div>
+</header>
+      <div class="outer">
+        <section id="main"><article id="post-MNN1" class="article article-type-post" itemscope itemprop="blogPost">
+  <div class="article-meta">
+    <a href="/2019/10/27/MNN1/" class="article-date">
+  <time datetime="2019-10-26T17:23:39.000Z" itemprop="datePublished">2019-10-27</time>
+</a>
+    
+  </div>
+  <div class="article-inner">
+    
+    
+      <header class="article-header">
+        
+  
+    <h1 class="article-title" itemprop="name">
+      浅谈移动工程师跨界机器学习之路
+    </h1>
+  
+
+      </header>
+    
+    <div class="article-entry" itemprop="articleBody">
+      
+        <h3 id="题记">题记</h3><p>相信从事移动开发的朋友们肯定看到过一个表情包：“iOS 开发没人要啦”。</p>
+<p><img src="https://github.com/SatanWoo/BeeHive/blob/master/mnn_1.jpeg?raw=true" alt="15706761042966.jpg"></p>
+<p>虽说是搞笑之图，却也反映了移动开发领域的部分焦虑感。网上甚至有文章贴出<strong>“难上加难”</strong>的数据，称：“相比于 2017 年，2018 年 Android 程序员人均面邀数<b style="color:red">减少40%</b>，iOS 程序员<b style="color:red">降幅更高达57%</b>，即<strong>平均每个移动端程序员在找工作时收到的面邀数比去年减少一半</strong>。”</p>
+<p>撇开玩笑之言，移动开发人员的焦虑感来自何处？我从自身角度及与他人沟通，大致归纳出如下几点：</p>
+<ul>
+<li>跨平台框架、如 Flutter 对 Native 研发模式的冲击。</li>
+<li>业界关注重点从移动时代向人工智能等领域转移。</li>
+<li>对自身掌握技术壁垒的担忧。</li>
+</ul>
+<p>细细品味这三点，我想<strong>开发者在面临业界趋势转移，担忧自身竞争力不足才是焦虑产生的内在根本</strong>。我曾和几个国内知名的 iOS 开发者闲聊，他们表示：都 <strong>9102 </strong>年了，<strong>从大量公开的文章来看，大家还是局限于研究 Runtime，Runloop，block 源码分析等一些比较缺少创新的知识点，让人感受行业的停滞不前。</strong></p>
+<p>当然，也有不少开发者在积极拥抱新技术。身边的许多朋友也在了解机器学习，自学相关课程等。但是其中大部分都反馈：学完了基础知识，不知道如何应用；也不知道这些东西能对自己日常工作带来怎样的帮助。<strong>最终的结果就演变成了学了就忘，无法产生实质价值</strong>。</p>
+<p>那是不是事情就此陷入了僵局呢？抱着怀疑及学习的态度，我在2018年中旬加入了<strong>手淘-端智能组</strong>，参与了一款名叫 <strong><a href="https://github.com/alibaba/MNN" target="_blank" rel="external">MNN</a></strong> 的深度推理引擎的研发工作。这一年多的开发过程，让我对加深了对机器学习 / 深度学习的理解。<strong>但更重要的是，这一年多的亲身经历，让我对过去的观点产生了颠覆式的看法。</strong></p>
+<p>在这里，<b style="color:red">我并不想探讨如何学习机器学习，因为这样的文章数量已经浩瀚如海；相反地，我希望通过这篇文章，阐述在开发推理引擎 <a href="https://github.com/alibaba/MNN" target="_blank" rel="external">MNN</a> 的过程中，我的思考与收获；希望给许多曾和我一样迷茫的移动开发者，一些亲历的感受和信心。</b></p>
+<blockquote>
+<p>节约篇幅直接贴出 MNN 的 Github 地址：<a href="https://github.com/alibaba/MNN" target="_blank" rel="external">https://github.com/alibaba/MNN</a></p>
+</blockquote>
+<p><a name="098e61e1"></a></p>
+<h3 id="定义清晰的跨界目标">定义清晰的跨界目标</h3><p>相信有不少同学都曾和我一样，在了解机器学习的初期被诸多的公式推导所吓退，担心这是一个充斥着算法、数学、理论证明的技术领域。</p>
+<p>这个观点没错，如果你想要设计出经典的 MobileNet、ResNet 这样的深度神经网络或者是对 Yolo 这样的结构进行复杂度优化，如 Yolo V3 等，你势必要对数学证明、算法优化等方面有较深刻的理解，<strong>从这个角度看，说一句很残酷的话：移动工程师跨界的机会不大。</strong></p>
+<p>但是机器学习是不是只有算法？<strong>这个观点是偏颇的，机器学习本质上是一个工程开发、算法优化与实际应用结合的领域。</strong></p>
+<p>用 深度学习领域的知名大牛 <strong>贾扬青 </strong>的观点来看：<strong>AI 是一个系统工程，90%的工作在算法之外</strong>。</p>
+<p><img src="https://github.com/SatanWoo/BeeHive/blob/master/mnn_3.jpeg?raw=true" alt="IMG_2784.JPG"></p>
+<p>换句话说，<strong>机器学习还包含系统工程这个范畴</strong>。往小了说，模型可视化工具、转换工具；往大了讲，学术界探索机器学习的编译优化系统，比如陈天奇提出的 TVM 等等，这都是机器学习的一部分。</p>
+<p><img src="https://github.com/SatanWoo/BeeHive/blob/master/mnn_2.png?raw=true" alt=""></p>
+<blockquote>
+<p>上图是 MNN 官方在 Netron 上维护的可视化框架，我们应该是国内第一个主动支持可视化能力的深度学习推理引擎。</p>
+</blockquote>
+<p>因此，对于我们移动开发者来说，我们<strong>更适合从系统工程的角度，通过实际编程解决问题，去探索机器学习</strong>。</p>
+<blockquote>
+<p>备注：这个观点并不是我自己想象出来。大家可以看看机器学习泰斗级人物 Jeff Dean 和李飞飞等人在2017年发表的机器学习系统白皮书。<a href="https://arxiv.org/abs/1904.03257" target="_blank" rel="external">SysML: The New Frontier of Machine Learning Systems</a></p>
+</blockquote>
+<h3 id="系统工程角度的机器学习价值">系统工程角度的机器学习价值</h3><p>如同大家学习编程时听过的那样，算法和数据结构是核心能力，一通百通。<strong>那么从系统工程的角度来看，无论是机器学习抑或是移动开发，存在诸多共通点是可以相互借鉴</strong>。限于篇幅，我仅仅列举几点能够切实帮助我自身日常开发的：</p>
+<h4 id="数据自描述协议">数据自描述协议</h4><p>曾有人戏言“移动开发就是 UITableView + JSON”。虽然是句玩笑话，但也能看出数据传输在移动开发中的重要性。从个人经验来看，绝大多数的移动端数据传输协议基本都采用了 JSON（可能部分公司设计了自己的数据协议）。但是 JSON 存在几个缺点（不考虑优化的前提）：</p>
+<ul>
+<li>不内存友好，相对会带来性能瓶颈。</li>
+<li>需要人为的解析流程。</li>
+<li>不具备很好的类型解释性。</li>
+</ul>
+<p>为了解决类似的问题，一些新的数据协议，如 <strong>FlatBuffer </strong>也渐渐进入大家的视线之中。<strong>尽管之前就对其有所耳闻，但是真的深入了解还是要追溯到开发推理引擎的过程中</strong>。在设计机器学习模型存储结构中，大名鼎鼎的 TFLite，<a href="https://github.com/alibaba/MNN" target="_blank" rel="external"><strong>MNN</strong></a><strong> </strong>等框架都采用了 <strong>FlatBuffer</strong>，这是一种具备 <code>Access to serialized data without parsing/unpacking</code> 的存储结构。它不仅减少了模型的存储大小、提升了性能，也对模型结构扩展、解析自描述起到了巨大的帮助。</p>
+<p>尤其是协议自解析方面，真是令我大开眼界。简单来说，你只要按照 <strong>FlatBuffer Schema 要求的方式定义你的数据结构，剩下的编码 / 解析的过程都自动化完成。</strong></p>
+<p>这里以 <a href="https://github.com/alibaba/MNN" target="_blank" rel="external"><strong>MNN</strong></a> 框架中的 <strong>FlatBuffer</strong> 的使用举例，比如整个神经网络的拓扑架构定义如下：</p>
+<figure class="highlight css"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br></pre></td><td class="code"><pre><span class="line"><span class="tag">table</span> <span class="tag">Net</span> <span class="rules">&#123;</span><br><span class="line">    <span class="rule"><span class="attribute">bizCode</span>:<span class="value"> string</span></span>;</span><br><span class="line">    <span class="rule"><span class="attribute">extraTensorDescribe</span>:<span class="value"> [TensorDescribe]</span></span>;</span><br><span class="line">    <span class="rule"><span class="attribute">gpulibrary</span>:<span class="value"> GpuLibrary</span></span>;</span><br><span class="line">    <span class="rule"><span class="attribute">oplists</span>:<span class="value"> [Op]</span></span>;</span><br><span class="line">    <span class="rule"><span class="attribute">outputName</span>:<span class="value"> [string]</span></span>;</span><br><span class="line">    <span class="rule"><span class="attribute">preferForwardType</span>:<span class="value"> ForwardType = CPU</span></span>;</span><br><span class="line">    <span class="rule"><span class="attribute">sourceType</span>:<span class="value"> NetSource = CAFFE</span></span>;</span><br><span class="line">    <span class="rule"><span class="attribute">tensorName</span>:<span class="value"> [string]</span></span>;</span><br><span class="line">    <span class="rule"><span class="attribute">tensorNumber</span>:<span class="value"> int = <span class="number">0</span></span></span>;</span><br><span class="line">&#125;</span></span><br></pre></td></tr></table></figure>
+<blockquote>
+<p>整体 MNN 中 Schema 的设计可以参考：<a href="https://github.com/alibaba/MNN/tree/master/schema/default" target="_blank" rel="external">https://github.com/alibaba/MNN/tree/master/schema/default</a></p>
+</blockquote>
+<p>然后我们通过一行简单的命令（这里仅作演示举例）就可以自动生成 JavaScript 的对应代码。</p>
+<figure class="highlight"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">./flatc -s -I ~/MNN/schema/default ~/MNN/schema/default/MNN.fbs</span><br></pre></td></tr></table></figure>
+<figure class="highlight"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">/**&#10; * @constructor&#10; */&#10;MNN.Net = function() &#123;&#10;  /**&#10;   * @type &#123;flatbuffers.ByteBuffer&#125;&#10;   */&#10;  this.bb = null;&#10;&#10;  /**&#10;   * @type &#123;number&#125;&#10;   */&#10;  this.bb_pos = 0;&#10;&#125;;&#10;&#10;/**&#10; * @param &#123;number&#125; i&#10; * @param &#123;flatbuffers.ByteBuffer&#125; bb&#10; * @returns &#123;MNN.Net&#125;&#10; */&#10;MNN.Net.prototype.__init = function(i, bb) &#123;&#10;  this.bb_pos = i;&#10;  this.bb = bb;&#10;  return this;&#10;&#125;;&#10;&#10;/**&#10; * @param &#123;flatbuffers.ByteBuffer&#125; bb&#10; * @param &#123;MNN.Net=&#125; obj&#10; * @returns &#123;MNN.Net&#125;&#10; */&#10;MNN.Net.getRootAsNet = function(bb, obj) &#123;&#10;  return (obj || new MNN.Net).__init(bb.readInt32(bb.position()) + bb.position(), bb);&#10;&#125;;&#10;&#10;/**&#10; * @param &#123;flatbuffers.ByteBuffer&#125; bb&#10; * @param &#123;MNN.Net=&#125; obj&#10; * @returns &#123;MNN.Net&#125;&#10; */&#10;MNN.Net.getSizePrefixedRootAsNet = function(bb, obj) &#123;&#10;  return (obj || new MNN.Net).__init(bb.readInt32(bb.position()) + bb.position(), bb);&#10;&#125;;&#10;&#10;/**&#10; * @param &#123;number&#125; index&#10; * @param &#123;MNN.TensorDescribe=&#125; obj&#10; * @returns &#123;MNN.TensorDescribe&#125;&#10; */&#10;MNN.Net.prototype.extraTensorDescribe = function(index, obj) &#123;&#10;  var offset = this.bb.__offset(this.bb_pos, 6);&#10;  return offset ? (obj || new MNN.TensorDescribe).__init(this.bb.__indirect(this.bb.__vector(this.bb_pos + offset) + index * 4), this.bb) : null;&#10;&#125;;&#10;&#10;/**&#10; * @returns &#123;number&#125;&#10; */&#10;MNN.Net.prototype.extraTensorDescribeLength = function() &#123;&#10;  var offset = this.bb.__offset(this.bb_pos, 6);&#10;  return offset ? this.bb.__vector_len(this.bb_pos + offset) : 0;&#10;&#125;;&#10;&#10;/**&#10; * @param &#123;number&#125; index&#10; * @param &#123;MNN.Op=&#125; obj&#10; * @returns &#123;MNN.Op&#125;&#10; */&#10;MNN.Net.prototype.oplists = function(index, obj) &#123;&#10;  var offset = this.bb.__offset(this.bb_pos, 10);&#10;  return offset ? (obj || new MNN.Op).__init(this.bb.__indirect(this.bb.__vector(this.bb_pos + offset) + index * 4), this.bb) : null;&#10;&#125;;</span><br></pre></td></tr></table></figure>
+<p>而用户在代码中使用这个拓扑结构，只要简单调用入口函数 <strong>getRootAsNet ，剩下来的一切都自动化完成。而当你要修改结构定义的时候，仅仅需要修改对应的 Schema 文件，重新生成对应的解析文件，无需人工逐字段手工修改。</strong></p>
+<blockquote>
+<p>限于篇幅有限，这里不过多展开对 <strong>FlatBuffer</strong> 的介绍，感兴趣的读者可以阅读 <a href="https://github.com/alibaba/MNN" target="_blank" rel="external"><strong>MNN</strong></a> 用户自发写的博客《<a href="https://www.jianshu.com/p/8eb153c12a4b" target="_blank" rel="external">FlatBuffers，MNN模型存储结构基础 —- 无法解读MNN模型文件的秘密</a>》。</p>
+</blockquote>
+<p><b style="color:red">那这样的协议能不能应用于移动开发中并起到正向的作用呢？</b>答案是肯定的，有兴趣的朋友可以阅读 Facebook 的相关文章。</p>
+<h4 id="汇编知识的深度掌握">汇编知识的深度掌握</h4><p>部分读者可能知道，我和几位同事在知乎上开了一个专栏<a href="https://zhuanlan.zhihu.com/c_142064221" target="_blank" rel="external">《iOS调试进阶》</a>，重点分享 ARM 相关的汇编知识。会有这个想法是因为日常工作中排查许多 Crash 的时候，从源码层面已经无法定位，必须要依赖计算机执行的本质 - 机器码进行分析，而这正是汇编可以产生价值的地方。</p>
+<p>但是汇编不仅仅局限于排查 Crash。在开发 <a href="https://github.com/alibaba/MNN" target="_blank" rel="external">MNN</a> 过程中，涉及了大量的密集型计算操作。团队的一些大牛在<strong>指令实现层面根据流水线编排、硬件大小核数、缓存大小等等，使用手写汇编来精细化调度数据的读写与执行，使得MNN 的推理性能达到了业界一流的水准</strong>（无论是我们自己的 benchmark 抑或是利益无关的友商的评测都证明了这一点）。而阅读这些<strong>精心酿造的</strong>汇编代码，会让你感到，原来开发还能这么玩！</p>
+<p>这里展示一个经典的 <strong>Bilinear </strong>插值通过汇编的实现：</p>
+<figure class="highlight"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br><span class="line">34</span><br><span class="line">35</span><br><span class="line">36</span><br><span class="line">37</span><br><span class="line">38</span><br><span class="line">39</span><br><span class="line">40</span><br><span class="line">41</span><br><span class="line">42</span><br><span class="line">43</span><br><span class="line">44</span><br><span class="line">45</span><br><span class="line">46</span><br><span class="line">47</span><br><span class="line">48</span><br><span class="line">49</span><br><span class="line">50</span><br><span class="line">51</span><br><span class="line">52</span><br><span class="line">53</span><br><span class="line">54</span><br><span class="line">55</span><br><span class="line">56</span><br><span class="line">57</span><br><span class="line">58</span><br><span class="line">59</span><br><span class="line">60</span><br><span class="line">61</span><br></pre></td><td class="code"><pre><span class="line">text</span><br><span class="line">  .align 5</span><br><span class="line">  </span><br><span class="line">  asm_function MNNBilinearProcC1</span><br><span class="line">  //void MNNBilinearProcC1(const unsigned char *sample, unsigned char* dst, const int16_t* xFactor, const int16_t* yFactor, size_t w);</span><br><span class="line">  </span><br><span class="line">  //Auto: x0:sample, x1:dst, x2:xFactor, x3:yFactor, x4:w</span><br><span class="line">  </span><br><span class="line">  ld1 &#123;v31.s&#125;[0], [x3]</span><br><span class="line">  //Now x3 is no used</span><br><span class="line">  dup v30.4h, v31.h[0]</span><br><span class="line">  dup v31.4h, v31.h[1]</span><br><span class="line">  </span><br><span class="line">  L8:</span><br><span class="line">  cmp x4, #8</span><br><span class="line">  blt End</span><br><span class="line">  </span><br><span class="line">  LoopL8:</span><br><span class="line">      ld4 &#123;v4.8b, v5.8b, v6.8b, v7.8b&#125;, [x0], #32</span><br><span class="line">      ld2 &#123;v0.8h, v1.8h&#125;, [x2], #32//q0, q1</span><br><span class="line">      //(x00,x01) -&gt; (y0)</span><br><span class="line">      uxtl v2.8h, v4.8b</span><br><span class="line">      uxtl v3.8h, v5.8b</span><br><span class="line">      umull v16.4s, v2.4h, v0.4h</span><br><span class="line">      umull2 v17.4s, v2.8h, v0.8h</span><br><span class="line">      umlal v16.4s, v3.4h, v1.4h</span><br><span class="line">      umlal2 v17.4s, v3.8h, v1.8h</span><br><span class="line">  </span><br><span class="line">      uqshrn v18.4h, v16.4s, #4</span><br><span class="line">      uqshrn v19.4h, v17.4s, #4</span><br><span class="line">  </span><br><span class="line">      //(x10,x11) -&gt; (y1)</span><br><span class="line">      uxtl v2.8h, v6.8b</span><br><span class="line">      uxtl v3.8h, v7.8b</span><br><span class="line">      umull v16.4s, v2.4h, v0.4h</span><br><span class="line">      umull2 v17.4s, v2.8h, v0.8h</span><br><span class="line">      umlal v16.4s, v3.4h, v1.4h</span><br><span class="line">      umlal2 v17.4s, v3.8h, v1.8h</span><br><span class="line">  </span><br><span class="line">      uqshrn v20.4h, v16.4s, #4</span><br><span class="line">      uqshrn v21.4h, v17.4s, #4</span><br><span class="line">  </span><br><span class="line">      //(y0,y1) -&gt; dst</span><br><span class="line">      umull v16.4s, v18.4h, v30.4h</span><br><span class="line">      umull v17.4s, v19.4h, v30.4h</span><br><span class="line">      umlal v16.4s, v20.4h, v31.4h</span><br><span class="line">      umlal v17.4s, v21.4h, v31.4h</span><br><span class="line">  </span><br><span class="line">      uqshrn v2.4h, v16.4s, #16</span><br><span class="line">      uqshrn2 v2.8h, v17.4s, #16</span><br><span class="line">  </span><br><span class="line">      uqrshrn v0.8b, v2.8h, #2</span><br><span class="line">  </span><br><span class="line">      st1 &#123;v0.8b&#125;, [x1], #8</span><br><span class="line">  </span><br><span class="line">  </span><br><span class="line">      sub x4, x4, #8</span><br><span class="line">      cmp x4, #8</span><br><span class="line">      bge LoopL8</span><br><span class="line">  </span><br><span class="line">  End:</span><br></pre></td></tr></table></figure>
+<p><b style="color:red">相信我，当你从不懂汇编 -&gt; 读懂汇编 -&gt; 手写汇编，每前进一步，你会发现更广阔的天地。</b>有一天当你要做性能优化，发现许多网上常见的手段都使用过了但仍然不起作用的时候，也许汇编就是你杀手锏。</p>
+<h4 id="GPU_相关知识融合">GPU 相关知识融合</h4><p>近些年来随着短视频的崛起，市面上渲染、多媒体相关的岗位也越加变得火热。而这些岗位无一例外都需要对 GPU 有着深度的了解。而操作 GPU，自然而然就少不了与 Shader 打交道。</p>
+<blockquote>
+<p>Shader 其实就是专门用来渲染图形的一种技术。通过 Shader ，我们可以自定义显卡渲染画面的算法，使画面达到我们想要的效果。</p>
+</blockquote>
+<p>但 Shader 的作用不仅仅作用于渲染。在机器学习领域，苹果的 Metal 框架所包含的Metal Performance Shader（MPS）也能用来做 GPU 计算，提升机器学习在移动端的执行性能。就连诞生已久的 OpenGL，也在最新的 <strong>OpenGL 3</strong> 标准中增加了<b style="color:red">计算纹理</b>，支持 GPU 计算的能力。由此可见，尽管最初的目的并不相同，但是技术本质是相通的，最后都会产生微妙的化学反应。</p>
+<p><strong>上述几点，仅仅是个人抛砖引玉，展示机器学习和日常移动开发相互交织的冰山一角</strong>。从工程实现的角度，仍有许多值得探索并实践应用的，欢迎大家一起探讨交流。</p>
+<hr>
+<p><a name="RC2H2"></a></p>
+<h3 id="与大家携手一起进步">与大家携手一起进步</h3><p>读到这，可能有些读者内心的兴奋之情被熊熊点燃，恨不得立刻能将相关的知识学习起来；但也有部分朋友会觉得，可能只有 BAT 这样的大厂才会有实际的场景需要进行如此深入的研究和开发工作，有沮丧之情。</p>
+<p>我对这种体会特别感同身受，因为去年刚转型开发 <strong><a href="https://github.com/alibaba/MNN" target="_blank" rel="external">MNN</a> </strong>之初，我也有过手足无促，连简单的 Metal Performance Shader 都写不好。加上之前有些朋友通过 QCon 和云栖大会听闻了 <strong><a href="https://github.com/alibaba/MNN" target="_blank" rel="external">MNN</a></strong>，也和我或其他同事进行过一些实现上或者应用方面的探讨。</p>
+<p>因此，借着这个机会，除了希望通过这篇文章带领大家对<strong>【机器学习系统】</strong>有一个全新的认知之外，<strong>后续也会以连载的方式</strong>，<strong>在以下两个方面给大家继续带来更多有价值的点：</strong></p>
+<ul>
+<li><p><strong>技术介绍</strong>，我会把 <strong><a href="https://github.com/alibaba/MNN" target="_blank" rel="external">MNN</a> </strong>里面使用的相关技术点，逐个拆解，带领大家通过理论探索和实际编程相结合的方式来深入了解细节，反哺于大家日常的开发工作。</p>
+</li>
+<li><p><strong>最佳实践</strong>，目前在客户端领域应用机器学习的典型案例还比较缺乏。而我正好在过去一年多的时间里，探索了诸多的实践案例（比如<strong>大家耳熟能详的拍立淘、淘宝直播、AR试妆等等中都有 MNN 的身影哦～</strong>），我也会将其整理分享出来，<strong>和大家一起探索端智能的前行之路</strong>。</p>
+</li>
+</ul>
+<p><img src="https://github.com/SatanWoo/BeeHive/blob/master/mnn_4.png?raw=true" alt=""></p>
+<p>对了，写了这么多文字，还请读者们见谅，<strong>允许我打个招人合作的广告吧</strong>：</p>
+<p><strong><a href="https://github.com/alibaba/MNN" target="_blank" rel="external">MNN</a></strong> 是阿里巴巴开源的一款轻量级、高性能深度学习推理引擎，用于<strong>解决深度神经网络模型在端侧推理运行问题。</strong></p>
+<p>从今年4月份开源到现在，我们始终在完善和响应社区用户的诉求，并保持着每两个月一次重大 Feature Release 的发布频率。</p>
+<p>但我们团队的力量是有限的，而端上智能应用前进的道路仍然充满着广阔未被探索的区域，我们希望和大家一起教学相长，携手进步。</p>
+<p>如果大家对移动端机器学习有什么好的想法和建议，也可以前往 <a href="https://github.com/alibaba/MNN" target="_blank" rel="external">Github</a> 上，给我们反馈。</p>
+<p>也欢迎对 <a href="https://github.com/alibaba/MNN" target="_blank" rel="external"><strong>MNN</strong></a><strong> </strong>感兴趣的朋友，扫描二维码，加入钉钉群，和我们一起交流或者直接加入我们团队哦（悄悄地说，人气有点高，一群都满啦）</p>
+<blockquote>
+<p>用钉钉群比较方便我们在工作闲暇时间及时响应大家的问题和诉求，请大家多包涵啦～</p>
+</blockquote>
+<p><img src="https://github.com/SatanWoo/BeeHive/blob/master/mnn_5.jpeg?raw=true" alt=""></p>
+<h3 id="结语">结语</h3><p>本文记录了过去一年多，个人参与 <strong><a href="https://github.com/alibaba/MNN" target="_blank" rel="external">MNN</a></strong> 框架相关开发过程中的一些收获与心得。<b style="color:red">如何不分裂的看待机器学习与移动开发的关系，如何从看似不相关的领域寻找共同点，提升自己所处领域的价值和核心能力，是值得我们每位开发同学需要思考的。</b></p>
+<p>在最后，还是要说一句：<strong>移动客户端的从业人员并不需要过多的焦虑和担忧，动态化、高性能、内核、渲染等等方向都充满前景。但是，你需要找到你所擅长且愿意为之深入的，这才是你保证在浪潮中不被拍翻的核心竞争力。</strong></p>
+
+      
+    </div>
+    <footer class="article-footer">
+      <a data-url="http://satanwoo.github.io/2019/10/27/MNN1/" data-id="ck27uu1cz002k18i10wk3uwwz" class="article-share-link">Share</a>
+      
+        <a href="http://satanwoo.github.io/2019/10/27/MNN1/#disqus_thread" class="article-comment-link">Comments</a>
+      
+      
+  <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Machine-Learning/">Machine Learning</a></li><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
+
+    </footer>
+  </div>
+  
+    
+<nav id="article-nav">
+  
+  
+    <a href="/2019/07/07/RevisitAutorelease2/" id="article-nav-older" class="article-nav-link-wrap">
+      <strong class="article-nav-caption">Older</strong>
+      <div class="article-nav-title">Revisit iOS Autorelease之二</div>
+    </a>
+  
+</nav>
+
+  
+</article>
+
+<div id="disqus_thread"></div>
+<script>
+
+/**
+*  RECOMMENDED CONFIGURATION VARIABLES: EDIT AND UNCOMMENT THE SECTION BELOW TO INSERT DYNAMIC VALUES FROM YOUR PLATFORM OR CMS.
+*  LEARN WHY DEFINING THESE VARIABLES IS IMPORTANT: https://disqus.com/admin/universalcode/#configuration-variables*/
+/*
+var disqus_config = function () {
+this.page.url = PAGE_URL;  // Replace PAGE_URL with your page's canonical URL variable
+this.page.identifier = PAGE_IDENTIFIER; // Replace PAGE_IDENTIFIER with your page's unique identifier variable
+};
+*/
+(function() { // DON'T EDIT BELOW THIS LINE
+var d = document, s = d.createElement('script');
+s.src = 'https://satanwoo-2.disqus.com/embed.js';
+s.setAttribute('data-timestamp', +new Date());
+(d.head || d.body).appendChild(s);
+})();
+</script>
+<noscript>Please enable JavaScript to view the <a href="https://disqus.com/?ref_noscript">comments powered by Disqus.</a></noscript>
+                                
+  <section id="comments">
+    <div id="disqus_thread">
+      <noscript>Please enable JavaScript to view the <a href="//disqus.com/?ref_noscript">comments powered by Disqus.</a></noscript>
+    </div>
+  </section>
+</section>
+        
+          <aside id="sidebar">
+  
+    
+  
+    
+  <div class="widget-wrap">
+    <h3 class="widget-title">Tags</h3>
+    <div class="widget">
+      <ul class="tag-list"><li class="tag-list-item"><a class="tag-list-link" href="/tags/Android/">Android</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/C/">C</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/C/">C++</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Growth/">Growth</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/JavaScript/">JavaScript</a><span class="tag-list-count">3</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Machine-Learning/">Machine Learning</a><span class="tag-list-count">2</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Math/">Math</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Performance/">Performance</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/R/">R</a><span class="tag-list-count">2</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Reverse-Engineering/">Reverse Engineering</a><span class="tag-list-count">6</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Swift/">Swift</a><span class="tag-list-count">6</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/XNU/">XNU</a><span class="tag-list-count">2</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/c/">c++</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/iOS/">iOS</a><span class="tag-list-count">42</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/shell/">shell</a><span class="tag-list-count">1</span></li></ul>
+    </div>
+  </div>
+
+  
+    
+  <div class="widget-wrap">
+    <h3 class="widget-title">Tag Cloud</h3>
+    <div class="widget tagcloud">
+      <a href="/tags/Android/" style="font-size: 10px;">Android</a> <a href="/tags/C/" style="font-size: 10px;">C</a> <a href="/tags/C/" style="font-size: 10px;">C++</a> <a href="/tags/Growth/" style="font-size: 10px;">Growth</a> <a href="/tags/JavaScript/" style="font-size: 15px;">JavaScript</a> <a href="/tags/Machine-Learning/" style="font-size: 12.5px;">Machine Learning</a> <a href="/tags/Math/" style="font-size: 10px;">Math</a> <a href="/tags/Performance/" style="font-size: 10px;">Performance</a> <a href="/tags/R/" style="font-size: 12.5px;">R</a> <a href="/tags/Reverse-Engineering/" style="font-size: 17.5px;">Reverse Engineering</a> <a href="/tags/Swift/" style="font-size: 17.5px;">Swift</a> <a href="/tags/XNU/" style="font-size: 12.5px;">XNU</a> <a href="/tags/c/" style="font-size: 10px;">c++</a> <a href="/tags/iOS/" style="font-size: 20px;">iOS</a> <a href="/tags/shell/" style="font-size: 10px;">shell</a>
+    </div>
+  </div>
+
+  
+    
+  <div class="widget-wrap">
+    <h3 class="widget-title">Archives</h3>
+    <div class="widget">
+      <ul class="archive-list"><li class="archive-list-item"><a class="archive-list-link" href="/archives/2019/10/">October 2019</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2019/07/">July 2019</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2019/01/">January 2019</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2018/12/">December 2018</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2018/10/">October 2018</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2018/05/">May 2018</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2018/04/">April 2018</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2018/02/">February 2018</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2018/01/">January 2018</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/11/">November 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/10/">October 2017</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/09/">September 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/08/">August 2017</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/07/">July 2017</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/06/">June 2017</a><span class="archive-list-count">3</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/04/">April 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/01/">January 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/10/">October 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/09/">September 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/07/">July 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/05/">May 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/04/">April 2016</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/03/">March 2016</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/02/">February 2016</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/12/">December 2015</a><span class="archive-list-count">6</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/11/">November 2015</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/10/">October 2015</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/09/">September 2015</a><span class="archive-list-count">4</span></li></ul>
+    </div>
+  </div>
+
+  
+    
+  <div class="widget-wrap">
+    <h3 class="widget-title">Recents</h3>
+    <div class="widget">
+      <ul>
+        
+          <li>
+            <a href="/2019/10/27/MNN1/">浅谈移动工程师跨界机器学习之路</a>
+          </li>
+        
+          <li>
+            <a href="/2019/07/07/RevisitAutorelease2/">Revisit iOS Autorelease之二</a>
+          </li>
+        
+          <li>
+            <a href="/2019/07/02/RevisitAutorelease/">Revisit iOS Autorelease 之不经意间可能被影响的优化</a>
+          </li>
+        
+          <li>
+            <a href="/2019/01/26/RAII/">基于智能指针和RAII的对象内存管理设计</a>
+          </li>
+        
+          <li>
+            <a href="/2019/01/26/LD-2/">LD-2</a>
+          </li>
+        
+      </ul>
+    </div>
+  </div>
+
+  
+</aside>
+        
+      </div>
+      <footer id="footer">
+  
+  <div class="outer">
+    <div id="footer-info" class="inner">
+      &copy; 2019 SatanWoo<br>
+      Powered by <a href="http://hexo.io/" target="_blank">Hexo</a>
+    </div>
+  </div>
+</footer>
+    </div>
+    <nav id="mobile-nav">
+  
+    <a href="/" class="mobile-nav-link">Home</a>
+  
+    <a href="/archives" class="mobile-nav-link">Archives</a>
+  
+    <a href="/sitemap.xml" class="mobile-nav-link">map</a>
+  
+</nav>
+    
+<script>
+  var disqus_shortname = 'satanwoo-2';
+  
+  var disqus_url = 'http://satanwoo.github.io/2019/10/27/MNN1/';
+  
+  (function(){
+    var dsq = document.createElement('script');
+    dsq.type = 'text/javascript';
+    dsq.async = true;
+    dsq.src = '//' + disqus_shortname + '.disqus.com/embed.js';
+    (document.getElementsByTagName('head')[0] || document.getElementsByTagName('body')[0]).appendChild(dsq);
+  })();
+</script>
+
+
+
+  <link rel="stylesheet" href="/fancybox/jquery.fancybox.css" type="text/css">
+  <script src="/fancybox/jquery.fancybox.pack.js" type="text/javascript"></script>
+
+
+<script src="/js/script.js" type="text/javascript"></script>
+
+  </div>
+</body>
+</html>
