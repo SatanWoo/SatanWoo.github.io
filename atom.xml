@@ -4,7 +4,7 @@
   
   <link href="/atom.xml" rel="self"/>
   <link href="http://satanwoo.github.io/"/>
-  <updated>2019-12-01T15:42:48.000Z</updated>
+  <updated>2019-12-01T15:44:41.000Z</updated>
   <id>http://satanwoo.github.io/</id>
   
   <author>
@@ -19,9 +19,8 @@
     <link href="http://satanwoo.github.io/2019/12/01/SIMD-1/"/>
     <id>http://satanwoo.github.io/2019/12/01/SIMD-1/</id>
     <published>2019-12-01T15:39:48.000Z</published>
-    <updated>2019-12-01T15:42:48.000Z</updated>
-    <content type="html"><![CDATA[<h2 id="了解_SIMD_指令">了解 SIMD 指令</h2><p>SIMD 是一种常见的利用单指令完成多数据量处理的计算方式。本身 Intel / AMD 等芯片厂商都在指令集上提供了对应的能力，没有什么特别的要探讨的，参考对应详实的文档就好。</p>
-<p>但是通过使用 SIMD，却发现了一些比较边角的内存注意事项 - 内存对齐，值得探究一番。</p>
+    <updated>2019-12-01T15:44:41.000Z</updated>
+    <content type="html"><![CDATA[<h2 id="了解_SIMD_指令">了解 SIMD 指令</h2><p>SIMD 是一种常见的利用单指令完成多数据量处理的计算方式。本文作为 SIMD 文章的引子，先来了解简单的 SIMD 使用和概念。</p>
 <h4 id="SIMD_的含义">SIMD 的含义</h4><p>SIMD 的全称是 Single Instruction Multiple Data。简要来说，就是通过一条指令完成多条数据处理的行为。我们知道，虽然程序是由一条条机器指令组成，但是实际上执行一条机器码包含了多个过程，包含取指令、分析指令到执行等，如下图所示（暂时先忽略流水线并行）</p>
 <p><img src="http://file.elecfans.com/web1/M00/47/5F/pIYBAFqkjYeAONeZAAApUrptLBI051.jpg" alt=""></p>
 <p>而在这其中，每一个阶段，都会消耗一个或多个机器周期。如果我们认为，取指令和分析指令（译码）可以近似的认为是一个机器周期内完成，<b style="color:red">那么不同的指令，在执行阶段耗费的机器周期则大不相同。</b></p>
@@ -158,8 +157,8 @@ _mm256_store_pd(<span class="literal">result</span>, c);
 <h3 id="后记">后记</h3><p>本文只是仅仅介绍了最常规的 SIMD 使用方式。但是在实际设计的过程中，不可能像我们这么简单的去应用。随之而来的，你会发现伴随着许多不同的坑，包含不规范的应用导致<b style="color:red">性能的下降</b>和<b style="color:red">崩溃问题</b>。这些都会留在后面我们去解决。</p>
 ]]></content>
     <summary type="html">
-    <![CDATA[<h2 id="了解_SIMD_指令">了解 SIMD 指令</h2><p>SIMD 是一种常见的利用单指令完成多数据量处理的计算方式。本身 Intel / AMD 等芯片厂商都在指令集上提供了对应的能力，没有什么特别的要探讨的，参考对应详实的文档就好。</p>
-<p>但是通过使]]>
+    <![CDATA[<h2 id="了解_SIMD_指令">了解 SIMD 指令</h2><p>SIMD 是一种常见的利用单指令完成多数据量处理的计算方式。本文作为 SIMD 文章的引子，先来了解简单的 SIMD 使用和概念。</p>
+<h4 id="SIMD_的含义">SIMD 的含义</h4><]]>
     </summary>
     
       <category term="iOS" scheme="http://satanwoo.github.io/tags/iOS/"/>

@@ -5,23 +5,20 @@
   
   <title>了解 SIMD 指令 | SatanWoo</title>
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
-  <meta name="description" content="了解 SIMD 指令SIMD 是一种常见的利用单指令完成多数据量处理的计算方式。本身 Intel / AMD 等芯片厂商都在指令集上提供了对应的能力，没有什么特别的要探讨的，参考对应详实的文档就好。
-但是通过使用 SIMD，却发现了一些比较边角的内存注意事项 - 内存对齐，值得探究一番。
-SIMD 的含义SIMD 的全称是 Single Instruction Multiple Data。简要来说">
+  <meta name="description" content="了解 SIMD 指令SIMD 是一种常见的利用单指令完成多数据量处理的计算方式。本文作为 SIMD 文章的引子，先来了解简单的 SIMD 使用和概念。
+SIMD 的含义SIMD 的全称是 Single Instruction Multiple Data。简要来说，就是通过一条指令完成多条数据处理的行为。我们知道，虽然程序是由一条条机器指令组成，但是实际上执行一条机器码包含了多个过程，包含取指令、分">
 <meta property="og:type" content="article">
 <meta property="og:title" content="了解 SIMD 指令">
 <meta property="og:url" content="http://satanwoo.github.io/2019/12/01/SIMD-1/index.html">
 <meta property="og:site_name" content="SatanWoo">
-<meta property="og:description" content="了解 SIMD 指令SIMD 是一种常见的利用单指令完成多数据量处理的计算方式。本身 Intel / AMD 等芯片厂商都在指令集上提供了对应的能力，没有什么特别的要探讨的，参考对应详实的文档就好。
-但是通过使用 SIMD，却发现了一些比较边角的内存注意事项 - 内存对齐，值得探究一番。
-SIMD 的含义SIMD 的全称是 Single Instruction Multiple Data。简要来说">
+<meta property="og:description" content="了解 SIMD 指令SIMD 是一种常见的利用单指令完成多数据量处理的计算方式。本文作为 SIMD 文章的引子，先来了解简单的 SIMD 使用和概念。
+SIMD 的含义SIMD 的全称是 Single Instruction Multiple Data。简要来说，就是通过一条指令完成多条数据处理的行为。我们知道，虽然程序是由一条条机器指令组成，但是实际上执行一条机器码包含了多个过程，包含取指令、分">
 <meta property="og:image" content="http://file.elecfans.com/web1/M00/47/5F/pIYBAFqkjYeAONeZAAApUrptLBI051.jpg">
-<meta property="og:updated_time" content="2019-12-01T15:42:48.000Z">
+<meta property="og:updated_time" content="2019-12-01T15:44:41.000Z">
 <meta name="twitter:card" content="summary">
 <meta name="twitter:title" content="了解 SIMD 指令">
-<meta name="twitter:description" content="了解 SIMD 指令SIMD 是一种常见的利用单指令完成多数据量处理的计算方式。本身 Intel / AMD 等芯片厂商都在指令集上提供了对应的能力，没有什么特别的要探讨的，参考对应详实的文档就好。
-但是通过使用 SIMD，却发现了一些比较边角的内存注意事项 - 内存对齐，值得探究一番。
-SIMD 的含义SIMD 的全称是 Single Instruction Multiple Data。简要来说">
+<meta name="twitter:description" content="了解 SIMD 指令SIMD 是一种常见的利用单指令完成多数据量处理的计算方式。本文作为 SIMD 文章的引子，先来了解简单的 SIMD 使用和概念。
+SIMD 的含义SIMD 的全称是 Single Instruction Multiple Data。简要来说，就是通过一条指令完成多条数据处理的行为。我们知道，虽然程序是由一条条机器指令组成，但是实际上执行一条机器码包含了多个过程，包含取指令、分">
   
     <link rel="alternative" href="/atom.xml" title="SatanWoo" type="application/atom+xml">
   
@@ -90,8 +87,7 @@ SIMD 的含义SIMD 的全称是 Single Instruction Multiple Data。简要来说"
     
     <div class="article-entry" itemprop="articleBody">
       
-        <h2 id="了解_SIMD_指令">了解 SIMD 指令</h2><p>SIMD 是一种常见的利用单指令完成多数据量处理的计算方式。本身 Intel / AMD 等芯片厂商都在指令集上提供了对应的能力，没有什么特别的要探讨的，参考对应详实的文档就好。</p>
-<p>但是通过使用 SIMD，却发现了一些比较边角的内存注意事项 - 内存对齐，值得探究一番。</p>
+        <h2 id="了解_SIMD_指令">了解 SIMD 指令</h2><p>SIMD 是一种常见的利用单指令完成多数据量处理的计算方式。本文作为 SIMD 文章的引子，先来了解简单的 SIMD 使用和概念。</p>
 <h4 id="SIMD_的含义">SIMD 的含义</h4><p>SIMD 的全称是 Single Instruction Multiple Data。简要来说，就是通过一条指令完成多条数据处理的行为。我们知道，虽然程序是由一条条机器指令组成，但是实际上执行一条机器码包含了多个过程，包含取指令、分析指令到执行等，如下图所示（暂时先忽略流水线并行）</p>
 <p><img src="http://file.elecfans.com/web1/M00/47/5F/pIYBAFqkjYeAONeZAAApUrptLBI051.jpg" alt=""></p>
 <p>而在这其中，每一个阶段，都会消耗一个或多个机器周期。如果我们认为，取指令和分析指令（译码）可以近似的认为是一个机器周期内完成，<b style="color:red">那么不同的指令，在执行阶段耗费的机器周期则大不相同。</b></p>
@@ -230,7 +226,7 @@ _mm256_store_pd(<span class="literal">result</span>, c);
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2019/12/01/SIMD-1/" data-id="ck3n6b1gl001yeji1bam6tv7n" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2019/12/01/SIMD-1/" data-id="ck3n6e311001yq6i18jdk9nmk" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2019/12/01/SIMD-1/#disqus_thread" class="article-comment-link">Comments</a>
       
