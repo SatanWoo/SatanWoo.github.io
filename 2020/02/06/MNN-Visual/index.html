@@ -1,0 +1,546 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  
+  <title>实现 MNN 模型的可视化工具 | SatanWoo</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+  <meta name="description" content="Netron 是一个支持 Tensorflow ，PyTorch ，MXNet ，NCNN ， PaddlePaddle 等深度模型格式的可视化框架。去年国庆前的时候我稍微研究了下相关的代码，重点关注其将其是如何设计出一套兼容不同模型格式表征，用来归一化展现不同的深度学习框架模型。
+研究完成后，我利用如下两个 Commit 作为 Pull Request 提交给了作者，用以支持 MNN 的模型可视">
+<meta property="og:type" content="article">
+<meta property="og:title" content="实现 MNN 模型的可视化工具">
+<meta property="og:url" content="http://satanwoo.github.io/2020/02/06/MNN-Visual/index.html">
+<meta property="og:site_name" content="SatanWoo">
+<meta property="og:description" content="Netron 是一个支持 Tensorflow ，PyTorch ，MXNet ，NCNN ， PaddlePaddle 等深度模型格式的可视化框架。去年国庆前的时候我稍微研究了下相关的代码，重点关注其将其是如何设计出一套兼容不同模型格式表征，用来归一化展现不同的深度学习框架模型。
+研究完成后，我利用如下两个 Commit 作为 Pull Request 提交给了作者，用以支持 MNN 的模型可视">
+<meta property="og:image" content="https://upload-images.jianshu.io/upload_images/4292627-565192345c3f5484.png?imageMogr2/auto-orient/strip%7CimageView2/2/w/1240">
+<meta property="og:image" content="https://upload-images.jianshu.io/upload_images/4292627-6539f5107f03904e.png?imageMogr2/auto-orient/strip%7CimageView2/2/w/1240">
+<meta property="og:image" content="https://upload-images.jianshu.io/upload_images/9525982-b558276df2e23ddc.png">
+<meta property="og:image" content="https://upload-images.jianshu.io/upload_images/4292627-ecec7a02f7c33ae9.png?imageMogr2/auto-orient/strip%7CimageView2/2/w/1240">
+<meta property="og:updated_time" content="2020-02-07T13:33:24.017Z">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="实现 MNN 模型的可视化工具">
+<meta name="twitter:description" content="Netron 是一个支持 Tensorflow ，PyTorch ，MXNet ，NCNN ， PaddlePaddle 等深度模型格式的可视化框架。去年国庆前的时候我稍微研究了下相关的代码，重点关注其将其是如何设计出一套兼容不同模型格式表征，用来归一化展现不同的深度学习框架模型。
+研究完成后，我利用如下两个 Commit 作为 Pull Request 提交给了作者，用以支持 MNN 的模型可视">
+  
+    <link rel="alternative" href="/atom.xml" title="SatanWoo" type="application/atom+xml">
+  
+  
+    <link rel="icon" href="/favicon.png">
+  
+  <link rel="stylesheet" href="/css/style.css" type="text/css">
+  
+
+</head>
+<body>
+  <div id="container">
+    <div id="wrap">
+      <header id="header">
+  <div id="banner"></div>
+  <div id="header-outer" class="outer">
+    <div id="header-title" class="inner">
+      <h1 id="logo-wrap">
+        <a href="/" id="logo">SatanWoo</a>
+      </h1>
+      
+    </div>
+    <div id="header-inner" class="inner">
+      <nav id="main-nav">
+        <a id="main-nav-toggle" class="nav-icon"></a>
+        
+          <a class="main-nav-link" href="/">Home</a>
+        
+          <a class="main-nav-link" href="/archives">Archives</a>
+        
+          <a class="main-nav-link" href="/sitemap.xml">map</a>
+        
+      </nav>
+      <nav id="sub-nav">
+        
+          <a id="nav-rss-link" class="nav-icon" href="/atom.xml" title="RSS Feed"></a>
+        
+        <a id="nav-search-btn" class="nav-icon" title="Search"></a>
+      </nav>
+      <div id="search-form-wrap">
+        <form action="//google.com/search" method="get" accept-charset="UTF-8" class="search-form"><input type="search" name="q" results="0" class="search-form-input" placeholder="Search"><button type="submit" class="search-form-submit">&#xF002;</button><input type="hidden" name="sitesearch" value="http://satanwoo.github.io"></form>
+      </div>
+    </div>
+  </div>
+</header>
+      <div class="outer">
+        <section id="main"><article id="post-MNN-Visual" class="article article-type-post" itemscope itemprop="blogPost">
+  <div class="article-meta">
+    <a href="/2020/02/06/MNN-Visual/" class="article-date">
+  <time datetime="2020-02-06T15:10:21.000Z" itemprop="datePublished">2020-02-06</time>
+</a>
+    
+  </div>
+  <div class="article-inner">
+    
+    
+      <header class="article-header">
+        
+  
+    <h1 class="article-title" itemprop="name">
+      实现 MNN 模型的可视化工具
+    </h1>
+  
+
+      </header>
+    
+    <div class="article-entry" itemprop="articleBody">
+      
+        <p><code>Netron</code> 是一个支持 <code>Tensorflow</code> ，<code>PyTorch</code> ，<code>MXNet</code> ，<code>NCNN</code> ， <code>PaddlePaddle</code> 等深度模型格式的可视化框架。去年国庆前的时候我稍微研究了下相关的代码，<b style="color:red">重点关注其将其是如何设计出一套兼容不同模型格式表征，用来归一化展现不同的深度学习框架模型。</b></p>
+<p>研究完成后，我利用如下两个 <code>Commit</code> 作为 <code>Pull Request</code> 提交给了作者，用以支持 <code>MNN</code> 的模型可视化。</p>
+<ul>
+<li><p><a href="https://github.com/lutzroeder/netron/pull/340" target="_blank" rel="external">Visualization support for MNN models #340</a></p>
+</li>
+<li><p><a href="https://github.com/lutzroeder/netron/pull/345" target="_blank" rel="external">Fix loading .mnn model failed when there is no extraTensorDescribe existed.</a></p>
+</li>
+</ul>
+<p>从中也不难看出我扎实的英语表述能力（我果然是个国际化人才）。</p>
+<p>这篇文章会从<strong>架构设计、标准定义、巧用JS解析</strong>等几个方面来阐述</p>
+<h3 id="架构设计">架构设计</h3><p>整体上，按照我个人的理解，<code>Netron</code> 的架构可以简要展现如下：</p>
+<p><img src="https://upload-images.jianshu.io/upload_images/4292627-565192345c3f5484.png?imageMogr2/auto-orient/strip%7CimageView2/2/w/1240" alt=""></p>
+<p>最基础的应用部分及运行环境，是 <code>Electron</code> 这个跨平台框架直接呈现的。<br>当然，一些诸如基础zip/gzip用于解压等等的库我们也统一归类到支撑里。</p>
+<p>然后是一套经典的 <code>MVC</code> 的结构，<code>app.js</code> 作为整体的 controller ，负责整个应用的功能逻辑，如导出图片、菜单管理、保存加载等等。<b style="color:red">这一层我们需要的做事非常少，只要将 <code>MNN</code> 支持的模型后缀 <code>.mnn</code> 注册进去即可</b>。 然后是是对应的 <code>view.js</code>，这块实际上还是一层 <code>controller</code>，类比我们常说的子控制器，专门用于处理主视图的逻辑，如下图所示：</p>
+<p><img src="https://upload-images.jianshu.io/upload_images/4292627-6539f5107f03904e.png?imageMogr2/auto-orient/strip%7CimageView2/2/w/1240" alt=""></p>
+<p><b style="color:red">从这块开始，我们就要注意了，因为这里开始通过工厂方法对应的根据读取文件类型的不同，托管给了不同的自定义 <code>xxx.js</code> 来处理后续步骤</b>。 比如<code>.mar</code>，<code>model</code>，<code>prototxt</code> 等格式的模型会首先托管给 <code>mxnet.js</code>来处理。<strong>如果存在重名，则按照先后顺序依次尝试。</strong></p>
+<pre><code>view.ModelFactoryService = <span class="keyword">class</span> {
+    <span class="constructor"><span class="keyword">constructor</span>(host) </span>{
+        <span class="keyword">this</span>._host = host;
+        <span class="keyword">this</span>._extensions = [];
+        <span class="keyword">this</span>.register(<span class="string">'./onnx'</span>, [ <span class="string">'.onnx'</span>, <span class="string">'.pb'</span>, <span class="string">'.pbtxt'</span>, <span class="string">'.prototxt'</span> ]);
+        <span class="keyword">this</span>.register(<span class="string">'./mxnet'</span>, [ <span class="string">'.mar'</span>, <span class="string">'.model'</span>, <span class="string">'.json'</span>, <span class="string">'.params'</span> ]);
+        <span class="keyword">this</span>.register(<span class="string">'./keras'</span>, [ <span class="string">'.h5'</span>, <span class="string">'.hd5'</span>, <span class="string">'.hdf5'</span>, <span class="string">'.keras'</span>, <span class="string">'.json'</span>, <span class="string">'.model'</span> ]);
+        <span class="keyword">this</span>.register(<span class="string">'./coreml'</span>, [ <span class="string">'.mlmodel'</span> ]);
+        <span class="keyword">this</span>.register(<span class="string">'./caffe'</span>, [ <span class="string">'.caffemodel'</span>, <span class="string">'.pbtxt'</span>, <span class="string">'.prototxt'</span>, <span class="string">'.pt'</span> ]);
+        <span class="keyword">this</span>.register(<span class="string">'./caffe2'</span>, [ <span class="string">'.pb'</span>, <span class="string">'.pbtxt'</span>, <span class="string">'.prototxt'</span> ]);
+        <span class="keyword">this</span>.register(<span class="string">'./pytorch'</span>, [ <span class="string">'.pt'</span>, <span class="string">'.pth'</span>, <span class="string">'.pkl'</span>, <span class="string">'.h5'</span>, <span class="string">'.t7'</span>, <span class="string">'.model'</span>, <span class="string">'.dms'</span>, <span class="string">'.pth.tar'</span>, <span class="string">'.ckpt'</span>, <span class="string">'.bin'</span> ]);
+        <span class="keyword">this</span>.register(<span class="string">'./torch'</span>, [ <span class="string">'.t7'</span> ]);
+        <span class="keyword">this</span>.register(<span class="string">'./torchscript'</span>, [ <span class="string">'.pt'</span>, <span class="string">'.pth'</span> ]);
+        <span class="keyword">this</span>.register(<span class="string">'./mnn'</span>, [<span class="string">'.mnn'</span>, <span class="string">'.tflite'</span>]);
+        <span class="keyword">this</span>.register(<span class="string">'./tflite'</span>, [ <span class="string">'.tflite'</span>, <span class="string">'.lite'</span>, <span class="string">'.tfl'</span>, <span class="string">'.bin'</span> ]);
+        <span class="keyword">this</span>.register(<span class="string">'./tf'</span>, [ <span class="string">'.pb'</span>, <span class="string">'.meta'</span>, <span class="string">'.pbtxt'</span>, <span class="string">'.prototxt'</span>, <span class="string">'.json'</span> ]);
+        <span class="keyword">this</span>.register(<span class="string">'./sklearn'</span>, [ <span class="string">'.pkl'</span>, <span class="string">'.joblib'</span>, <span class="string">'.model'</span> ]);
+        <span class="keyword">this</span>.register(<span class="string">'./cntk'</span>, [ <span class="string">'.model'</span>, <span class="string">'.cntk'</span>, <span class="string">'.cmf'</span>, <span class="string">'.dnn'</span> ]);
+        <span class="keyword">this</span>.register(<span class="string">'./openvino'</span>, [ <span class="string">'.xml'</span> ]);
+        <span class="keyword">this</span>.register(<span class="string">'./darknet'</span>, [ <span class="string">'.cfg'</span> ]);
+        <span class="keyword">this</span>.register(<span class="string">'./paddle'</span>, [ <span class="string">'.paddle'</span>, <span class="string">'__model__'</span> ]);
+        <span class="keyword">this</span>.register(<span class="string">'./ncnn'</span>, [ <span class="string">'.param'</span>, <span class="string">'.bin'</span>, <span class="string">'.cfg.ncnn'</span>, <span class="string">'.weights.ncnn'</span>]);
+        <span class="keyword">this</span>.register(<span class="string">'./dl4j'</span>, [ <span class="string">'.zip'</span> ]);
+        <span class="keyword">this</span>.register(<span class="string">'./mlnet'</span>, [ <span class="string">'.zip'</span>]);
+
+    }
+</code></pre><p>在这上层是一层标准定义层，用于抹平不同模型之间的表达方式，用归一化的逻辑来进行处理，<strong>至于怎么把自己的模型表征映射成归一化的逻辑，就需要编写对应 <code>xxx.js</code> 来自行处理，后文会以 <code>MNN</code> 来进行举例。</strong></p>
+<p>最上层就是对应各个深度框架自行的逻辑处理了。其中包含了数据格式及对应解析（如 <code>flatbuffer</code>）、内容校验、构图等等，后文也会用 <code>MNN</code> 举例说明。</p>
+<h3 id="标准定义">标准定义</h3><p>这一环是一个很不起眼但是却非常重要的环节。 每种深度模型框架都有其自定义的模块结构和模块构成，一般都以 <code>Flatbuffer Schema</code> 的形式构成。（当然也有例外）以<code>MNN</code> 为例，其对应的模型结构大致如下图所示：</p>
+<p><img src="https://upload-images.jianshu.io/upload_images/9525982-b558276df2e23ddc.png" alt=""></p>
+<blockquote>
+<p>上图引用自<a href="https://www.jianshu.com/p/8eb153c12a4b" target="_blank" rel="external">FlatBuffers，MNN模型存储结构基础 —- 无法解读MNN模型文件的秘密</a></p>
+</blockquote>
+<p>同理， <code>TFLite</code> 的模型也可见 <code>TFLite.schema</code>，不再赘述。</p>
+<p>从定义中不难看出，<code>TFLite</code> 有 <code>model</code>，<code>graph</code> ，<code>SubGraph</code> 等；而 <code>MNN</code> 对应的就是<code>Net</code>；再往下一层 <code>TFLite</code> 有 <code>Operator</code> 和 <code>Options</code>；而 <code>MNN</code> 有 <code>OP</code> 和<code>OPParameter</code>；至于 <code>NCNN</code> 则是 <code>Layer</code>。</p>
+<p><b style="color:red">如果是从整个架构角度去兼容不同的框架，必然会有着大量的 <code>messy code</code>。因此作者定义了一套标准表征，让不同的深度模型自己去解析，然后附着自身的逻辑到这同一套表征上。</b></p>
+<ul>
+<li><code>Model</code> ，表示模型的静态表示。</li>
+<li><code>Graph</code> ，表示模型的计算图表示。</li>
+<li><code>Node</code> ，一个操作对应一个节点。</li>
+<li><code>Tensor</code> ，输入输出数据。</li>
+<li><code>Parameter</code> ，对应的属性。</li>
+<li><code>Argument</code> ，对应的属性值。</li>
+</ul>
+<blockquote>
+<p>上述 <code>Parameter</code> 和 <code>Argument</code>可以简单认为一一对应吧，都认为是属性值即可。</p>
+</blockquote>
+<p>一图胜千言，下图比较好的展现了<strong>术语和对应的表征：</strong></p>
+<p><img src="https://upload-images.jianshu.io/upload_images/4292627-ecec7a02f7c33ae9.png?imageMogr2/auto-orient/strip%7CimageView2/2/w/1240" alt=""></p>
+<p>这样不同的框架模型只要在自己对应的 <code>xxx.js</code> 中，把<strong>图，<code>OP</code> 层</strong>对应的数据填充至对应的地方即可。</p>
+<p>这里依然以 <code>MNN</code> 举例：</p>
+<ul>
+<li>我们不存在 <code>subgraph</code> 的概念，直接把 <code>Model</code> 和 <code>Graph</code> 等价于一个 <code>net</code>即可。</li>
+<li>从 <code>net</code> 中取出 <code>oplist</code> ，对应创建成 <code>Node</code>。</li>
+<li>从 <code>oplist</code> 中每个 <code>op</code> ，取出对应的 <code>tensorIndex</code>，根据 <code>net</code> 的 <code>tensorName</code> 和<code>tensorIndex</code> 来创建对应的 <code>tensor</code> 。</li>
+<li>从 <code>op</code> 中根据 <code>opparameter</code> 的种类，从 <code>op.main</code> 中取出不同的数据来填入 <code>paramter / argument</code>，<strong>这块是解析的大头，如果没想好方式，就会非常浪费时间</strong>，下文重点说。</li>
+</ul>
+<h3 id="数据格式">数据格式</h3><p>诸如 <code>MNN</code> ，<code>TFlite</code> 都选用了 <code>Flatbuffer</code> 来进行数据的保存，而官方的 <code>flatc</code> 程序支持直接根据定义的 <code>schema</code> 文件生成对应的 <code>generated.js</code>，命令如下：</p>
+<pre><code>.<span class="regexp">/flatc -s ~/y</span>ourPathTo<span class="regexp">/MNN/</span>schema<span class="regexp">/default/</span>Type.fbs
+</code></pre><p>这个我看了下很多的同学的在处理多 <code>Schema</code> 定义的时候是对应的一个个生成 <code>generated.js</code>，这样维护成本比较大，既然我们的已经使用了 <code>include</code> 机制，我们直接在生成过程中合并即可，如下所示：</p>
+<pre><code>.<span class="regexp">/flatc --js -I ~/y</span>ourPathTo<span class="regexp">/MNN/</span>schema<span class="regexp">/default/</span> ~<span class="regexp">/yourPathTo/M</span>NN<span class="regexp">/schema/</span><span class="keyword">default</span><span class="regexp">/MNN.fbs --gen-all</span>
+</code></pre><p>这里有两个参数注意下：</p>
+<ul>
+<li><code>-I</code>，表示 <code>include</code> 从哪个路径进行搜索。</li>
+<li><code>--gen-all</code>，表示自动对生成的所有文件合并。</li>
+</ul>
+<p>生成代码大致如下：</p>
+<pre><code><span class="comment">/**
+ * <span class="doctag">@param</span> {number} i
+ * <span class="doctag">@param</span> {flatbuffers.ByteBuffer} bb
+ * <span class="doctag">@returns</span> {MNN.Blob}
+ */</span>
+MNN.Blob.prototype.__init = <span class="function"><span class="keyword">function</span><span class="params">(i, bb)</span> </span>{
+  this.bb_pos = i;
+  this.bb = bb;
+  <span class="keyword">return</span> this;
+};
+<span class="comment">/**
+ * <span class="doctag">@param</span> {flatbuffers.ByteBuffer} bb
+ * <span class="doctag">@param</span> {MNN.Blob=} obj
+ * <span class="doctag">@returns</span> {MNN.Blob}
+ */</span>
+MNN.Blob.getRootAsBlob = <span class="function"><span class="keyword">function</span><span class="params">(bb, obj)</span> </span>{
+  <span class="keyword">return</span> (obj || <span class="keyword">new</span> MNN.Blob).__init(bb.readInt32(bb.position()) + bb.position(), bb);
+};
+<span class="comment">/**
+ * <span class="doctag">@param</span> {flatbuffers.ByteBuffer} bb
+ * <span class="doctag">@param</span> {MNN.Blob=} obj
+ * <span class="doctag">@returns</span> {MNN.Blob}
+ */</span>
+MNN.Blob.getSizePrefixedRootAsBlob = <span class="function"><span class="keyword">function</span><span class="params">(bb, obj)</span> </span>{
+  <span class="keyword">return</span> (obj || <span class="keyword">new</span> MNN.Blob).__init(bb.readInt32(bb.position()) + bb.position(), bb);
+};
+</code></pre><p>具体关于 <code>FlatBuffer</code> 的细节，可以阅读我之前的文章，不再赘述。</p>
+<h3 id="避免冗余解析流程">避免冗余解析流程</h3><p>上文提到 <strong>根据 OpParameter </strong>来获取 <code>main</code> 中的数据，然后依次填入 <code>parameter / argument</code> 是比较耗费精力的步骤。我们所有的 <code>OpParameter</code> 类型有 <b style="color:red">74</b>种（还在不断更新）</p>
+<pre><code>MNN.OpParameter = {
+  NONE: <span class="number">0</span>,
+  QuantizedAdd: <span class="number">1</span>,
+  ArgMax: <span class="number">2</span>,
+  AsString: <span class="number">3</span>,
+  Axis: <span class="number">4</span>,
+  BatchNorm: <span class="number">5</span>,
+  BinaryOp: <span class="number">6</span>,
+  Blob: <span class="number">7</span>,
+  CastParam: <span class="number">8</span>,
+  Convolution2D: <span class="number">9</span>,
+  Crop: <span class="number">10</span>,
+  CropAndResize: <span class="number">11</span>,
+  Dequantize: <span class="number">12</span>,
+  DetectionOutput: <span class="number">13</span>,
+  Eltwise: <span class="number">14</span>,
+  ExpandDims: <span class="number">15</span>,
+  Fill: <span class="number">16</span>,
+  Flatten: <span class="number">17</span>,
+  Gather: <span class="number">18</span>,
+  GatherV2: <span class="number">19</span>,
+  InnerProduct: <span class="number">20</span>,
+  Input: <span class="number">21</span>,
+  Interp: <span class="number">22</span>,
+  LRN: <span class="number">23</span>,
+  LSTM: <span class="number">24</span>,
+  MatMul: <span class="number">25</span>,
+  NonMaxSuppressionV2: <span class="number">26</span>,
+  Normalize: <span class="number">27</span>,
+  PackParam: <span class="number">28</span>,
+  Permute: <span class="number">29</span>,
+  Plugin: <span class="number">30</span>,
+  Pool: <span class="number">31</span>,
+  PRelu: <span class="number">32</span>,
+  PriorBox: <span class="number">33</span>,
+  Proposal: <span class="number">34</span>,
+  QuantizedAvgPool: <span class="number">35</span>,
+  QuantizedBiasAdd: <span class="number">36</span>,
+  QuantizedConcat: <span class="number">37</span>,
+  QuantizedLogistic: <span class="number">38</span>,
+  QuantizedMatMul: <span class="number">39</span>,
+  QuantizedMaxPool: <span class="number">40</span>,
+  QuantizedRelu: <span class="number">41</span>,
+  QuantizedRelu6: <span class="number">42</span>,
+  QuantizedReshape: <span class="number">43</span>,
+  QuantizedSoftmax: <span class="number">44</span>,
+  QuantizeMaxMin: <span class="number">45</span>,
+  QuantizeV2: <span class="number">46</span>,
+  Range: <span class="number">47</span>,
+  Rank: <span class="number">48</span>,
+  ReduceJoin: <span class="number">49</span>,
+  ReductionParam: <span class="number">50</span>,
+  Relu: <span class="number">51</span>,
+  Relu6: <span class="number">52</span>,
+  RequantizationRange: <span class="number">53</span>,
+  Requantize: <span class="number">54</span>,
+  Reshape: <span class="number">55</span>,
+  Resize: <span class="number">56</span>,
+  RoiPooling: <span class="number">57</span>,
+  Scale: <span class="number">58</span>,
+  Selu: <span class="number">59</span>,
+  Size: <span class="number">60</span>,
+  Slice: <span class="number">61</span>,
+  SliceTf: <span class="number">62</span>,
+  SpaceBatch: <span class="number">63</span>,
+  SqueezeParam: <span class="number">64</span>,
+  StridedSliceParam: <span class="number">65</span>,
+  TensorConvertInfo: <span class="number">66</span>,
+  TfQuantizedConv2D: <span class="number">67</span>,
+  TopKV2: <span class="number">68</span>,
+  Transpose: <span class="number">69</span>,
+  UnaryOp: <span class="number">70</span>,
+  MomentsParam: <span class="number">71</span>,
+  RNNParam: <span class="number">72</span>,
+  BatchMatMulParam: <span class="number">73</span>,
+  QuantizedFloatParam: <span class="number">74</span>
+};
+</code></pre><p><strong>以 <code>Convolution2D</code> 举例，它又有几个对应的参数：<code>weight</code> ，<code>bias</code> ，<code>quanParameter</code> ，<code>symmetricQuan</code> ，<code>padX</code> ，<code>padY</code> ，<code>kernelX</code> ，<code>kernelY</code> 等等，需要解析。</strong></p>
+<p>一开始我采用了人肉的解析方式，代码就成了 <code>if else</code> 加上一大堆解析代码：</p>
+<pre><code>mnn_private.Convolution2DAttrBuilder = <span class="keyword">class</span> {
+constructor() {}
+
+buildAttributes(metadata, parameter) {
+    <span class="comment">//var common = parameter.common();</span>
+    var attributes = [];
+    var common = parameter.common();
+    attributes.<span class="keyword">push</span>(<span class="keyword">new</span> mnn.Attribute(metadata, <span class="string">"padX"</span>, common.padX(), <span class="keyword">true</span>));
+    attributes.<span class="keyword">push</span>(<span class="keyword">new</span> mnn.Attribute(metadata, <span class="string">"padY"</span>, common.padY(), <span class="keyword">true</span>));
+    attributes.<span class="keyword">push</span>(<span class="keyword">new</span> mnn.Attribute(metadata, <span class="string">"kernelX"</span>, common.kernelX(), <span class="keyword">true</span>));
+    attributes.<span class="keyword">push</span>(<span class="keyword">new</span> mnn.Attribute(metadata, <span class="string">"kernelY"</span>, common.kernelY(), <span class="keyword">true</span>));
+    attributes.<span class="keyword">push</span>(<span class="keyword">new</span> mnn.Attribute(metadata, <span class="string">"strideX"</span>, common.strideX(), <span class="keyword">true</span>));
+    attributes.<span class="keyword">push</span>(<span class="keyword">new</span> mnn.Attribute(metadata, <span class="string">"strideY"</span>, common.strideY(), <span class="keyword">true</span>));
+    attributes.<span class="keyword">push</span>(<span class="keyword">new</span> mnn.Attribute(metadata, <span class="string">"dilateX"</span>, common.dilateX(), <span class="keyword">true</span>));
+    attributes.<span class="keyword">push</span>(<span class="keyword">new</span> mnn.Attribute(metadata, <span class="string">"dilateY"</span>, common.dilateY(), <span class="keyword">true</span>));
+    attributes.<span class="keyword">push</span>(<span class="keyword">new</span> mnn.Attribute(metadata, <span class="string">"padMode"</span>, mnn.schema.PadModeName[common.dilateY()], <span class="keyword">true</span>));
+    attributes.<span class="keyword">push</span>(<span class="keyword">new</span> mnn.Attribute(metadata, <span class="string">"group"</span>, common.<span class="keyword">group</span>(), <span class="keyword">true</span>));
+    attributes.<span class="keyword">push</span>(<span class="keyword">new</span> mnn.Attribute(metadata, <span class="string">"outputCount"</span>, common.outputCount(), <span class="keyword">true</span>));
+    attributes.<span class="keyword">push</span>(<span class="keyword">new</span> mnn.Attribute(metadata, <span class="string">"inputCount"</span>, common.inputCount(), <span class="keyword">true</span>));
+    attributes.<span class="keyword">push</span>(<span class="keyword">new</span> mnn.Attribute(metadata, <span class="string">"relu"</span>, common.relu(), <span class="keyword">true</span>));
+    attributes.<span class="keyword">push</span>(<span class="keyword">new</span> mnn.Attribute(metadata, <span class="string">"relu6"</span>, common.relu6(), <span class="keyword">true</span>));
+    <span class="comment">//var quanParameter = parameter.quanParameter();</span>
+    var weights = [];
+    <span class="keyword">for</span> (var w = <span class="number">0</span>; w &lt; parameter.weightLength(); w++) {
+        weights.<span class="keyword">push</span>(parameter.weight(w));
+    }
+    attributes.<span class="keyword">push</span>(<span class="keyword">new</span> mnn.Attribute(metadata, <span class="string">"weights"</span>, weights, <span class="keyword">true</span>));
+    var bias = [];
+    <span class="keyword">for</span> (var b = <span class="number">0</span>; b &lt; parameter.biasLength(); b++) {
+        bias.<span class="keyword">push</span>(parameter.bias(b));
+    }
+    attributes.<span class="keyword">push</span>(<span class="keyword">new</span> mnn.Attribute(metadata, <span class="string">"bias"</span>, bias, <span class="keyword">true</span>));
+
+    <span class="keyword">return</span> attributes;
+}
+
+get hasMain() {
+    <span class="keyword">return</span> <span class="keyword">true</span>;
+}
+</code></pre><p><strong>这样的代码如果写完74个 <code>OpParameter</code> ，可维护性和后续的扩展也不够。</strong></p>
+<p><b style="color:red">我们要巧用 <code>JavaScript</code>的 <code>Reflect</code> 能力以及<strong>属性等于与字符串值属性的特性</strong></b></p>
+<pre><code>_buildAttributes(metadata, op, net, args) {
+        <span class="keyword">var</span> opParameter = op.mainType();    
+        <span class="keyword">var</span> opParameterName = mnn.schema.OpParameterName[opParameter];
+
+        <span class="comment">// 获取对应的类型</span>
+        <span class="keyword">var</span> mainConstructor = mnn.schema[opParameterName];
+        <span class="keyword">var</span> opParameterObject = <span class="keyword">null</span>;
+        <span class="keyword">if</span> (<span class="keyword">typeof</span> mainConstructor === <span class="string">'function'</span>) {
+            <span class="keyword">var</span> mainTemplate = Reflect.construct(mainConstructor, []);
+            opParameterObject = op.main(mainTemplate);
+        }
+        <span class="keyword">this</span>._recursivelyBuildAttributes(metadata, net, opParameterObject, <span class="keyword">this</span>._attributes);
+    }
+    _recursivelyBuildAttributes(metadata, net, opParameterObject, attributeHolders) {
+        <span class="keyword">if</span> (!opParameterObject) <span class="keyword">return</span>;
+        <span class="keyword">var</span> attributeName;
+        <span class="keyword">var</span> attributeNames = [];
+        <span class="keyword">var</span> attributeNamesMap = {};
+        <span class="keyword">for</span> (attributeName of Object.keys(Object.getPrototypeOf(opParameterObject))) {
+            <span class="keyword">if</span> (attributeName != <span class="string">'__init'</span>) {
+                attributeNames.push(attributeName);
+            }
+            attributeNamesMap[attributeName] = <span class="keyword">true</span>;
+        }
+        <span class="keyword">var</span> attributeArrayNamesMap = {}; 
+        <span class="keyword">for</span> (attributeName of Object.keys(attributeNamesMap)) {
+            <span class="keyword">if</span> (attributeNamesMap[attributeName + <span class="string">'Length'</span>]) {                    attributeArrayNamesMap[attributeName] = <span class="keyword">true</span>;
+                attributeNames = attributeNames.filter((item) =&gt; item != (attributeName + <span class="string">'Array'</span>) &amp;&amp; item != (attributeName + <span class="string">'Length'</span>));
+            }
+        }
+        <span class="keyword">for</span> (attributeName of attributeNames) {
+            <span class="keyword">if</span> (opParameterObject[attributeName] &amp;&amp; <span class="keyword">typeof</span> opParameterObject[attributeName] == <span class="string">'function'</span>) {
+                <span class="keyword">var</span> <span class="keyword">value</span> = <span class="keyword">null</span>;
+                <span class="keyword">if</span> (attributeArrayNamesMap[attributeName]) {
+                    <span class="keyword">var</span> array = [];
+                    <span class="keyword">var</span> length = opParameterObject[attributeName + <span class="string">'Length'</span>]();
+                    <span class="comment">//var a = opParameterObject[attributeName + 'Array']();</span>
+                    <span class="keyword">for</span> (<span class="keyword">var</span> l = <span class="number">0</span>; l &lt; length; l++) {
+                        array.push(opParameterObject[attributeName + <span class="string">'Length'</span>](l));
+                    }
+                    <span class="keyword">value</span> = array;
+                }
+                <span class="keyword">else</span> {
+                    <span class="keyword">value</span> = opParameterObject[attributeName]();
+                    <span class="keyword">if</span> (<span class="keyword">typeof</span> <span class="keyword">value</span> === <span class="string">'object'</span>) {
+                        <span class="keyword">this</span>._recursivelyBuildAttributes(metadata, net, <span class="keyword">value</span>, attributeHolders);   
+                        <span class="keyword">value</span> = <span class="keyword">null</span>;
+                    }
+                }
+                <span class="keyword">if</span> (<span class="keyword">value</span>) {
+                    <span class="keyword">var</span> attribute = <span class="keyword">new</span> mnn.Attribute(metadata, attributeName, <span class="keyword">value</span>);
+                    attributeHolders.push(attribute);
+                }                
+            }
+        }
+    }
+</code></pre><p><b style="color:red">区区50多行代码就可以完成所有 <code>OpParamater</code> 及其对应的属性解析。</b></p>
+
+      
+    </div>
+    <footer class="article-footer">
+      <a data-url="http://satanwoo.github.io/2020/02/06/MNN-Visual/" data-id="ck6c7nckq002shhi1jtyfkaiw" class="article-share-link">Share</a>
+      
+        <a href="http://satanwoo.github.io/2020/02/06/MNN-Visual/#disqus_thread" class="article-comment-link">Comments</a>
+      
+      
+  <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/JavaScript/">JavaScript</a></li><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Machine-Learning/">Machine Learning</a></li><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
+
+    </footer>
+  </div>
+  
+    
+<nav id="article-nav">
+  
+  
+    <a href="/2019/12/01/SIMD-1/" id="article-nav-older" class="article-nav-link-wrap">
+      <strong class="article-nav-caption">Older</strong>
+      <div class="article-nav-title">了解 SIMD 指令</div>
+    </a>
+  
+</nav>
+
+  
+</article>
+
+<div id="disqus_thread"></div>
+<script>
+
+/**
+*  RECOMMENDED CONFIGURATION VARIABLES: EDIT AND UNCOMMENT THE SECTION BELOW TO INSERT DYNAMIC VALUES FROM YOUR PLATFORM OR CMS.
+*  LEARN WHY DEFINING THESE VARIABLES IS IMPORTANT: https://disqus.com/admin/universalcode/#configuration-variables*/
+/*
+var disqus_config = function () {
+this.page.url = PAGE_URL;  // Replace PAGE_URL with your page's canonical URL variable
+this.page.identifier = PAGE_IDENTIFIER; // Replace PAGE_IDENTIFIER with your page's unique identifier variable
+};
+*/
+(function() { // DON'T EDIT BELOW THIS LINE
+var d = document, s = d.createElement('script');
+s.src = 'https://satanwoo-2.disqus.com/embed.js';
+s.setAttribute('data-timestamp', +new Date());
+(d.head || d.body).appendChild(s);
+})();
+</script>
+<noscript>Please enable JavaScript to view the <a href="https://disqus.com/?ref_noscript">comments powered by Disqus.</a></noscript>
+                                
+  <section id="comments">
+    <div id="disqus_thread">
+      <noscript>Please enable JavaScript to view the <a href="//disqus.com/?ref_noscript">comments powered by Disqus.</a></noscript>
+    </div>
+  </section>
+</section>
+        
+          <aside id="sidebar">
+  
+    
+  
+    
+  <div class="widget-wrap">
+    <h3 class="widget-title">Tags</h3>
+    <div class="widget">
+      <ul class="tag-list"><li class="tag-list-item"><a class="tag-list-link" href="/tags/Android/">Android</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/C/">C</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/C/">C++</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Growth/">Growth</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/JavaScript/">JavaScript</a><span class="tag-list-count">4</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Machine-Learning/">Machine Learning</a><span class="tag-list-count">3</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Math/">Math</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Performance/">Performance</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/R/">R</a><span class="tag-list-count">2</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Reverse-Engineering/">Reverse Engineering</a><span class="tag-list-count">6</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Swift/">Swift</a><span class="tag-list-count">6</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/XNU/">XNU</a><span class="tag-list-count">2</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/c/">c++</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/iOS/">iOS</a><span class="tag-list-count">44</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/shell/">shell</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/汇编/">汇编</a><span class="tag-list-count">1</span></li></ul>
+    </div>
+  </div>
+
+  
+    
+  <div class="widget-wrap">
+    <h3 class="widget-title">Tag Cloud</h3>
+    <div class="widget tagcloud">
+      <a href="/tags/Android/" style="font-size: 10px;">Android</a> <a href="/tags/C/" style="font-size: 10px;">C</a> <a href="/tags/C/" style="font-size: 10px;">C++</a> <a href="/tags/Growth/" style="font-size: 10px;">Growth</a> <a href="/tags/JavaScript/" style="font-size: 16px;">JavaScript</a> <a href="/tags/Machine-Learning/" style="font-size: 14px;">Machine Learning</a> <a href="/tags/Math/" style="font-size: 10px;">Math</a> <a href="/tags/Performance/" style="font-size: 10px;">Performance</a> <a href="/tags/R/" style="font-size: 12px;">R</a> <a href="/tags/Reverse-Engineering/" style="font-size: 18px;">Reverse Engineering</a> <a href="/tags/Swift/" style="font-size: 18px;">Swift</a> <a href="/tags/XNU/" style="font-size: 12px;">XNU</a> <a href="/tags/c/" style="font-size: 10px;">c++</a> <a href="/tags/iOS/" style="font-size: 20px;">iOS</a> <a href="/tags/shell/" style="font-size: 10px;">shell</a> <a href="/tags/汇编/" style="font-size: 10px;">汇编</a>
+    </div>
+  </div>
+
+  
+    
+  <div class="widget-wrap">
+    <h3 class="widget-title">Archives</h3>
+    <div class="widget">
+      <ul class="archive-list"><li class="archive-list-item"><a class="archive-list-link" href="/archives/2020/02/">February 2020</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2019/12/">December 2019</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2019/10/">October 2019</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2019/07/">July 2019</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2019/01/">January 2019</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2018/12/">December 2018</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2018/10/">October 2018</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2018/05/">May 2018</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2018/04/">April 2018</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2018/02/">February 2018</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2018/01/">January 2018</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/11/">November 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/10/">October 2017</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/09/">September 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/08/">August 2017</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/07/">July 2017</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/06/">June 2017</a><span class="archive-list-count">3</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/04/">April 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/01/">January 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/10/">October 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/09/">September 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/07/">July 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/05/">May 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/04/">April 2016</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/03/">March 2016</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/02/">February 2016</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/12/">December 2015</a><span class="archive-list-count">6</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/11/">November 2015</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/10/">October 2015</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/09/">September 2015</a><span class="archive-list-count">4</span></li></ul>
+    </div>
+  </div>
+
+  
+    
+  <div class="widget-wrap">
+    <h3 class="widget-title">Recents</h3>
+    <div class="widget">
+      <ul>
+        
+          <li>
+            <a href="/2020/02/06/MNN-Visual/">实现 MNN 模型的可视化工具</a>
+          </li>
+        
+          <li>
+            <a href="/2019/12/01/SIMD-1/">了解 SIMD 指令</a>
+          </li>
+        
+          <li>
+            <a href="/2019/10/27/MNN1/">浅谈移动工程师跨界机器学习之路</a>
+          </li>
+        
+          <li>
+            <a href="/2019/07/07/RevisitAutorelease2/">Revisit iOS Autorelease之二</a>
+          </li>
+        
+          <li>
+            <a href="/2019/07/02/RevisitAutorelease/">Revisit iOS Autorelease 之不经意间可能被影响的优化</a>
+          </li>
+        
+      </ul>
+    </div>
+  </div>
+
+  
+</aside>
+        
+      </div>
+      <footer id="footer">
+  
+  <div class="outer">
+    <div id="footer-info" class="inner">
+      &copy; 2020 SatanWoo<br>
+      Powered by <a href="http://hexo.io/" target="_blank">Hexo</a>
+    </div>
+  </div>
+</footer>
+    </div>
+    <nav id="mobile-nav">
+  
+    <a href="/" class="mobile-nav-link">Home</a>
+  
+    <a href="/archives" class="mobile-nav-link">Archives</a>
+  
+    <a href="/sitemap.xml" class="mobile-nav-link">map</a>
+  
+</nav>
+    
+<script>
+  var disqus_shortname = 'satanwoo-2';
+  
+  var disqus_url = 'http://satanwoo.github.io/2020/02/06/MNN-Visual/';
+  
+  (function(){
+    var dsq = document.createElement('script');
+    dsq.type = 'text/javascript';
+    dsq.async = true;
+    dsq.src = '//' + disqus_shortname + '.disqus.com/embed.js';
+    (document.getElementsByTagName('head')[0] || document.getElementsByTagName('body')[0]).appendChild(dsq);
+  })();
+</script>
+
+
+
+  <link rel="stylesheet" href="/fancybox/jquery.fancybox.css" type="text/css">
+  <script src="/fancybox/jquery.fancybox.pack.js" type="text/javascript"></script>
+
+
+<script src="/js/script.js" type="text/javascript"></script>
+
+  </div>
+</body>
+</html>

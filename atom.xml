@@ -4,7 +4,7 @@
   
   <link href="/atom.xml" rel="self"/>
   <link href="http://satanwoo.github.io/"/>
-  <updated>2019-12-01T15:44:41.000Z</updated>
+  <updated>2020-02-07T13:33:24.017Z</updated>
   <id>http://satanwoo.github.io/</id>
   
   <author>
@@ -13,6 +13,313 @@
   </author>
   
   <generator uri="http://hexo.io/">Hexo</generator>
+  
+  <entry>
+    <title><![CDATA[实现 MNN 模型的可视化工具]]></title>
+    <link href="http://satanwoo.github.io/2020/02/06/MNN-Visual/"/>
+    <id>http://satanwoo.github.io/2020/02/06/MNN-Visual/</id>
+    <published>2020-02-06T15:10:21.000Z</published>
+    <updated>2020-02-07T13:33:24.017Z</updated>
+    <content type="html"><![CDATA[<p><code>Netron</code> 是一个支持 <code>Tensorflow</code> ，<code>PyTorch</code> ，<code>MXNet</code> ，<code>NCNN</code> ， <code>PaddlePaddle</code> 等深度模型格式的可视化框架。去年国庆前的时候我稍微研究了下相关的代码，<b style="color:red">重点关注其将其是如何设计出一套兼容不同模型格式表征，用来归一化展现不同的深度学习框架模型。</b></p>
+<p>研究完成后，我利用如下两个 <code>Commit</code> 作为 <code>Pull Request</code> 提交给了作者，用以支持 <code>MNN</code> 的模型可视化。</p>
+<ul>
+<li><p><a href="https://github.com/lutzroeder/netron/pull/340" target="_blank" rel="external">Visualization support for MNN models #340</a></p>
+</li>
+<li><p><a href="https://github.com/lutzroeder/netron/pull/345" target="_blank" rel="external">Fix loading .mnn model failed when there is no extraTensorDescribe existed.</a></p>
+</li>
+</ul>
+<p>从中也不难看出我扎实的英语表述能力（我果然是个国际化人才）。</p>
+<p>这篇文章会从<strong>架构设计、标准定义、巧用JS解析</strong>等几个方面来阐述</p>
+<h3 id="架构设计">架构设计</h3><p>整体上，按照我个人的理解，<code>Netron</code> 的架构可以简要展现如下：</p>
+<p><img src="https://upload-images.jianshu.io/upload_images/4292627-565192345c3f5484.png?imageMogr2/auto-orient/strip%7CimageView2/2/w/1240" alt=""></p>
+<p>最基础的应用部分及运行环境，是 <code>Electron</code> 这个跨平台框架直接呈现的。<br>当然，一些诸如基础zip/gzip用于解压等等的库我们也统一归类到支撑里。</p>
+<p>然后是一套经典的 <code>MVC</code> 的结构，<code>app.js</code> 作为整体的 controller ，负责整个应用的功能逻辑，如导出图片、菜单管理、保存加载等等。<b style="color:red">这一层我们需要的做事非常少，只要将 <code>MNN</code> 支持的模型后缀 <code>.mnn</code> 注册进去即可</b>。 然后是是对应的 <code>view.js</code>，这块实际上还是一层 <code>controller</code>，类比我们常说的子控制器，专门用于处理主视图的逻辑，如下图所示：</p>
+<p><img src="https://upload-images.jianshu.io/upload_images/4292627-6539f5107f03904e.png?imageMogr2/auto-orient/strip%7CimageView2/2/w/1240" alt=""></p>
+<p><b style="color:red">从这块开始，我们就要注意了，因为这里开始通过工厂方法对应的根据读取文件类型的不同，托管给了不同的自定义 <code>xxx.js</code> 来处理后续步骤</b>。 比如<code>.mar</code>，<code>model</code>，<code>prototxt</code> 等格式的模型会首先托管给 <code>mxnet.js</code>来处理。<strong>如果存在重名，则按照先后顺序依次尝试。</strong></p>
+<pre><code>view.ModelFactoryService = <span class="keyword">class</span> {
+    <span class="constructor"><span class="keyword">constructor</span>(host) </span>{
+        <span class="keyword">this</span>._host = host;
+        <span class="keyword">this</span>._extensions = [];
+        <span class="keyword">this</span>.register(<span class="string">'./onnx'</span>, [ <span class="string">'.onnx'</span>, <span class="string">'.pb'</span>, <span class="string">'.pbtxt'</span>, <span class="string">'.prototxt'</span> ]);
+        <span class="keyword">this</span>.register(<span class="string">'./mxnet'</span>, [ <span class="string">'.mar'</span>, <span class="string">'.model'</span>, <span class="string">'.json'</span>, <span class="string">'.params'</span> ]);
+        <span class="keyword">this</span>.register(<span class="string">'./keras'</span>, [ <span class="string">'.h5'</span>, <span class="string">'.hd5'</span>, <span class="string">'.hdf5'</span>, <span class="string">'.keras'</span>, <span class="string">'.json'</span>, <span class="string">'.model'</span> ]);
+        <span class="keyword">this</span>.register(<span class="string">'./coreml'</span>, [ <span class="string">'.mlmodel'</span> ]);
+        <span class="keyword">this</span>.register(<span class="string">'./caffe'</span>, [ <span class="string">'.caffemodel'</span>, <span class="string">'.pbtxt'</span>, <span class="string">'.prototxt'</span>, <span class="string">'.pt'</span> ]);
+        <span class="keyword">this</span>.register(<span class="string">'./caffe2'</span>, [ <span class="string">'.pb'</span>, <span class="string">'.pbtxt'</span>, <span class="string">'.prototxt'</span> ]);
+        <span class="keyword">this</span>.register(<span class="string">'./pytorch'</span>, [ <span class="string">'.pt'</span>, <span class="string">'.pth'</span>, <span class="string">'.pkl'</span>, <span class="string">'.h5'</span>, <span class="string">'.t7'</span>, <span class="string">'.model'</span>, <span class="string">'.dms'</span>, <span class="string">'.pth.tar'</span>, <span class="string">'.ckpt'</span>, <span class="string">'.bin'</span> ]);
+        <span class="keyword">this</span>.register(<span class="string">'./torch'</span>, [ <span class="string">'.t7'</span> ]);
+        <span class="keyword">this</span>.register(<span class="string">'./torchscript'</span>, [ <span class="string">'.pt'</span>, <span class="string">'.pth'</span> ]);
+        <span class="keyword">this</span>.register(<span class="string">'./mnn'</span>, [<span class="string">'.mnn'</span>, <span class="string">'.tflite'</span>]);
+        <span class="keyword">this</span>.register(<span class="string">'./tflite'</span>, [ <span class="string">'.tflite'</span>, <span class="string">'.lite'</span>, <span class="string">'.tfl'</span>, <span class="string">'.bin'</span> ]);
+        <span class="keyword">this</span>.register(<span class="string">'./tf'</span>, [ <span class="string">'.pb'</span>, <span class="string">'.meta'</span>, <span class="string">'.pbtxt'</span>, <span class="string">'.prototxt'</span>, <span class="string">'.json'</span> ]);
+        <span class="keyword">this</span>.register(<span class="string">'./sklearn'</span>, [ <span class="string">'.pkl'</span>, <span class="string">'.joblib'</span>, <span class="string">'.model'</span> ]);
+        <span class="keyword">this</span>.register(<span class="string">'./cntk'</span>, [ <span class="string">'.model'</span>, <span class="string">'.cntk'</span>, <span class="string">'.cmf'</span>, <span class="string">'.dnn'</span> ]);
+        <span class="keyword">this</span>.register(<span class="string">'./openvino'</span>, [ <span class="string">'.xml'</span> ]);
+        <span class="keyword">this</span>.register(<span class="string">'./darknet'</span>, [ <span class="string">'.cfg'</span> ]);
+        <span class="keyword">this</span>.register(<span class="string">'./paddle'</span>, [ <span class="string">'.paddle'</span>, <span class="string">'__model__'</span> ]);
+        <span class="keyword">this</span>.register(<span class="string">'./ncnn'</span>, [ <span class="string">'.param'</span>, <span class="string">'.bin'</span>, <span class="string">'.cfg.ncnn'</span>, <span class="string">'.weights.ncnn'</span>]);
+        <span class="keyword">this</span>.register(<span class="string">'./dl4j'</span>, [ <span class="string">'.zip'</span> ]);
+        <span class="keyword">this</span>.register(<span class="string">'./mlnet'</span>, [ <span class="string">'.zip'</span>]);
+
+    }
+</code></pre><p>在这上层是一层标准定义层，用于抹平不同模型之间的表达方式，用归一化的逻辑来进行处理，<strong>至于怎么把自己的模型表征映射成归一化的逻辑，就需要编写对应 <code>xxx.js</code> 来自行处理，后文会以 <code>MNN</code> 来进行举例。</strong></p>
+<p>最上层就是对应各个深度框架自行的逻辑处理了。其中包含了数据格式及对应解析（如 <code>flatbuffer</code>）、内容校验、构图等等，后文也会用 <code>MNN</code> 举例说明。</p>
+<h3 id="标准定义">标准定义</h3><p>这一环是一个很不起眼但是却非常重要的环节。 每种深度模型框架都有其自定义的模块结构和模块构成，一般都以 <code>Flatbuffer Schema</code> 的形式构成。（当然也有例外）以<code>MNN</code> 为例，其对应的模型结构大致如下图所示：</p>
+<p><img src="https://upload-images.jianshu.io/upload_images/9525982-b558276df2e23ddc.png" alt=""></p>
+<blockquote>
+<p>上图引用自<a href="https://www.jianshu.com/p/8eb153c12a4b" target="_blank" rel="external">FlatBuffers，MNN模型存储结构基础 —- 无法解读MNN模型文件的秘密</a></p>
+</blockquote>
+<p>同理， <code>TFLite</code> 的模型也可见 <code>TFLite.schema</code>，不再赘述。</p>
+<p>从定义中不难看出，<code>TFLite</code> 有 <code>model</code>，<code>graph</code> ，<code>SubGraph</code> 等；而 <code>MNN</code> 对应的就是<code>Net</code>；再往下一层 <code>TFLite</code> 有 <code>Operator</code> 和 <code>Options</code>；而 <code>MNN</code> 有 <code>OP</code> 和<code>OPParameter</code>；至于 <code>NCNN</code> 则是 <code>Layer</code>。</p>
+<p><b style="color:red">如果是从整个架构角度去兼容不同的框架，必然会有着大量的 <code>messy code</code>。因此作者定义了一套标准表征，让不同的深度模型自己去解析，然后附着自身的逻辑到这同一套表征上。</b></p>
+<ul>
+<li><code>Model</code> ，表示模型的静态表示。</li>
+<li><code>Graph</code> ，表示模型的计算图表示。</li>
+<li><code>Node</code> ，一个操作对应一个节点。</li>
+<li><code>Tensor</code> ，输入输出数据。</li>
+<li><code>Parameter</code> ，对应的属性。</li>
+<li><code>Argument</code> ，对应的属性值。</li>
+</ul>
+<blockquote>
+<p>上述 <code>Parameter</code> 和 <code>Argument</code>可以简单认为一一对应吧，都认为是属性值即可。</p>
+</blockquote>
+<p>一图胜千言，下图比较好的展现了<strong>术语和对应的表征：</strong></p>
+<p><img src="https://upload-images.jianshu.io/upload_images/4292627-ecec7a02f7c33ae9.png?imageMogr2/auto-orient/strip%7CimageView2/2/w/1240" alt=""></p>
+<p>这样不同的框架模型只要在自己对应的 <code>xxx.js</code> 中，把<strong>图，<code>OP</code> 层</strong>对应的数据填充至对应的地方即可。</p>
+<p>这里依然以 <code>MNN</code> 举例：</p>
+<ul>
+<li>我们不存在 <code>subgraph</code> 的概念，直接把 <code>Model</code> 和 <code>Graph</code> 等价于一个 <code>net</code>即可。</li>
+<li>从 <code>net</code> 中取出 <code>oplist</code> ，对应创建成 <code>Node</code>。</li>
+<li>从 <code>oplist</code> 中每个 <code>op</code> ，取出对应的 <code>tensorIndex</code>，根据 <code>net</code> 的 <code>tensorName</code> 和<code>tensorIndex</code> 来创建对应的 <code>tensor</code> 。</li>
+<li>从 <code>op</code> 中根据 <code>opparameter</code> 的种类，从 <code>op.main</code> 中取出不同的数据来填入 <code>paramter / argument</code>，<strong>这块是解析的大头，如果没想好方式，就会非常浪费时间</strong>，下文重点说。</li>
+</ul>
+<h3 id="数据格式">数据格式</h3><p>诸如 <code>MNN</code> ，<code>TFlite</code> 都选用了 <code>Flatbuffer</code> 来进行数据的保存，而官方的 <code>flatc</code> 程序支持直接根据定义的 <code>schema</code> 文件生成对应的 <code>generated.js</code>，命令如下：</p>
+<pre><code>.<span class="regexp">/flatc -s ~/y</span>ourPathTo<span class="regexp">/MNN/</span>schema<span class="regexp">/default/</span>Type.fbs
+</code></pre><p>这个我看了下很多的同学的在处理多 <code>Schema</code> 定义的时候是对应的一个个生成 <code>generated.js</code>，这样维护成本比较大，既然我们的已经使用了 <code>include</code> 机制，我们直接在生成过程中合并即可，如下所示：</p>
+<pre><code>.<span class="regexp">/flatc --js -I ~/y</span>ourPathTo<span class="regexp">/MNN/</span>schema<span class="regexp">/default/</span> ~<span class="regexp">/yourPathTo/M</span>NN<span class="regexp">/schema/</span><span class="keyword">default</span><span class="regexp">/MNN.fbs --gen-all</span>
+</code></pre><p>这里有两个参数注意下：</p>
+<ul>
+<li><code>-I</code>，表示 <code>include</code> 从哪个路径进行搜索。</li>
+<li><code>--gen-all</code>，表示自动对生成的所有文件合并。</li>
+</ul>
+<p>生成代码大致如下：</p>
+<pre><code><span class="comment">/**
+ * <span class="doctag">@param</span> {number} i
+ * <span class="doctag">@param</span> {flatbuffers.ByteBuffer} bb
+ * <span class="doctag">@returns</span> {MNN.Blob}
+ */</span>
+MNN.Blob.prototype.__init = <span class="function"><span class="keyword">function</span><span class="params">(i, bb)</span> </span>{
+  this.bb_pos = i;
+  this.bb = bb;
+  <span class="keyword">return</span> this;
+};
+<span class="comment">/**
+ * <span class="doctag">@param</span> {flatbuffers.ByteBuffer} bb
+ * <span class="doctag">@param</span> {MNN.Blob=} obj
+ * <span class="doctag">@returns</span> {MNN.Blob}
+ */</span>
+MNN.Blob.getRootAsBlob = <span class="function"><span class="keyword">function</span><span class="params">(bb, obj)</span> </span>{
+  <span class="keyword">return</span> (obj || <span class="keyword">new</span> MNN.Blob).__init(bb.readInt32(bb.position()) + bb.position(), bb);
+};
+<span class="comment">/**
+ * <span class="doctag">@param</span> {flatbuffers.ByteBuffer} bb
+ * <span class="doctag">@param</span> {MNN.Blob=} obj
+ * <span class="doctag">@returns</span> {MNN.Blob}
+ */</span>
+MNN.Blob.getSizePrefixedRootAsBlob = <span class="function"><span class="keyword">function</span><span class="params">(bb, obj)</span> </span>{
+  <span class="keyword">return</span> (obj || <span class="keyword">new</span> MNN.Blob).__init(bb.readInt32(bb.position()) + bb.position(), bb);
+};
+</code></pre><p>具体关于 <code>FlatBuffer</code> 的细节，可以阅读我之前的文章，不再赘述。</p>
+<h3 id="避免冗余解析流程">避免冗余解析流程</h3><p>上文提到 <strong>根据 OpParameter </strong>来获取 <code>main</code> 中的数据，然后依次填入 <code>parameter / argument</code> 是比较耗费精力的步骤。我们所有的 <code>OpParameter</code> 类型有 <b style="color:red">74</b>种（还在不断更新）</p>
+<pre><code>MNN.OpParameter = {
+  NONE: <span class="number">0</span>,
+  QuantizedAdd: <span class="number">1</span>,
+  ArgMax: <span class="number">2</span>,
+  AsString: <span class="number">3</span>,
+  Axis: <span class="number">4</span>,
+  BatchNorm: <span class="number">5</span>,
+  BinaryOp: <span class="number">6</span>,
+  Blob: <span class="number">7</span>,
+  CastParam: <span class="number">8</span>,
+  Convolution2D: <span class="number">9</span>,
+  Crop: <span class="number">10</span>,
+  CropAndResize: <span class="number">11</span>,
+  Dequantize: <span class="number">12</span>,
+  DetectionOutput: <span class="number">13</span>,
+  Eltwise: <span class="number">14</span>,
+  ExpandDims: <span class="number">15</span>,
+  Fill: <span class="number">16</span>,
+  Flatten: <span class="number">17</span>,
+  Gather: <span class="number">18</span>,
+  GatherV2: <span class="number">19</span>,
+  InnerProduct: <span class="number">20</span>,
+  Input: <span class="number">21</span>,
+  Interp: <span class="number">22</span>,
+  LRN: <span class="number">23</span>,
+  LSTM: <span class="number">24</span>,
+  MatMul: <span class="number">25</span>,
+  NonMaxSuppressionV2: <span class="number">26</span>,
+  Normalize: <span class="number">27</span>,
+  PackParam: <span class="number">28</span>,
+  Permute: <span class="number">29</span>,
+  Plugin: <span class="number">30</span>,
+  Pool: <span class="number">31</span>,
+  PRelu: <span class="number">32</span>,
+  PriorBox: <span class="number">33</span>,
+  Proposal: <span class="number">34</span>,
+  QuantizedAvgPool: <span class="number">35</span>,
+  QuantizedBiasAdd: <span class="number">36</span>,
+  QuantizedConcat: <span class="number">37</span>,
+  QuantizedLogistic: <span class="number">38</span>,
+  QuantizedMatMul: <span class="number">39</span>,
+  QuantizedMaxPool: <span class="number">40</span>,
+  QuantizedRelu: <span class="number">41</span>,
+  QuantizedRelu6: <span class="number">42</span>,
+  QuantizedReshape: <span class="number">43</span>,
+  QuantizedSoftmax: <span class="number">44</span>,
+  QuantizeMaxMin: <span class="number">45</span>,
+  QuantizeV2: <span class="number">46</span>,
+  Range: <span class="number">47</span>,
+  Rank: <span class="number">48</span>,
+  ReduceJoin: <span class="number">49</span>,
+  ReductionParam: <span class="number">50</span>,
+  Relu: <span class="number">51</span>,
+  Relu6: <span class="number">52</span>,
+  RequantizationRange: <span class="number">53</span>,
+  Requantize: <span class="number">54</span>,
+  Reshape: <span class="number">55</span>,
+  Resize: <span class="number">56</span>,
+  RoiPooling: <span class="number">57</span>,
+  Scale: <span class="number">58</span>,
+  Selu: <span class="number">59</span>,
+  Size: <span class="number">60</span>,
+  Slice: <span class="number">61</span>,
+  SliceTf: <span class="number">62</span>,
+  SpaceBatch: <span class="number">63</span>,
+  SqueezeParam: <span class="number">64</span>,
+  StridedSliceParam: <span class="number">65</span>,
+  TensorConvertInfo: <span class="number">66</span>,
+  TfQuantizedConv2D: <span class="number">67</span>,
+  TopKV2: <span class="number">68</span>,
+  Transpose: <span class="number">69</span>,
+  UnaryOp: <span class="number">70</span>,
+  MomentsParam: <span class="number">71</span>,
+  RNNParam: <span class="number">72</span>,
+  BatchMatMulParam: <span class="number">73</span>,
+  QuantizedFloatParam: <span class="number">74</span>
+};
+</code></pre><p><strong>以 <code>Convolution2D</code> 举例，它又有几个对应的参数：<code>weight</code> ，<code>bias</code> ，<code>quanParameter</code> ，<code>symmetricQuan</code> ，<code>padX</code> ，<code>padY</code> ，<code>kernelX</code> ，<code>kernelY</code> 等等，需要解析。</strong></p>
+<p>一开始我采用了人肉的解析方式，代码就成了 <code>if else</code> 加上一大堆解析代码：</p>
+<pre><code>mnn_private.Convolution2DAttrBuilder = <span class="keyword">class</span> {
+constructor() {}
+
+buildAttributes(metadata, parameter) {
+    <span class="comment">//var common = parameter.common();</span>
+    var attributes = [];
+    var common = parameter.common();
+    attributes.<span class="keyword">push</span>(<span class="keyword">new</span> mnn.Attribute(metadata, <span class="string">"padX"</span>, common.padX(), <span class="keyword">true</span>));
+    attributes.<span class="keyword">push</span>(<span class="keyword">new</span> mnn.Attribute(metadata, <span class="string">"padY"</span>, common.padY(), <span class="keyword">true</span>));
+    attributes.<span class="keyword">push</span>(<span class="keyword">new</span> mnn.Attribute(metadata, <span class="string">"kernelX"</span>, common.kernelX(), <span class="keyword">true</span>));
+    attributes.<span class="keyword">push</span>(<span class="keyword">new</span> mnn.Attribute(metadata, <span class="string">"kernelY"</span>, common.kernelY(), <span class="keyword">true</span>));
+    attributes.<span class="keyword">push</span>(<span class="keyword">new</span> mnn.Attribute(metadata, <span class="string">"strideX"</span>, common.strideX(), <span class="keyword">true</span>));
+    attributes.<span class="keyword">push</span>(<span class="keyword">new</span> mnn.Attribute(metadata, <span class="string">"strideY"</span>, common.strideY(), <span class="keyword">true</span>));
+    attributes.<span class="keyword">push</span>(<span class="keyword">new</span> mnn.Attribute(metadata, <span class="string">"dilateX"</span>, common.dilateX(), <span class="keyword">true</span>));
+    attributes.<span class="keyword">push</span>(<span class="keyword">new</span> mnn.Attribute(metadata, <span class="string">"dilateY"</span>, common.dilateY(), <span class="keyword">true</span>));
+    attributes.<span class="keyword">push</span>(<span class="keyword">new</span> mnn.Attribute(metadata, <span class="string">"padMode"</span>, mnn.schema.PadModeName[common.dilateY()], <span class="keyword">true</span>));
+    attributes.<span class="keyword">push</span>(<span class="keyword">new</span> mnn.Attribute(metadata, <span class="string">"group"</span>, common.<span class="keyword">group</span>(), <span class="keyword">true</span>));
+    attributes.<span class="keyword">push</span>(<span class="keyword">new</span> mnn.Attribute(metadata, <span class="string">"outputCount"</span>, common.outputCount(), <span class="keyword">true</span>));
+    attributes.<span class="keyword">push</span>(<span class="keyword">new</span> mnn.Attribute(metadata, <span class="string">"inputCount"</span>, common.inputCount(), <span class="keyword">true</span>));
+    attributes.<span class="keyword">push</span>(<span class="keyword">new</span> mnn.Attribute(metadata, <span class="string">"relu"</span>, common.relu(), <span class="keyword">true</span>));
+    attributes.<span class="keyword">push</span>(<span class="keyword">new</span> mnn.Attribute(metadata, <span class="string">"relu6"</span>, common.relu6(), <span class="keyword">true</span>));
+    <span class="comment">//var quanParameter = parameter.quanParameter();</span>
+    var weights = [];
+    <span class="keyword">for</span> (var w = <span class="number">0</span>; w &lt; parameter.weightLength(); w++) {
+        weights.<span class="keyword">push</span>(parameter.weight(w));
+    }
+    attributes.<span class="keyword">push</span>(<span class="keyword">new</span> mnn.Attribute(metadata, <span class="string">"weights"</span>, weights, <span class="keyword">true</span>));
+    var bias = [];
+    <span class="keyword">for</span> (var b = <span class="number">0</span>; b &lt; parameter.biasLength(); b++) {
+        bias.<span class="keyword">push</span>(parameter.bias(b));
+    }
+    attributes.<span class="keyword">push</span>(<span class="keyword">new</span> mnn.Attribute(metadata, <span class="string">"bias"</span>, bias, <span class="keyword">true</span>));
+
+    <span class="keyword">return</span> attributes;
+}
+
+get hasMain() {
+    <span class="keyword">return</span> <span class="keyword">true</span>;
+}
+</code></pre><p><strong>这样的代码如果写完74个 <code>OpParameter</code> ，可维护性和后续的扩展也不够。</strong></p>
+<p><b style="color:red">我们要巧用 <code>JavaScript</code>的 <code>Reflect</code> 能力以及<strong>属性等于与字符串值属性的特性</strong></b></p>
+<pre><code>_buildAttributes(metadata, op, net, args) {
+        <span class="keyword">var</span> opParameter = op.mainType();    
+        <span class="keyword">var</span> opParameterName = mnn.schema.OpParameterName[opParameter];
+
+        <span class="comment">// 获取对应的类型</span>
+        <span class="keyword">var</span> mainConstructor = mnn.schema[opParameterName];
+        <span class="keyword">var</span> opParameterObject = <span class="keyword">null</span>;
+        <span class="keyword">if</span> (<span class="keyword">typeof</span> mainConstructor === <span class="string">'function'</span>) {
+            <span class="keyword">var</span> mainTemplate = Reflect.construct(mainConstructor, []);
+            opParameterObject = op.main(mainTemplate);
+        }
+        <span class="keyword">this</span>._recursivelyBuildAttributes(metadata, net, opParameterObject, <span class="keyword">this</span>._attributes);
+    }
+    _recursivelyBuildAttributes(metadata, net, opParameterObject, attributeHolders) {
+        <span class="keyword">if</span> (!opParameterObject) <span class="keyword">return</span>;
+        <span class="keyword">var</span> attributeName;
+        <span class="keyword">var</span> attributeNames = [];
+        <span class="keyword">var</span> attributeNamesMap = {};
+        <span class="keyword">for</span> (attributeName of Object.keys(Object.getPrototypeOf(opParameterObject))) {
+            <span class="keyword">if</span> (attributeName != <span class="string">'__init'</span>) {
+                attributeNames.push(attributeName);
+            }
+            attributeNamesMap[attributeName] = <span class="keyword">true</span>;
+        }
+        <span class="keyword">var</span> attributeArrayNamesMap = {}; 
+        <span class="keyword">for</span> (attributeName of Object.keys(attributeNamesMap)) {
+            <span class="keyword">if</span> (attributeNamesMap[attributeName + <span class="string">'Length'</span>]) {                    attributeArrayNamesMap[attributeName] = <span class="keyword">true</span>;
+                attributeNames = attributeNames.filter((item) =&gt; item != (attributeName + <span class="string">'Array'</span>) &amp;&amp; item != (attributeName + <span class="string">'Length'</span>));
+            }
+        }
+        <span class="keyword">for</span> (attributeName of attributeNames) {
+            <span class="keyword">if</span> (opParameterObject[attributeName] &amp;&amp; <span class="keyword">typeof</span> opParameterObject[attributeName] == <span class="string">'function'</span>) {
+                <span class="keyword">var</span> <span class="keyword">value</span> = <span class="keyword">null</span>;
+                <span class="keyword">if</span> (attributeArrayNamesMap[attributeName]) {
+                    <span class="keyword">var</span> array = [];
+                    <span class="keyword">var</span> length = opParameterObject[attributeName + <span class="string">'Length'</span>]();
+                    <span class="comment">//var a = opParameterObject[attributeName + 'Array']();</span>
+                    <span class="keyword">for</span> (<span class="keyword">var</span> l = <span class="number">0</span>; l &lt; length; l++) {
+                        array.push(opParameterObject[attributeName + <span class="string">'Length'</span>](l));
+                    }
+                    <span class="keyword">value</span> = array;
+                }
+                <span class="keyword">else</span> {
+                    <span class="keyword">value</span> = opParameterObject[attributeName]();
+                    <span class="keyword">if</span> (<span class="keyword">typeof</span> <span class="keyword">value</span> === <span class="string">'object'</span>) {
+                        <span class="keyword">this</span>._recursivelyBuildAttributes(metadata, net, <span class="keyword">value</span>, attributeHolders);   
+                        <span class="keyword">value</span> = <span class="keyword">null</span>;
+                    }
+                }
+                <span class="keyword">if</span> (<span class="keyword">value</span>) {
+                    <span class="keyword">var</span> attribute = <span class="keyword">new</span> mnn.Attribute(metadata, attributeName, <span class="keyword">value</span>);
+                    attributeHolders.push(attribute);
+                }                
+            }
+        }
+    }
+</code></pre><p><b style="color:red">区区50多行代码就可以完成所有 <code>OpParamater</code> 及其对应的属性解析。</b></p>
+]]></content>
+    <summary type="html">
+    <![CDATA[<p><code>Netron</code> 是一个支持 <code>Tensorflow</code> ，<code>PyTorch</code> ，<code>MXNet</code> ，<code>NCNN</code> ， <code>PaddlePaddle</code]]>
+    </summary>
+    
+      <category term="JavaScript" scheme="http://satanwoo.github.io/tags/JavaScript/"/>
+    
+      <category term="Machine Learning" scheme="http://satanwoo.github.io/tags/Machine-Learning/"/>
+    
+      <category term="iOS" scheme="http://satanwoo.github.io/tags/iOS/"/>
+    
+  </entry>
   
   <entry>
     <title><![CDATA[了解 SIMD 指令]]></title>
@@ -3915,260 +4222,6 @@ WKContentExtensionStore
     <summary type="html">
     <![CDATA[<p>现在各大公司的App容纳的功能越来越多，导致应用包大小越来越大。而苹果对于<code>text</code>段的大小现在在60MB，为了避免无法上架的问题，所以很多App都开始用了动态库来避免这个问题。</p>
 <p>这两天在帮支付宝开发一个功能的时候，由于支付宝许多模块的]]>
-    </summary>
-    
-      <category term="Reverse Engineering" scheme="http://satanwoo.github.io/tags/Reverse-Engineering/"/>
-    
-      <category term="iOS" scheme="http://satanwoo.github.io/tags/iOS/"/>
-    
-  </entry>
-  
-  <entry>
-    <title><![CDATA[UIKit解剖（-）逆向UITableViewController分析Bug]]></title>
-    <link href="http://satanwoo.github.io/2017/08/06/UITableViewController/"/>
-    <id>http://satanwoo.github.io/2017/08/06/UITableViewController/</id>
-    <published>2017-08-06T14:28:23.000Z</published>
-    <updated>2017-08-06T14:43:12.000Z</updated>
-    <content type="html"><![CDATA[<p>之前在做XXXSDK的时候，我hook的<code>UITableView</code>的<code>setDelegate:</code>方法。整个SDK在接入手淘、天猫以及闲鱼等其他App的时候都没啥问题。</p>
-<p>上周，UC的同学突然找到说，给我说了如下图所示的问题：</p>
-<p><strong><span style="color:red">商业保密，不显示了</span></strong></p>
-<p>卧槽，这下我就懵逼了，看样子是把整个<code>rowHeight</code>给Hook坏了，那这是为什么呢？</p>
-<p>从开发<code>UITableView</code>的正向角度来说：我们一般都需要给其提供一个必选的<code>UITableViewDataSource</code>和一个可选的<code>UITableViewDelegate</code>，其中，涉及到高度的是如下这个API：</p>
-<pre><code><span class="tag">-</span> (<span class="tag">CGFloat</span>)<span class="rule"><span class="attribute">tableView</span>:<span class="value">(UITableView *)tableView heightForRowAtIndexPath:(NSIndexPath *)indexPath</span></span>;
-</code></pre><blockquote>
-<p>有人说可以直接通过tableview.rowHeight设置高度，但是对于不同cell不同高度的动态需求，但是这里我们暂不提这种分支情况。</p>
-</blockquote>
-<p>通过UC同学的协助，我们发现了如下输出：</p>
-<p><img src="https://raw.githubusercontent.com/SatanWoo/BeeHive/master/delegate.png?raw=true" alt=""></p>
-<p>通过输出不难发现，是最后的<code>delegate</code>被从对应的<code>UIViewController</code>改成了一个乱七八糟没实现对应<code>heightForRowAtIndexPath</code>方法的对象。</p>
-<p>为什么会这样呢？</p>
-<p>通过如下图所示的调用栈，</p>
-<p><img src="https://raw.githubusercontent.com/SatanWoo/BeeHive/master/stack.png?raw=true" alt=""></p>
-<p>调用栈最下层是UC同学的代码；</p>
-<p><code>self.tableview = [[xxxTableView alloc] init]</code></p>
-<p>调用栈最上层是我们的一层防护性hook，其代码如下：</p>
-<pre><code>+ (<span class="keyword">void</span>)load {
-    <span class="keyword">static</span> <span class="built_in">dispatch_once_t</span> onceToken;
-    <span class="built_in">dispatch_once</span>(&amp;onceToken, ^{
-        Swizzle([<span class="built_in">UIScrollView</span> class], <span class="keyword">@selector</span>(init), <span class="keyword">@selector</span>(swizzled_init));
-    });
-}
-
-- (instancetype)swizzled_init
-{
-    <span class="keyword">id</span> obj = [<span class="keyword">self</span> swizzled_init];
-    <span class="built_in">UIScrollView</span> *scrollView = (<span class="built_in">UIScrollView</span> *)obj;
-    <span class="keyword">if</span> (!scrollView<span class="variable">.delegate</span>) {
-        <span class="comment">//scrollView.delegate = [UIScrollViewDelegateDummyStub sharedStub];</span>
-    }
-    <span class="keyword">return</span> obj;
-}
-</code></pre><p>这段代码是什么作用呢？</p>
-<p><span style="color:red"><strong>我们之前提了<code>UITableViewDelegate</code>不是必需，因此，为了能够抓去所有UITableView的代码，我们会提供一个内置的默认delegate(当时的实现存在bug，没有实现heightForRowAtIndexPath方法)</strong></span>。</p>
-<p>而且，为了防止我们的delegate覆盖了有delegate的情况，我们还特地做了<code>!scroll.delegate</code>的判断。</p>
-<p>按照我们的预期设想，存在两种时间顺序情况：</p>
-<ol>
-<li>我们的init先执行，此时肯定会进入我们设置默认的逻辑；然后当外部代码调用<code>tableview.delegate = xxx</code>的时候，会把我们这个替换掉，不会影响正常的逻辑。</li>
-<li>我们的init后执行（比如某些子类覆盖的情况），那这样的话，当子类已经设置好<code>delegate</code>后，压根不会进入我们的设置逻辑。</li>
-</ol>
-<p><strong>然而，就是这一小段看起来无错的代码导致了UC的App出现了文章开头的Bug。</strong></p>
-<h3 id="逆向分析UITableViewController">逆向分析UITableViewController</h3><p>基于<strong>10.2</strong>的UIKit，我们通过汇编来分析<code>-[UITableViewController setTableView:]</code>的流程：</p>
-<pre><code>     <span class="comment">// 保存寄存器</span>
--&gt;  <span class="number">0x18c84c640</span> &lt;+<span class="number">0</span>&gt;:   stp    x26, x25, [sp, <span class="preprocessor">#-<span class="number">0x50</span>]!</span>
-    <span class="number">0x18c84c644</span> &lt;+<span class="number">4</span>&gt;:   stp    x24, x23, [sp, <span class="preprocessor">#<span class="number">0x10</span>]</span>
-    <span class="number">0x18c84c648</span> &lt;+<span class="number">8</span>&gt;:   stp    x22, x21, [sp, <span class="preprocessor">#<span class="number">0x20</span>]</span>
-    <span class="number">0x18c84c64c</span> &lt;+<span class="number">12</span>&gt;:  stp    x20, x19, [sp, <span class="preprocessor">#<span class="number">0x30</span>]</span>
-    <span class="number">0x18c84c650</span> &lt;+<span class="number">16</span>&gt;:  stp    x29, x30, [sp, <span class="preprocessor">#<span class="number">0x40</span>]</span>
-
-    <span class="comment">// 获取原先UITableViewController的旧tableView</span>
-    <span class="number">0x18c84c654</span> &lt;+<span class="number">20</span>&gt;:  add    x29, sp, <span class="preprocessor">#<span class="number">0x40</span>            ; =<span class="number">0x40</span> </span>
-    <span class="number">0x18c84c658</span> &lt;+<span class="number">24</span>&gt;:  mov    x20, x0
-    <span class="number">0x18c84c65c</span> &lt;+<span class="number">28</span>&gt;:  mov    x0, x2
-    <span class="number">0x18c84c660</span> &lt;+<span class="number">32</span>&gt;:  bl     <span class="number">0x1851c8090</span>               ; objc_retain
-    <span class="number">0x18c84c664</span> &lt;+<span class="number">36</span>&gt;:  mov    x19, x0
-    <span class="number">0x18c84c668</span> &lt;+<span class="number">40</span>&gt;:  adrp   x8, <span class="number">124100</span>
-    <span class="number">0x18c84c66c</span> &lt;+<span class="number">44</span>&gt;:  ldr    x1, [x8, <span class="preprocessor">#<span class="number">0xd78</span>]</span>
-    <span class="number">0x18c84c670</span> &lt;+<span class="number">48</span>&gt;:  mov    x0, x20
-    <span class="number">0x18c84c674</span> &lt;+<span class="number">52</span>&gt;:  bl     <span class="number">0x1851c2f60</span>               ; objc_msgSend
-    <span class="number">0x18c84c678</span> &lt;+<span class="number">56</span>&gt;:  mov    x29, x29
-    <span class="number">0x18c84c67c</span> &lt;+<span class="number">60</span>&gt;:  bl     <span class="number">0x1851ca48c</span>               ; objc_retainAutoreleasedReturnValue
-
-    <span class="comment">// 比较旧的tableview和新的tableview</span>
-    <span class="number">0x18c84c680</span> &lt;+<span class="number">64</span>&gt;:  mov    x21, x0
-    <span class="number">0x18c84c684</span> &lt;+<span class="number">68</span>&gt;:  cmp    x21, x19
-
-    <span class="comment">// 如果两个tableView一致，直接返回</span>
-    <span class="number">0x18c84c688</span> &lt;+<span class="number">72</span>&gt;:  b.eq   <span class="number">0x18c84c7d4</span>               ; &lt;+<span class="number">404</span>&gt;
-
-    <span class="comment">// 获取旧的tableView的datasource</span>
-    <span class="number">0x18c84c68c</span> &lt;+<span class="number">76</span>&gt;:  adrp   x8, <span class="number">124074</span>
-    <span class="number">0x18c84c690</span> &lt;+<span class="number">80</span>&gt;:  ldr    x23, [x8, <span class="preprocessor">#<span class="number">0x2e0</span>]</span>
-    <span class="number">0x18c84c694</span> &lt;+<span class="number">84</span>&gt;:  mov    x0, x21
-    <span class="number">0x18c84c698</span> &lt;+<span class="number">88</span>&gt;:  mov    x1, x23
-    <span class="number">0x18c84c69c</span> &lt;+<span class="number">92</span>&gt;:  bl     <span class="number">0x1851c2f60</span>               ; objc_msgSend
-    <span class="number">0x18c84c6a0</span> &lt;+<span class="number">96</span>&gt;:  mov    x29, x29
-    <span class="number">0x18c84c6a4</span> &lt;+<span class="number">100</span>&gt;: bl     <span class="number">0x1851ca48c</span>               ; objc_retainAutoreleasedReturnValue
-
-
-    <span class="comment">// 从self的成员对象便宜792处取出UIFilteredDataSource</span>
-    <span class="number">0x18c84c6a8</span> &lt;+<span class="number">104</span>&gt;: mov    x22, x0
-    <span class="number">0x18c84c6ac</span> &lt;+<span class="number">108</span>&gt;: adrp   x8, <span class="number">124145</span>
-    <span class="number">0x18c84c6b0</span> &lt;+<span class="number">112</span>&gt;: ldrsw  x8, [x8, <span class="preprocessor">#<span class="number">0x7ac</span>]</span>
-    <span class="number">0x18c84c6b4</span> &lt;+<span class="number">116</span>&gt;: ldr    x8, [x20, x8]
-    <span class="number">0x18c84c6b8</span> &lt;+<span class="number">120</span>&gt;: cmp    x22, x20
-    <span class="number">0x18c84c6bc</span> &lt;+<span class="number">124</span>&gt;: ccmp   x22, x8, <span class="preprocessor">#<span class="number">0x4</span>, ne</span>
-
-    <span class="comment">// 如果不一致，把旧的tableview的datasource 置为nil</span>
-    <span class="number">0x18c84c6c0</span> &lt;+<span class="number">128</span>&gt;: b.ne   <span class="number">0x18c84c6d8</span>               ; &lt;+<span class="number">152</span>&gt;
-    <span class="number">0x18c84c6c4</span> &lt;+<span class="number">132</span>&gt;: adrp   x8, <span class="number">124073</span>
-    <span class="number">0x18c84c6c8</span> &lt;+<span class="number">136</span>&gt;: ldr    x1, [x8, <span class="preprocessor">#<span class="number">0x3c0</span>]</span>
-    <span class="number">0x18c84c6cc</span> &lt;+<span class="number">140</span>&gt;: mov    x2, <span class="preprocessor">#<span class="number">0x0</span></span>
-    <span class="number">0x18c84c6d0</span> &lt;+<span class="number">144</span>&gt;: mov    x0, x21
-    <span class="number">0x18c84c6d4</span> &lt;+<span class="number">148</span>&gt;: bl     <span class="number">0x1851c2f60</span>               ; objc_msgSend
-
-    <span class="comment">// 获取旧的tableview的delegate</span>
-    <span class="number">0x18c84c6d8</span> &lt;+<span class="number">152</span>&gt;: adrp   x8, <span class="number">124074</span>
-    <span class="number">0x18c84c6dc</span> &lt;+<span class="number">156</span>&gt;: ldr    x24, [x8, <span class="preprocessor">#<span class="number">0x7d8</span>]</span>
-    <span class="number">0x18c84c6e0</span> &lt;+<span class="number">160</span>&gt;: mov    x0, x21
-    <span class="number">0x18c84c6e4</span> &lt;+<span class="number">164</span>&gt;: mov    x1, x24
-    <span class="number">0x18c84c6e8</span> &lt;+<span class="number">168</span>&gt;: bl     <span class="number">0x1851c2f60</span>               ; objc_msgSend
-    <span class="number">0x18c84c6ec</span> &lt;+<span class="number">172</span>&gt;: mov    x29, x29
-    <span class="number">0x18c84c6f0</span> &lt;+<span class="number">176</span>&gt;: bl     <span class="number">0x1851ca48c</span>               ; objc_retainAutoreleasedReturnValue
-        <span class="number">0x18c84c6f4</span> &lt;+<span class="number">180</span>&gt;: mov    x25, x0
-    <span class="number">0x18c84c6f8</span> &lt;+<span class="number">184</span>&gt;: bl     <span class="number">0x1851c8150</span>               ; objc_release
-
-    <span class="comment">// 判断旧的delegate是不是当前的UITableViewController</span>
-    <span class="number">0x18c84c6fc</span> &lt;+<span class="number">188</span>&gt;: cmp    x25, x20
-    <span class="number">0x18c84c700</span> &lt;+<span class="number">192</span>&gt;: b.ne   <span class="number">0x18c84c718</span>               ; &lt;+<span class="number">216</span>&gt;
-    <span class="number">0x18c84c704</span> &lt;+<span class="number">196</span>&gt;: adrp   x8, <span class="number">124073</span>
-    <span class="number">0x18c84c708</span> &lt;+<span class="number">200</span>&gt;: ldr    x1, [x8, <span class="preprocessor">#<span class="number">0x3c8</span>]</span>
-
-    <span class="comment">// 如果不是，就把旧的tableview的delegate置为nil</span>
-    <span class="number">0x18c84c70c</span> &lt;+<span class="number">204</span>&gt;: mov    x2, <span class="preprocessor">#<span class="number">0x0</span></span>
-    <span class="number">0x18c84c710</span> &lt;+<span class="number">208</span>&gt;: mov    x0, x21
-    <span class="number">0x18c84c714</span> &lt;+<span class="number">212</span>&gt;: bl     <span class="number">0x1851c2f60</span>               ; objc_msgSend
-    <span class="number">0x18c84c718</span> &lt;+<span class="number">216</span>&gt;: adrp   x8, <span class="number">124080</span>
-    <span class="number">0x18c84c71c</span> &lt;+<span class="number">220</span>&gt;: ldr    x1, [x8, <span class="preprocessor">#<span class="number">0xe80</span>]</span>
-    <span class="number">0x18c84c720</span> &lt;+<span class="number">224</span>&gt;: mov    x0, x21
-    <span class="number">0x18c84c724</span> &lt;+<span class="number">228</span>&gt;: bl     <span class="number">0x1851c2f60</span>               ; objc_msgSend
-    <span class="number">0x18c84c728</span> &lt;+<span class="number">232</span>&gt;: mov    x29, x29
-    <span class="number">0x18c84c72c</span> &lt;+<span class="number">236</span>&gt;: bl     <span class="number">0x1851ca48c</span>               ; objc_retainAutoreleasedReturnValue
-    <span class="number">0x18c84c730</span> &lt;+<span class="number">240</span>&gt;: mov    x25, x0
-
-    <span class="comment">// 将uitableviewcontroller的tableview通过setView:置为新的</span>
-    <span class="number">0x18c84c734</span> &lt;+<span class="number">244</span>&gt;: adrp   x8, <span class="number">124076</span>
-    <span class="number">0x18c84c738</span> &lt;+<span class="number">248</span>&gt;: ldr    x1, [x8, <span class="preprocessor">#<span class="number">0x4b0</span>]</span>
-    <span class="number">0x18c84c73c</span> &lt;+<span class="number">252</span>&gt;: mov    x0, x20
-    <span class="number">0x18c84c740</span> &lt;+<span class="number">256</span>&gt;: mov    x2, x19
-    <span class="number">0x18c84c744</span> &lt;+<span class="number">260</span>&gt;: bl     <span class="number">0x1851c2f60</span>               ; objc_msgSend
-
-    <span class="comment">// 新的tableview的datasource判断是不是为空，为空通过_applyDefaultDataSourceToTable将其UIFilteredDataSource</span>
-    <span class="number">0x18c84c748</span> &lt;+<span class="number">264</span>&gt;: adrp   x8, <span class="number">124080</span>
-    <span class="number">0x18c84c74c</span> &lt;+<span class="number">268</span>&gt;: ldr    x1, [x8, <span class="preprocessor">#<span class="number">0x810</span>]</span>
-    <span class="number">0x18c84c750</span> &lt;+<span class="number">272</span>&gt;: mov    x0, x19
-    <span class="number">0x18c84c754</span> &lt;+<span class="number">276</span>&gt;: mov    x2, x25
-    <span class="number">0x18c84c758</span> &lt;+<span class="number">280</span>&gt;: bl     <span class="number">0x1851c2f60</span>               ; objc_msgSend
-    <span class="number">0x18c84c75c</span> &lt;+<span class="number">284</span>&gt;: mov    x0, x19
-    <span class="number">0x18c84c760</span> &lt;+<span class="number">288</span>&gt;: mov    x1, x23
-    <span class="number">0x18c84c764</span> &lt;+<span class="number">292</span>&gt;: bl     <span class="number">0x1851c2f60</span>               ; objc_msgSend
-    <span class="number">0x18c84c768</span> &lt;+<span class="number">296</span>&gt;: mov    x29, x29
-    <span class="number">0x18c84c76c</span> &lt;+<span class="number">300</span>&gt;: bl     <span class="number">0x1851ca48c</span>               ; objc_retainAutoreleasedReturnValue
-    <span class="number">0x18c84c770</span> &lt;+<span class="number">304</span>&gt;: mov    x23, x0
-    <span class="number">0x18c84c774</span> &lt;+<span class="number">308</span>&gt;: bl     <span class="number">0x1851c8150</span>               ; objc_release
-    <span class="number">0x18c84c778</span> &lt;+<span class="number">312</span>&gt;: cbnz   x23, <span class="number">0x18c84c790</span>          ; &lt;+<span class="number">336</span>&gt;
-    <span class="number">0x18c84c77c</span> &lt;+<span class="number">316</span>&gt;: adrp   x8, <span class="number">124100</span>
-    <span class="number">0x18c84c780</span> &lt;+<span class="number">320</span>&gt;: ldr    x1, [x8, <span class="preprocessor">#<span class="number">0xd80</span>]</span>
-    <span class="number">0x18c84c784</span> &lt;+<span class="number">324</span>&gt;: mov    x0, x20
-    <span class="number">0x18c84c788</span> &lt;+<span class="number">328</span>&gt;: mov    x2, x19
-    <span class="number">0x18c84c78c</span> &lt;+<span class="number">332</span>&gt;: bl     <span class="number">0x1851c2f60</span>               ; objc_msgSend
-
-    <span class="comment">// 新的tableview的delegaate判断是不是为空，为空通过将delegate置为self（即当前的UITableViewController）</span>
-    <span class="number">0x18c84c790</span> &lt;+<span class="number">336</span>&gt;: mov    x0, x19
-    <span class="number">0x18c84c794</span> &lt;+<span class="number">340</span>&gt;: mov    x1, x24
-    <span class="number">0x18c84c798</span> &lt;+<span class="number">344</span>&gt;: bl     <span class="number">0x1851c2f60</span>               ; objc_msgSend
-    <span class="number">0x18c84c79c</span> &lt;+<span class="number">348</span>&gt;: mov    x29, x29
-    <span class="number">0x18c84c7a0</span> &lt;+<span class="number">352</span>&gt;: bl     <span class="number">0x1851ca48c</span>               ; objc_retainAutoreleasedReturnValue
-    <span class="number">0x18c84c7a4</span> &lt;+<span class="number">356</span>&gt;: mov    x23, x0
-    <span class="number">0x18c84c7a8</span> &lt;+<span class="number">360</span>&gt;: bl     <span class="number">0x1851c8150</span>               ; objc_release
-
-
-    <span class="number">0x18c84c7ac</span> &lt;+<span class="number">364</span>&gt;: cbnz   x23, <span class="number">0x18c84c7c4</span>          ; &lt;+<span class="number">388</span>&gt;
-    <span class="number">0x18c84c7b0</span> &lt;+<span class="number">368</span>&gt;: adrp   x8, <span class="number">124073</span>
-    <span class="number">0x18c84c7b4</span> &lt;+<span class="number">372</span>&gt;: ldr    x1, [x8, <span class="preprocessor">#<span class="number">0x3c8</span>]</span>
-    <span class="number">0x18c84c7b8</span> &lt;+<span class="number">376</span>&gt;: mov    x0, x19
-    <span class="number">0x18c84c7bc</span> &lt;+<span class="number">380</span>&gt;: mov    x2, x20
-    <span class="number">0x18c84c7c0</span> &lt;+<span class="number">384</span>&gt;: bl     <span class="number">0x1851c2f60</span>               ; objc_msgSend
-    <span class="number">0x18c84c7c4</span> &lt;+<span class="number">388</span>&gt;: mov    x0, x25
-    <span class="number">0x18c84c7c8</span> &lt;+<span class="number">392</span>&gt;: bl     <span class="number">0x1851c8150</span>               ; objc_release
-    <span class="number">0x18c84c7cc</span> &lt;+<span class="number">396</span>&gt;: mov    x0, x22
-    <span class="number">0x18c84c7d0</span> &lt;+<span class="number">400</span>&gt;: bl     <span class="number">0x1851c8150</span>               ; objc_release
-    <span class="number">0x18c84c7d4</span> &lt;+<span class="number">404</span>&gt;: mov    x0, x21
-    <span class="number">0x18c84c7d8</span> &lt;+<span class="number">408</span>&gt;: bl     <span class="number">0x1851c8150</span>               ; objc_release
-
-    <span class="comment">// 恢复寄存器</span>
-
-    <span class="number">0x18c84c7dc</span> &lt;+<span class="number">412</span>&gt;: mov    x0, x19
-    <span class="number">0x18c84c7e0</span> &lt;+<span class="number">416</span>&gt;: ldp    x29, x30, [sp, <span class="preprocessor">#<span class="number">0x40</span>]</span>
-    <span class="number">0x18c84c7e4</span> &lt;+<span class="number">420</span>&gt;: ldp    x20, x19, [sp, <span class="preprocessor">#<span class="number">0x30</span>]</span>
-    <span class="number">0x18c84c7e8</span> &lt;+<span class="number">424</span>&gt;: ldp    x22, x21, [sp, <span class="preprocessor">#<span class="number">0x20</span>]</span>
-    <span class="number">0x18c84c7ec</span> &lt;+<span class="number">428</span>&gt;: ldp    x24, x23, [sp, <span class="preprocessor">#<span class="number">0x10</span>]</span>
-    <span class="number">0x18c84c7f0</span> &lt;+<span class="number">432</span>&gt;: ldp    x26, x25, [sp], <span class="preprocessor">#<span class="number">0x50</span></span>
-    <span class="number">0x18c84c7f4</span> &lt;+<span class="number">436</span>&gt;: b      <span class="number">0x1851c8150</span>               ; objc_release
-</code></pre><ul>
-<li>一看到adrp, ldr的搭配，基本可以确定是取某个方法进行调用。</li>
-<li>看到一大堆的<code>bl objc_retain</code>，<code>bl objc_release</code>，不用管，反正都是ARC帮我们自动插入的。</li>
-<li>可以看出，当传入给UITableViewController的tableView含有<code>dataSource</code>和<code>delegate</code>，UITableViewController都不会对其进行处理；否则会进行一个默认的设置。</li>
-</ul>
-<p>我自己理解后转写的伪代码如下：</p>
-<pre><code><span class="built_in">UITableView</span> *oldTableView = [<span class="keyword">self</span> __existingTableView]; 
-
-<span class="keyword">if</span> (oldTableView == xxxtableView) {
-    <span class="keyword">return</span> 
-} <span class="keyword">else</span> {
-    <span class="keyword">id</span> oldDataSource = [oldTableView dataSource];
-    <span class="comment">// x21 被赋值成了oldTableView, x22 oldDataSource</span>
-
-    <span class="comment">// 取UITableViewController 792偏移的成员变量 filteredDataSource</span>
-    <span class="keyword">id</span> filteredDataSource = [<span class="keyword">self</span> _filteredDataSource];
-
-    <span class="keyword">if</span> (oldDataSource != filteredDataSource) 
-    {
-
-    } <span class="keyword">else</span> {
-        [oldTableView setDataSource:<span class="literal">nil</span>];
-    }
-
-    <span class="keyword">id</span> oldDelegate = [oldTableView delegate];
-    <span class="comment">// x25 被赋值了oldDelegate</span>
-
-    <span class="keyword">if</span> (oldeDelegate != <span class="keyword">self</span>)
-    {
-        <span class="keyword">goto</span> <span class="comment">//</span>
-    } <span class="keyword">else</span> {
-        [oldTableView setDelegate:<span class="literal">nil</span>];
-    }
-
-    <span class="keyword">id</span> oldRefreshControl = [oldTableView _refreshControl];
-    <span class="comment">// x25 被赋值了oldRefreshControl</span>
-
-    [<span class="keyword">self</span> setView:xxtableView];
-    [xxxtableView _setRefreshControl:oldRefreshControl];
-
-    <span class="keyword">id</span> newDataSource = [xxxtableview dataSource];
-    <span class="keyword">if</span> (!newDataSource) {
-        [<span class="keyword">self</span> _applyDefaultDataSourceToTable:xxxTableView];
-    }
-
-    <span class="keyword">id</span> newDelegate = [xxxtableview delegate];
-    <span class="keyword">if</span> (!newDelegate) {
-        [xxxTableView setDelegate:<span class="keyword">self</span>];
-    }
-}
-</code></pre><h3 id="结论">结论</h3><p>通过上面对汇编和伪代码的理解，我们可以很轻易的得出结论：当我们处于第一种情形的实现，我们将<code>tableview.delegate</code>设置成了我们的stub。因为不为空，所以<code>UITableViewController</code>默认不会对其进行处理，而由于我们当时没有提供stub对于<code>heightForRowAtIndexPath</code>的实现，导致出现了UC的bug。</p>
-]]></content>
-    <summary type="html">
-    <![CDATA[<p>之前在做XXXSDK的时候，我hook的<code>UITableView</code>的<code>setDelegate:</code>方法。整个SDK在接入手淘、天猫以及闲鱼等其他App的时候都没啥问题。</p>
-<p>上周，UC的同学突然找到说，给我说了如下图所示的]]>
     </summary>
     
       <category term="Reverse Engineering" scheme="http://satanwoo.github.io/tags/Reverse-Engineering/"/>
