@@ -5,23 +5,23 @@
   
   <title>目标检测之 Selective Search | SatanWoo</title>
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
-  <meta name="description" content="目标检测 Selective Search 学习最近因为工作上的事，搞了一点非常基础目标检测相关的东西。正好在学习之余梳理了下之前自己认知错误的一些地方，记录一下。
-起因之前对于目标检测的了解停留于深度学习部分，比如 Fast-RCNN / Faster-RCNN / Yolo 等等，对于候选框域搜索算法主要还是对于 RPN 的认知。但是这次在工作中了解到了 Selective Search 的概">
+  <meta name="description" content="最近因为工作上的事，搞了一点非常基础目标检测相关的东西。正好在学习之余梳理了下之前自己认知错误的一些地方，记录一下。
+起因之前对于目标检测的了解停留于深度学习部分，比如 Fast-RCNN / Faster-RCNN / Yolo 等等，对于候选框域搜索算法主要还是对于 RPN 的认知。但是这次在工作中了解到了 Selective Search 的概念，没想到在小样本训练的过程中精度也不错，性能还">
 <meta property="og:type" content="article">
 <meta property="og:title" content="目标检测之 Selective Search">
 <meta property="og:url" content="http://satanwoo.github.io/2020/04/07/Selective-Search/index.html">
 <meta property="og:site_name" content="SatanWoo">
-<meta property="og:description" content="目标检测 Selective Search 学习最近因为工作上的事，搞了一点非常基础目标检测相关的东西。正好在学习之余梳理了下之前自己认知错误的一些地方，记录一下。
-起因之前对于目标检测的了解停留于深度学习部分，比如 Fast-RCNN / Faster-RCNN / Yolo 等等，对于候选框域搜索算法主要还是对于 RPN 的认知。但是这次在工作中了解到了 Selective Search 的概">
+<meta property="og:description" content="最近因为工作上的事，搞了一点非常基础目标检测相关的东西。正好在学习之余梳理了下之前自己认知错误的一些地方，记录一下。
+起因之前对于目标检测的了解停留于深度学习部分，比如 Fast-RCNN / Faster-RCNN / Yolo 等等，对于候选框域搜索算法主要还是对于 RPN 的认知。但是这次在工作中了解到了 Selective Search 的概念，没想到在小样本训练的过程中精度也不错，性能还">
 <meta property="og:image" content="https://cdn.nlark.com/yuque/0/2020/jpeg/520564/1586190762414-d187819a-a5f8-467c-ac0e-b6f4fdb0facd.jpeg#align=left&display=inline&height=416&originHeight=416&originWidth=813&size=0&status=done&style=none&width=813">
 <meta property="og:image" content="https://cdn.nlark.com/yuque/0/2020/jpeg/520564/1586190762646-b0f5a4d4-ea6d-4223-a427-3dcab2360020.jpeg#align=left&display=inline&height=389&originHeight=389&originWidth=794&size=0&status=done&style=none&width=794">
 <meta property="og:image" content="https://cdn.nlark.com/yuque/0/2020/png/520564/1586190762438-1360cd20-f297-4977-8835-07cd1d7ac43b.png#align=left&display=inline&height=389&originHeight=389&originWidth=452&size=0&status=done&style=none&width=452">
 <meta property="og:image" content="https://cdn.nlark.com/yuque/0/2020/png/520564/1586190829238-e23f2c94-b271-499f-9cc7-230e005a8d94.png#align=left&display=inline&height=522&name=%E6%88%AA%E5%B1%8F2020-04-07%E4%B8%8A%E5%8D%8812.33.29.png&originHeight=522&originWidth=1656&size=1153243&status=done&style=none&width=1656">
-<meta property="og:updated_time" content="2020-04-06T16:37:51.610Z">
+<meta property="og:updated_time" content="2020-04-06T16:39:34.294Z">
 <meta name="twitter:card" content="summary">
 <meta name="twitter:title" content="目标检测之 Selective Search">
-<meta name="twitter:description" content="目标检测 Selective Search 学习最近因为工作上的事，搞了一点非常基础目标检测相关的东西。正好在学习之余梳理了下之前自己认知错误的一些地方，记录一下。
-起因之前对于目标检测的了解停留于深度学习部分，比如 Fast-RCNN / Faster-RCNN / Yolo 等等，对于候选框域搜索算法主要还是对于 RPN 的认知。但是这次在工作中了解到了 Selective Search 的概">
+<meta name="twitter:description" content="最近因为工作上的事，搞了一点非常基础目标检测相关的东西。正好在学习之余梳理了下之前自己认知错误的一些地方，记录一下。
+起因之前对于目标检测的了解停留于深度学习部分，比如 Fast-RCNN / Faster-RCNN / Yolo 等等，对于候选框域搜索算法主要还是对于 RPN 的认知。但是这次在工作中了解到了 Selective Search 的概念，没想到在小样本训练的过程中精度也不错，性能还">
   
     <link rel="alternative" href="/atom.xml" title="SatanWoo" type="application/atom+xml">
   
@@ -90,7 +90,7 @@
     
     <div class="article-entry" itemprop="articleBody">
       
-        <h2 id="目标检测_Selective_Search_学习">目标检测 Selective Search 学习</h2><p><br>最近因为工作上的事，搞了一点非常基础目标检测相关的东西。正好在学习之余梳理了下之前自己认知错误的一些地方，记录一下。<br></p>
+        <p><br>最近因为工作上的事，搞了一点非常基础目标检测相关的东西。正好在学习之余梳理了下之前自己认知错误的一些地方，记录一下。<br></p>
 <h3 id="起因">起因</h3><p><br>之前对于目标检测的了解停留于深度学习部分，比如 Fast-RCNN / Faster-RCNN / Yolo 等等，对于候选框域搜索算法主要还是对于 RPN 的认知。<br><br><br>但是这次在工作中了解到了 Selective Search 的概念，没想到在小样本训练的过程中精度也不错，性能还很好，哈哈。因此决定深入研究下。Selective Search 从大类上也可以属于 Region Proposal 的思想，但是主要的思想却是来源于传统的图像处理。<br><br><br>相关的论文发表于 IJCV 2013 《Selective Search for Object Detection》，大家可自行阅读获取更多细节。<br></p>
 <blockquote>
 <p>主要还是学习目的，业界主流的还是采用 Faster-RCNN 的做法。</p>
@@ -148,7 +148,7 @@
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2020/04/07/Selective-Search/" data-id="ck8op7oq4001yw8i1ahdfzyfa" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2020/04/07/Selective-Search/" data-id="ck8op9v1u001yxji1txyzlw93" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2020/04/07/Selective-Search/#disqus_thread" class="article-comment-link">Comments</a>
       
