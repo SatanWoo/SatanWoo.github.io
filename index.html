@@ -62,6 +62,120 @@
       <div class="outer">
         <section id="main">
   
+    <article id="post-Selective-Search" class="article article-type-post" itemscope itemprop="blogPost">
+  <div class="article-meta">
+    <a href="/2020/04/07/Selective-Search/" class="article-date">
+  <time datetime="2020-04-06T16:36:44.000Z" itemprop="datePublished">2020-04-07</time>
+</a>
+    
+  </div>
+  <div class="article-inner">
+    
+    
+      <header class="article-header">
+        
+  
+    <h1 itemprop="name">
+      <a class="article-title" href="/2020/04/07/Selective-Search/">目标检测之 Selective Search</a>
+    </h1>
+  
+
+      </header>
+    
+    <div class="article-entry" itemprop="articleBody">
+      
+        <h2 id="目标检测_Selective_Search_学习">目标检测 Selective Search 学习</h2><p><br>最近因为工作上的事，搞了一点非常基础目标检测相关的东西。正好在学习之余梳理了下之前自己认知错误的一些地方，记录一下。<br></p>
+<h3 id="起因">起因</h3><p><br>之前对于目标检测的了解停留于深度学习部分，比如 Fast-RCNN / Faster-RCNN / Yolo 等等，对于候选框域搜索算法主要还是对于 RPN 的认知。<br><br><br>但是这次在工作中了解到了 Selective Search 的概念，没想到在小样本训练的过程中精度也不错，性能还很好，哈哈。因此决定深入研究下。Selective Search 从大类上也可以属于 Region Proposal 的思想，但是主要的思想却是来源于传统的图像处理。<br><br><br>相关的论文发表于 IJCV 2013 《Selective Search for Object Detection》，大家可自行阅读获取更多细节。<br></p>
+<blockquote>
+<p>主要还是学习目的，业界主流的还是采用 Faster-RCNN 的做法。</p>
+</blockquote>
+<h3 id="Selective_Search">Selective Search</h3><p><br>目标检测问题相对来说比图像分类复杂点，因为一般情况下要同时检测出多个子物体的位置（及可能需要的分类目的）。最原始的做法就是对于一张图像的每个可能位置都进行搜索，但是这里会产生一个两个互相增加复杂度的问题？<br></p>
+<ul>
+<li>我们要识别的物体在哪？我们要识别的物体大小是多少？长宽比要不要考虑？</li>
+</ul>
+<p><br><strong>简单来说，假设知道一个待识别的物体左上角顶点处于（x, y），那么长和宽分别设置多少呢？设置小了，可能没有办法得到正确要识别的物体；设置大了，可能又把要分开区分的两个或多个物体合在了一起。</strong><br><br><br>因此，这种传统的做法产生的搜索空间基本可以认为是无穷尽的。<br><br><br><strong>那么自然而然地，我们的优化的想法肯定是减少搜索空间的大小！怎么做呢？</strong><br><br><br>答案说难也不难，就是<strong>只找哪些可能是物体的区域。从区域这个维度进行搜索，而不是全图像的像素级查询。</strong><br></p>
+<blockquote>
+<p>全图搜索绝大多数的搜索像素包含区域是不包含物体的，实质上是浪费，可以通过如下两张图进行直观对比。</p>
+</blockquote>
+<p><br><img src="https://cdn.nlark.com/yuque/0/2020/jpeg/520564/1586190762414-d187819a-a5f8-467c-ac0e-b6f4fdb0facd.jpeg#align=left&amp;display=inline&amp;height=416&amp;originHeight=416&amp;originWidth=813&amp;size=0&amp;status=done&amp;style=none&amp;width=813" alt=""><br><br><br><img src="https://cdn.nlark.com/yuque/0/2020/jpeg/520564/1586190762646-b0f5a4d4-ea6d-4223-a427-3dcab2360020.jpeg#align=left&amp;display=inline&amp;height=389&amp;originHeight=389&amp;originWidth=794&amp;size=0&amp;status=done&amp;style=none&amp;width=794" alt=""><br><br><br>基于此，作者首先利用图像分割的想法，来获取可能是物体的区域；<strong>当然，这种层次的分割肯定不准<br><br><br>进一步地，考虑掉物体之间诸如包含等关系，通过</strong>合并<strong>的方式来构建</strong>层次化**的潜在物体区域。<br><br><br>所以整篇论文的核心就可以归纳为如下的数学公式：<br><br><br><img src="https://cdn.nlark.com/yuque/0/2020/png/520564/1586190762438-1360cd20-f297-4977-8835-07cd1d7ac43b.png#align=left&amp;display=inline&amp;height=389&amp;originHeight=389&amp;originWidth=452&amp;size=0&amp;status=done&amp;style=none&amp;width=452" alt=""><br></p>
+<ul>
+<li>通过图像分割算法得到初始区域集合 R = {r1, ….. rn}，这个很容易理解吧，就是图像分割。</li>
+<li>设定一个相似集合 S，初始为<strong>空</strong>。</li>
+<li>对于初始区域集合<strong>相邻</strong>中的每一对(ri, rj)，计算<strong>相似度（下文会说如何计算相似度）</strong>，得到 s(ri, rj)，将其加入之前的相似集合 S 中。</li>
+<li>当 S 不为空的时候，从 S 中获取相似度最大的一对 s(ri, rj)，将这两个 ri, rj 区域合并，称为 rt。</li>
+<li>把所有和 ri, rj 相关的<strong>相似度对</strong>都从 S 中移除掉。（ri, rj 已经不存在了，变身为 rt）</li>
+<li>把新得到的 rt，在分别和其邻区域的 rx 们，计算相似度对，存入 S 中。</li>
+<li>把 rt 加入到区域集合 R 中。</li>
+<li>重复步骤，知道合并到最后只有一个区域了（即 S 为空）。</li>
+</ul>
+<p><br>这个时候，R 集合中的所有区域，就是通过 Selective Search 得到的候选框区域。<br><br><br><strong>值得注意的是，这种计算方式得到的 R，本身就包含了多层次的关系。</strong><br></p>
+<p><a name="3a2cccf8"></a></p>
+<h4 id="如何合并">如何合并</h4><p><br>前面我们提到了，我们初始的待定区域是基于图像分割得到的一批候选集，但是这些候选集的质量还比较“糙”，粒度也不一定对，需要合并甚至多次合并来处理一下。<strong>因此，如何合并也是一个相对值得思考的问题。</strong><br><strong><br></strong><img src="https://cdn.nlark.com/yuque/0/2020/png/520564/1586190829238-e23f2c94-b271-499f-9cc7-230e005a8d94.png#align=left&amp;display=inline&amp;height=522&amp;name=%E6%88%AA%E5%B1%8F2020-04-07%E4%B8%8A%E5%8D%8812.33.29.png&amp;originHeight=522&amp;originWidth=1656&amp;size=1153243&amp;status=done&amp;style=none&amp;width=1656" alt="截屏2020-04-07上午12.33.29.png"><strong><br></strong></p>
+<blockquote>
+<p>上两张图不难看出，初始化的图像分割对于目标检测来说是不能直接使用的。</p>
+</blockquote>
+<p><br><strong>其实这篇文章，作者也坦诚道：图片的样式千变万化，某些图片里面可行的方案到了另外一些图片中就不适用了。</strong> 因此，作者采用了多种方案混合的合并方法。<br></p>
+<ul>
+<li>比如，背景色大块区域和前景色不同的主体可以很明显区分。</li>
+<li>比如，材质 / 纹理等也可以比较明显区分出待检测的物体。</li>
+<li>比如，形状和大小也可以做为检测手段区分待检测物体。</li>
+</ul>
+<p><br>有了这些可以参考的思路，作者设计了<strong>四合一的合并公式。</strong><br></p>
+<ul>
+<li>颜色相似度</li>
+<li>纹理相似度，这里使用了 SIFT 算法。</li>
+<li>小区域合并优先级度。这里解释下，作者为了避免出现“大鱼吃小鱼”的现象，即一块区域不断膨胀，吞并周围区域，所以采用了尽量将小区域先分别合并，始终保持大小类似的方式。</li>
+<li>距离。如果区域ri包含在rj内，毫无疑问应该立刻合并，另一方面，如果ri很难与rj相接，不应该合并在一块。这里定义区域的合适度距离主要是为了衡量两个区域是否更加“吻合”，其指标是合并后的区域的Bounding Box（能够框住区域的最小矩形BBij）越小，其吻合度越高。</li>
+</ul>
+<p><a name="72f1243d"></a></p>
+<h3 id="Selective_Search_代码理解">Selective Search 代码理解</h3><p><br>读顶尖学术会议论文的好处就是一般对应的代码都会开源，即使论文读的云里雾里，但是只要能大致理解思路，配合源代码深入分析，总是能懂。<br><br><br>这篇论文对应的代码开源在<a href="https://github.com/AlpacaDB/selectivesearch" target="_blank" rel="external">Selective Search</a>，代码总计也就 <strong>300+</strong> 行（当然有些非核心代码直接依赖了库），很容易理解。<br></p>
+<figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br><span class="line">34</span><br><span class="line">35</span><br><span class="line">36</span><br><span class="line">37</span><br><span class="line">38</span><br><span class="line">39</span><br><span class="line">40</span><br><span class="line">41</span><br><span class="line">42</span><br><span class="line">43</span><br><span class="line">44</span><br><span class="line">45</span><br><span class="line">46</span><br><span class="line">47</span><br><span class="line">48</span><br><span class="line">49</span><br><span class="line">50</span><br><span class="line">51</span><br><span class="line">52</span><br><span class="line">53</span><br><span class="line">54</span><br><span class="line">55</span><br><span class="line">56</span><br><span class="line">57</span><br><span class="line">58</span><br><span class="line">59</span><br><span class="line">60</span><br><span class="line">61</span><br><span class="line">62</span><br><span class="line">63</span><br><span class="line">64</span><br><span class="line">65</span><br><span class="line">66</span><br><span class="line">67</span><br><span class="line">68</span><br><span class="line">69</span><br><span class="line">70</span><br><span class="line">71</span><br></pre></td><td class="code"><pre><span class="line">def selective_search(</span><br><span class="line">        im_orig, scale=1.0, sigma=0.8, min_size=50):</span><br><span class="line">    '''Selective Search</span><br><span class="line">    </span><br><span class="line"> 	 assert im_orig.shape[2] == 3, "3ch image is expected"</span><br><span class="line"></span><br><span class="line">    # <span class="operator"><span class="keyword">load</span> image <span class="keyword">and</span> <span class="keyword">get</span> smallest regions</span><br><span class="line">    # region label <span class="keyword">is</span> <span class="keyword">stored</span> <span class="keyword">in</span> the <span class="number">4</span>th <span class="keyword">value</span> <span class="keyword">of</span> <span class="keyword">each</span> pixel [r,<span class="keyword">g</span>,b,(region)]</span><br><span class="line">    </span><br><span class="line">    </span><br><span class="line">   【<span class="number">1</span>】图像分割</span><br><span class="line">    img = _generate_segments(im_orig, scale, sigma, min_size)</span><br><span class="line"></span><br><span class="line">    <span class="keyword">if</span> img <span class="keyword">is</span> <span class="keyword">None</span>:</span><br><span class="line">        <span class="keyword">return</span> <span class="keyword">None</span>, &#123;&#125;</span><br><span class="line">        </span><br><span class="line">        </span><br><span class="line">	【<span class="number">2</span>】获取对象总大小</span><br><span class="line">    imsize = img.shape[<span class="number">0</span>] * img.shape[<span class="number">1</span>]</span><br><span class="line">    </span><br><span class="line">   【<span class="number">3</span>】获取初始集合</span><br><span class="line">    R = _extract_regions(img)</span><br><span class="line"></span><br><span class="line">    # <span class="keyword">extract</span> neighbouring information</span><br><span class="line">    </span><br><span class="line">   【<span class="number">4</span>】计算相邻的区域</span><br><span class="line">    neighbours = _extract_neighbours(R)</span><br><span class="line"></span><br><span class="line">   【<span class="number">5</span>】计算初始化的相邻区域相似度</span><br><span class="line">    S = &#123;&#125;</span><br><span class="line">    <span class="keyword">for</span> (ai, ar), (bi, br) <span class="keyword">in</span> neighbours:</span><br><span class="line">        S[(ai, bi)] = _calc_sim(ar, br, imsize)</span><br><span class="line">        </span><br><span class="line">        </span><br><span class="line">	【<span class="number">6</span>】就是之前我们说的搜索过程</span><br><span class="line">    # hierarchal <span class="keyword">search</span></span><br><span class="line">    <span class="keyword">while</span> S != &#123;&#125;:</span><br><span class="line"></span><br><span class="line">        # <span class="keyword">get</span> highest similarity</span><br><span class="line">        <span class="keyword">i</span>, j = sorted(S.items(), <span class="keyword">key</span>=lambda <span class="keyword">i</span>: <span class="keyword">i</span>[<span class="number">1</span>])[-<span class="number">1</span>][<span class="number">0</span>]</span><br><span class="line"></span><br><span class="line">        # <span class="keyword">merge</span> <span class="keyword">corresponding</span> regions</span><br><span class="line">        <span class="keyword">t</span> = <span class="keyword">max</span>(R.<span class="keyword">keys</span>()) + <span class="number">1.0</span></span><br><span class="line">        R[<span class="keyword">t</span>] = _merge_regions(R[<span class="keyword">i</span>], R[j])</span><br><span class="line"></span><br><span class="line">        # mark similarities <span class="keyword">for</span> regions <span class="keyword">to</span> be removed</span><br><span class="line">        key_to_delete = []</span><br><span class="line">        <span class="keyword">for</span> <span class="keyword">k</span>, v <span class="keyword">in</span> <span class="keyword">list</span>(S.items()):</span><br><span class="line">            <span class="keyword">if</span> (<span class="keyword">i</span> <span class="keyword">in</span> <span class="keyword">k</span>) <span class="keyword">or</span> (j <span class="keyword">in</span> <span class="keyword">k</span>):</span><br><span class="line">                key_to_delete.append(<span class="keyword">k</span>)</span><br><span class="line"></span><br><span class="line">        # remove <span class="keyword">old</span> similarities <span class="keyword">of</span> related regions</span><br><span class="line">        <span class="keyword">for</span> <span class="keyword">k</span> <span class="keyword">in</span> key_to_delete:</span><br><span class="line">            del S[<span class="keyword">k</span>]</span><br><span class="line"></span><br><span class="line">        # calculate similarity <span class="keyword">set</span> <span class="keyword">with</span> the <span class="keyword">new</span> region</span><br><span class="line">        <span class="keyword">for</span> <span class="keyword">k</span> <span class="keyword">in</span> [a <span class="keyword">for</span> a <span class="keyword">in</span> key_to_delete <span class="keyword">if</span> a != (<span class="keyword">i</span>, j)]:</span><br><span class="line">            <span class="keyword">n</span> = <span class="keyword">k</span>[<span class="number">1</span>] <span class="keyword">if</span> <span class="keyword">k</span>[<span class="number">0</span>] <span class="keyword">in</span> (<span class="keyword">i</span>, j) <span class="keyword">else</span> <span class="keyword">k</span>[<span class="number">0</span>]</span><br><span class="line">            S[(<span class="keyword">t</span>, <span class="keyword">n</span>)] = _calc_sim(R[<span class="keyword">t</span>], R[<span class="keyword">n</span>], imsize)</span><br><span class="line"></span><br><span class="line">    regions = []</span><br><span class="line">    <span class="keyword">for</span> <span class="keyword">k</span>, r <span class="keyword">in</span> <span class="keyword">list</span>(R.items()):</span><br><span class="line">        regions.append(&#123;</span><br><span class="line">            <span class="string">'rect'</span>: (</span><br><span class="line">                r[<span class="string">'min_x'</span>], r[<span class="string">'min_y'</span>],</span><br><span class="line">                r[<span class="string">'max_x'</span>] - r[<span class="string">'min_x'</span>], r[<span class="string">'max_y'</span>] - r[<span class="string">'min_y'</span>]),</span><br><span class="line">            <span class="string">'size'</span>: r[<span class="string">'size'</span>],</span><br><span class="line">            <span class="string">'labels'</span>: r[<span class="string">'labels'</span>]</span><br><span class="line">        &#125;)</span><br><span class="line"></span><br><span class="line">    <span class="keyword">return</span> img, regions</span></span><br></pre></td></tr></table></figure>
+<ul>
+<li>第一步，通过经典的图像分割算法获取分割的块。这一步留到后续研究 felzenszwalb 算法再说吧，<strong>暂时我也不会。</strong></li>
+<li>其实第一步已经得到对应的区域了，但是在算法实现上只是做了一个个标记，所以还需要处理下，变成我们需要的 R 集合。这步里面已经做好了大量的计算处理，后续直接按照论文<strong>层级化</strong>调用就行。</li>
+<li>计算相邻的区域，对应产生初始的 S 集合。</li>
+<li>对相邻的区域计算最大相似度，然后合并。</li>
+<li>后面就重复我上问的内容了。</li>
+</ul>
+<p><br>大致内容就这样，当然细节还有不少值得研究的，可以继续深入，后续再读读。<br><br><br>最后，作者这 Python 写的真是溜。</p>
+
+      
+    </div>
+    <footer class="article-footer">
+      <a data-url="http://satanwoo.github.io/2020/04/07/Selective-Search/" data-id="ck8op7oq4001yw8i1ahdfzyfa" class="article-share-link">Share</a>
+      
+        <a href="http://satanwoo.github.io/2020/04/07/Selective-Search/#disqus_thread" class="article-comment-link">Comments</a>
+      
+      
+  <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Machine-Learning/">Machine Learning</a></li></ul>
+
+    </footer>
+  </div>
+  
+</article>
+
+<div id="disqus_thread"></div>
+<script>
+
+/**
+*  RECOMMENDED CONFIGURATION VARIABLES: EDIT AND UNCOMMENT THE SECTION BELOW TO INSERT DYNAMIC VALUES FROM YOUR PLATFORM OR CMS.
+*  LEARN WHY DEFINING THESE VARIABLES IS IMPORTANT: https://disqus.com/admin/universalcode/#configuration-variables*/
+/*
+var disqus_config = function () {
+this.page.url = PAGE_URL;  // Replace PAGE_URL with your page's canonical URL variable
+this.page.identifier = PAGE_IDENTIFIER; // Replace PAGE_IDENTIFIER with your page's unique identifier variable
+};
+*/
+(function() { // DON'T EDIT BELOW THIS LINE
+var d = document, s = d.createElement('script');
+s.src = 'https://satanwoo-2.disqus.com/embed.js';
+s.setAttribute('data-timestamp', +new Date());
+(d.head || d.body).appendChild(s);
+})();
+</script>
+<noscript>Please enable JavaScript to view the <a href="https://disqus.com/?ref_noscript">comments powered by Disqus.</a></noscript>
+                                
+  
     <article id="post-MNN-Visual" class="article article-type-post" itemscope itemprop="blogPost">
   <div class="article-meta">
     <a href="/2020/02/06/MNN-Visual/" class="article-date">
@@ -376,7 +490,7 @@ get hasMain() {
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2020/02/06/MNN-Visual/" data-id="ck6c7nckq002shhi1jtyfkaiw" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2020/02/06/MNN-Visual/" data-id="ck8op7or6002uw8i1dm7ashlq" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2020/02/06/MNN-Visual/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -571,7 +685,7 @@ _mm256_store_pd(<span class="literal">result</span>, c);
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2019/12/01/SIMD-1/" data-id="ck6c7ncjq001yhhi1l7sfv3vn" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2019/12/01/SIMD-1/" data-id="ck8op7oq70021w8i1p590y43s" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2019/12/01/SIMD-1/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -719,7 +833,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2019/10/27/MNN1/" data-id="ck6c7ncko002ohhi1npo1cmth" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2019/10/27/MNN1/" data-id="ck8op7or1002rw8i1w1jj9nok" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2019/10/27/MNN1/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -924,7 +1038,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2019/07/07/RevisitAutorelease2/" data-id="ck6c7ncjx0024hhi10dy52686" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2019/07/07/RevisitAutorelease2/" data-id="ck8op7oqc0027w8i1n7v0ksw7" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2019/07/07/RevisitAutorelease2/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -1265,7 +1379,7 @@ _pthread_tsd_cleanup_key(<span class="keyword">pthread_t</span> self, <span clas
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2019/07/02/RevisitAutorelease/" data-id="ck6c7nck10026hhi16xigao0j" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2019/07/02/RevisitAutorelease/" data-id="ck8op7oqh0029w8i1w6xc02b0" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2019/07/02/RevisitAutorelease/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -1439,7 +1553,7 @@ Data *data = <span class="keyword">new</span> Data();
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2019/01/26/RAII/" data-id="ck6c7nck9002dhhi1izr07qzk" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2019/01/26/RAII/" data-id="ck8op7oqo002gw8i1ayhx4wuf" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2019/01/26/RAII/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -1545,7 +1659,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2019/01/26/LD-2/" data-id="ck6c7ncle0038hhi1ntpieymg" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2019/01/26/LD-2/" data-id="ck8op7orl003aw8i1egl1bt8l" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2019/01/26/LD-2/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -1643,7 +1757,7 @@ NSLog(@<span class="string">"haha"</span>);
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2019/01/26/shared-ptr/" data-id="ck6c7nchl0009hhi1l3sc6coj" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2019/01/26/shared-ptr/" data-id="ck8op7onn0009w8i1u3wj8t8b" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2019/01/26/shared-ptr/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -2035,7 +2149,7 @@ lockp-&gt;unlock();
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2019/01/01/Synchronized/" data-id="ck6c7ncj1001lhhi1uqa6kjqo" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2019/01/01/Synchronized/" data-id="ck8op7op6001lw8i1hv5ruoh1" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2019/01/01/Synchronized/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -2275,7 +2389,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2018/12/22/LD-1/" data-id="ck6c7nclh003ahhi1bvrq502a" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2018/12/22/LD-1/" data-id="ck8op7orm003cw8i1ihlzz6tq" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2018/12/22/LD-1/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -2398,7 +2512,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2018/10/06/JSDebugger-INTRO/" data-id="ck6c7nclw003jhhi12yw56yvw" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2018/10/06/JSDebugger-INTRO/" data-id="ck8op7ory003lw8i1yrp7m410" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2018/10/06/JSDebugger-INTRO/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -2534,7 +2648,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2018/05/09/MNIST/" data-id="ck6c7ncl1002whhi1d3za8ewq" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2018/05/09/MNIST/" data-id="ck8op7or8002yw8i1zxcyeq9b" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2018/05/09/MNIST/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -2746,7 +2860,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2018/04/01/jsengine/" data-id="ck6c7nchw000mhhi1ucn8xxn0" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2018/04/01/jsengine/" data-id="ck8op7onz000mw8i10e5arscz" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2018/04/01/jsengine/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -2992,7 +3106,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2018/02/04/iOS-iVar/" data-id="ck6c7nci8000uhhi1zxmk1uyv" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2018/02/04/iOS-iVar/" data-id="ck8op7oo9000uw8i1cqantvlx" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2018/02/04/iOS-iVar/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -3617,7 +3731,7 @@ StartAgain: ;
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2018/01/14/iOS-virtual/" data-id="ck6c7nci3000qhhi1fpmydk5d" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2018/01/14/iOS-virtual/" data-id="ck8op7oo6000qw8i1u9u5omvp" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2018/01/14/iOS-virtual/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -3828,7 +3942,7 @@ remover.keyPath = identifier.copy<span class="comment">;</span>
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2017/11/27/KVO-Swizzle/" data-id="ck6c7ncli003chhi1kaqocr4u" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2017/11/27/KVO-Swizzle/" data-id="ck8op7orq003ew8i10gowbcmr" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2017/11/27/KVO-Swizzle/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -3990,7 +4104,7 @@ frame <span class="preprocessor">#<span class="number">14</span>: <span class="n
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2017/11/02/load-twice/" data-id="ck6c7nchu000khhi18zxyvsrd" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2017/11/02/load-twice/" data-id="ck8op7onx000kw8i1ffvidjay" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2017/11/02/load-twice/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -4391,7 +4505,7 @@ NSDate* bootTime = [NSDate dateWithTimeIntervalSince1970:timestamp];
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2017/10/18/abort/" data-id="ck6c7ncir001bhhi13e66kbjy" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2017/10/18/abort/" data-id="ck8op7oos001bw8i17hdih7to" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2017/10/18/abort/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -4777,7 +4891,7 @@ WKContentExtensionStore
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2017/09/24/mainthreadchecker1/" data-id="ck6c7nchs000ghhi1tbl7bt8f" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2017/09/24/mainthreadchecker1/" data-id="ck8op7onu000gw8i1svdu1v8p" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2017/09/24/mainthreadchecker1/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -5104,7 +5218,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2017/09/11/KVO-CRASH/" data-id="ck6c7nclm003ehhi1g7lvzrtm" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2017/09/11/KVO-CRASH/" data-id="ck8op7ors003gw8i152h9n7us" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2017/09/11/KVO-CRASH/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -5400,7 +5514,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2017/08/06/UITableViewController/" data-id="ck6c7nciv001ghhi17sfial3y" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2017/08/06/UITableViewController/" data-id="ck8op7ooz001gw8i1mi0z8t7q" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2017/08/06/UITableViewController/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -5691,7 +5805,7 @@ BOOT_RUN_EXIT(appender_close);
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2017/07/30/xlog/" data-id="ck6c7nch80003hhi10qsak27g" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2017/07/30/xlog/" data-id="ck8op7ona0003w8i1l3ue1zrh" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2017/07/30/xlog/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -5994,7 +6108,7 @@ ldp    x9, x17, [x12]        <span class="comment">// {x9, x17} = *bucket</span>
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2017/06/29/Macho-2/" data-id="ck6c7nckh002khhi1s312e4ge" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2017/06/29/Macho-2/" data-id="ck8op7oqw002nw8i1cq3n6zda" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2017/06/29/Macho-2/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -6283,7 +6397,7 @@ _magic = [cursor readBigInt32];
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2017/06/13/Macho-1/" data-id="ck6c7nckl002mhhi1j5w7p6mu" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2017/06/13/Macho-1/" data-id="ck8op7oqz002pw8i1eqcp58dl" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2017/06/13/Macho-1/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -6545,7 +6659,7 @@ _attribute__((section (<span class="string">"__DATA, MinyiSpecific"</span>))) <s
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2017/06/01/FBTweak/" data-id="ck6c7ncm7003rhhi1np4gi43c" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2017/06/01/FBTweak/" data-id="ck8op7osa003tw8i1arfqyo0f" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2017/06/01/FBTweak/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -6685,7 +6799,7 @@ foo(&amp;s, <span class="number">1</span>, <span class="number">2</span>);
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2017/04/23/ARM64IndirectReturn/" data-id="ck6c7ncmv0048hhi16bryth6v" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2017/04/23/ARM64IndirectReturn/" data-id="ck8op7oss004aw8i1agcwtpd2" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2017/04/23/ARM64IndirectReturn/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -6856,7 +6970,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2017/04/18/CalculateTwoArrayDiff/" data-id="ck6c7ncmr0044hhi16dv9qepl" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2017/04/18/CalculateTwoArrayDiff/" data-id="ck8op7osq0046w8i1zg90bc8t" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2017/04/18/CalculateTwoArrayDiff/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -7046,7 +7160,7 @@ dispatch_group_create(<span class="keyword">void</span>)
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2017/01/07/DispatchGroupCrash/" data-id="ck6c7ncmd003vhhi1io6g8po8" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2017/01/07/DispatchGroupCrash/" data-id="ck8op7osf003xw8i11j2u7k3f" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2017/01/07/DispatchGroupCrash/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -7294,7 +7408,7 @@ func <span class="function"><span class="title">resultFromBatchObjects</span><sp
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2017/01/07/JSONRPCKit/" data-id="ck6c7ncls003hhhi1iw8thgah" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2017/01/07/JSONRPCKit/" data-id="ck8op7orv003jw8i13apxjz7e" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2017/01/07/JSONRPCKit/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -7578,7 +7692,7 @@ dispatch_sync(dq, ^{
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/10/23/multithread-dangling-pointer/" data-id="ck6c7nchp000ehhi103g43p2e" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/10/23/multithread-dangling-pointer/" data-id="ck8op7onr000ew8i1mmayn2xn" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/10/23/multithread-dangling-pointer/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -7734,7 +7848,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/09/17/uiwindow-iOS/" data-id="ck6c7nchi0007hhi1xorm2me9" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/09/17/uiwindow-iOS/" data-id="ck8op7onk0007w8i1vzsr2n9n" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/09/17/uiwindow-iOS/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -7894,7 +8008,7 @@ OSSpinUnlock(&amp;_lock)<span class="comment">;</span>
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/07/10/immutable-thread/" data-id="ck6c7nchz000ohhi10pb050pw" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/07/10/immutable-thread/" data-id="ck8op7oo2000ow8i1o20vf0vl" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/07/10/immutable-thread/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -8018,7 +8132,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/05/02/Spotify/" data-id="ck6c7ncji001thhi1yqnk3d9j" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/05/02/Spotify/" data-id="ck8op7opp001tw8i1lmhpek4e" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/05/02/Spotify/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -8146,7 +8260,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/04/26/blank-space-in-html/" data-id="ck6c7nciq0019hhi1512q25jf" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/04/26/blank-space-in-html/" data-id="ck8op7oop0019w8i1654wjd16" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/04/26/blank-space-in-html/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -8404,7 +8518,7 @@ Elapsed application CPU <span class="keyword">time</span> (seconds): <span class
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/04/11/dispatch-once/" data-id="ck6c7ncid000zhhi1nykf0hzw" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/04/11/dispatch-once/" data-id="ck8op7ooe000zw8i1o7wlxj7f" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/04/11/dispatch-once/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -8621,7 +8735,7 @@ a4.<span class="function"><span class="title">staticInfo</span><span class="para
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/03/22/dispatch-in-swift/" data-id="ck6c7ncih0011hhi11e7mom8d" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/03/22/dispatch-in-swift/" data-id="ck8op7ooh0011w8i1p3y6m7cc" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/03/22/dispatch-in-swift/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -8735,7 +8849,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/03/14/RxSwift/" data-id="ck6c7ncjv0022hhi1p9m2irq4" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/03/14/RxSwift/" data-id="ck8op7oq90025w8i1uo5h3c2u" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/03/14/RxSwift/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -8845,7 +8959,7 @@ val = edx(<span class="literal">true</span>)
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/03/14/SizeUp/" data-id="ck6c7ncjn001whhi1izdz89pj" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/03/14/SizeUp/" data-id="ck8op7opt001ww8i10c1adoxt" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/03/14/SizeUp/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -9007,7 +9121,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/03/14/DXXcodeConsoleUnicodePlugin/" data-id="ck6c7ncmj0040hhi1cwrfulyl" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/03/14/DXXcodeConsoleUnicodePlugin/" data-id="ck8op7osk0042w8i1e3yevg7g" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/03/14/DXXcodeConsoleUnicodePlugin/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -9106,7 +9220,7 @@ fi
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/02/27/check-manifest/" data-id="ck6c7ncio0016hhi135wyx2gv" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/02/27/check-manifest/" data-id="ck8op7oom0016w8i16a3xlw6n" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/02/27/check-manifest/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -9238,7 +9352,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/02/27/pod-install-plugin/" data-id="ck6c7nchn000chhi1qo7vmol0" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/02/27/pod-install-plugin/" data-id="ck8op7onp000cw8i1kfd5envp" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/02/27/pod-install-plugin/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -9516,7 +9630,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/02/27/FBKVOController/" data-id="ck6c7ncma003thhi12q9w65yw" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/02/27/FBKVOController/" data-id="ck8op7osd003vw8i1jv262go6" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/02/27/FBKVOController/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -9652,7 +9766,7 @@ selectedTitleLabelsContentView<span class="class">.layer</span><span class="clas
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/02/05/DGRunKeeperSwitch/" data-id="ck6c7ncmm0042hhi1era17haf" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/02/05/DGRunKeeperSwitch/" data-id="ck8op7osn0044w8i1ur6ndrnx" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/02/05/DGRunKeeperSwitch/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -9930,7 +10044,7 @@ NSLayoutConstraint *constraint = [NSLayoutConstraint <span class="string">constr
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/02/05/PureLayout/" data-id="ck6c7nckc002ghhi1cfoi4ow5" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/02/05/PureLayout/" data-id="ck8op7oqr002jw8i1lrtlj0zf" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/02/05/PureLayout/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -10278,7 +10392,7 @@ extension Task {
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/12/30/Refactor-Mega-ViewController/" data-id="ck6c7nck7002bhhi1gvrdagp7" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/12/30/Refactor-Mega-ViewController/" data-id="ck8op7oqm002ew8i1rna2iup5" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2015/12/30/Refactor-Mega-ViewController/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -10451,7 +10565,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/12/20/Learn-R-2/" data-id="ck6c7ncl4002yhhi1syxzjr7f" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/12/20/Learn-R-2/" data-id="ck8op7ora0030w8i12043982e" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2015/12/20/Learn-R-2/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -10527,7 +10641,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/12/15/Regression-Model-1/" data-id="ck6c7nck40028hhi147xeia0q" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/12/15/Regression-Model-1/" data-id="ck8op7oqk002bw8i1ecj2thru" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2015/12/15/Regression-Model-1/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -10692,7 +10806,7 @@ $foo
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/12/13/Learn-R-1/" data-id="ck6c7ncl70031hhi14szkog74" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/12/13/Learn-R-1/" data-id="ck8op7ore0033w8i1sf6qmgj5" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2015/12/13/Learn-R-1/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -10820,330 +10934,9 @@ frame <span class="preprocessor">#<span class="number">20</span>: libdyld.dylib`
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/12/11/LLDB-1/" data-id="ck6c7ncld0036hhi157bx1oap" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/12/11/LLDB-1/" data-id="ck8op7ori0038w8i1ua6bjkzf" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2015/12/11/LLDB-1/#disqus_thread" class="article-comment-link">Comments</a>
-      
-      
-  <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
-
-    </footer>
-  </div>
-  
-</article>
-
-<div id="disqus_thread"></div>
-<script>
-
-/**
-*  RECOMMENDED CONFIGURATION VARIABLES: EDIT AND UNCOMMENT THE SECTION BELOW TO INSERT DYNAMIC VALUES FROM YOUR PLATFORM OR CMS.
-*  LEARN WHY DEFINING THESE VARIABLES IS IMPORTANT: https://disqus.com/admin/universalcode/#configuration-variables*/
-/*
-var disqus_config = function () {
-this.page.url = PAGE_URL;  // Replace PAGE_URL with your page's canonical URL variable
-this.page.identifier = PAGE_IDENTIFIER; // Replace PAGE_IDENTIFIER with your page's unique identifier variable
-};
-*/
-(function() { // DON'T EDIT BELOW THIS LINE
-var d = document, s = d.createElement('script');
-s.src = 'https://satanwoo-2.disqus.com/embed.js';
-s.setAttribute('data-timestamp', +new Date());
-(d.head || d.body).appendChild(s);
-})();
-</script>
-<noscript>Please enable JavaScript to view the <a href="https://disqus.com/?ref_noscript">comments powered by Disqus.</a></noscript>
-                                
-  
-    <article id="post-TBAnnotationClustering" class="article article-type-post" itemscope itemprop="blogPost">
-  <div class="article-meta">
-    <a href="/2015/12/11/TBAnnotationClustering/" class="article-date">
-  <time datetime="2015-12-10T16:56:04.000Z" itemprop="datePublished">2015-12-11</time>
-</a>
-    
-  </div>
-  <div class="article-inner">
-    
-    
-      <header class="article-header">
-        
-  
-    <h1 itemprop="name">
-      <a class="article-title" href="/2015/12/11/TBAnnotationClustering/">TBAnnotationClustering源码解析</a>
-    </h1>
-  
-
-      </header>
-    
-    <div class="article-entry" itemprop="articleBody">
-      
-        <p>毕设这两天飞一般的加速，终于可以写写源码解析了，嘿嘿，这周读两个跟性能相关的源码，首先是一个跟地图相关的，今天来看看一个数据结构在iOS开发中的妙用。</p>
-<h3 id="TBAnnotationClustering">TBAnnotationClustering</h3><p>我们都知道，MapView的实现机制其实和UITableView类似，首先他们都是基于UIScrollView支持滑动的，此外，他们都采用了循环服用的机制了来保持内存的开销。</p>
-<p><strong>但是</strong>，两者之间有个很大的区别就是数量级的差距，UITableView就算充满整个屏幕，充其量也就是10多个同时可见的VisibleCell，因此就多维护一个大小是VisibleCells数量 ＋ 2的这样一个循环队列，进行复用。但是MapView就不一样了，地图上同时展示一段范围内几千个Point of Interest是非常有可能的，这一下子的内存开销和性能卡顿就非常不得了，因此我们需要一种合理的手段来避免，这就是我们今天要讲解的TBAnnotationClustering的由来。</p>
-<p><a href="https://github.com/thoughtbot/TBAnnotationClustering" target="_blank" rel="external">Github地址</a></p>
-<h3 id="Level_of_Detail">Level of Detail</h3><p>首先，让我们先介绍一下相关背景知识。</p>
-<p>根据图像渲染的理论我们可以知道，人的视野存在焦点区域和盲点区域，总是更倾向于关注处于视线左上角到视线中心部分的。因此，在现实应用中，如游戏场景，当场景需要展现的模型距离视线焦点非常近时，就采用高精度的模型来进行展示；而到模型处于较远位置时，比如体育游戏的场外观众，就可以采用低精度模型进行替换，减少渲染时候的计算量；而到模型所处位置基本可以考虑成为背景时，则会采用基本图元进行展示。通过这种方法，即保证了场景的真实观感，同时又大大减少了不必要的计算量。这也就是通常计算机图形学领域所谓的Level Of Detail技术。</p>
-<h3 id="QuadTree">QuadTree</h3><p>QuadTree可能很多人会比较陌生，但是一提到他的哥哥 － 二叉树，想必大家不会陌生，所以QuadTree又被称为四叉树，关于四叉树的定义，</p>
-<blockquote><br>A quadtree is a tree data structure in which each internal node has exactly four children.<br></blockquote>
-
-<p>四叉树被广泛的运用于空间划分。通过将空间递归划分不同层次的子结构，可以达到较高的空间数据插入和查询效果。</p>
-<p>下面就是一张比较经典的四叉树构造，首先先将一个大空间划分为四个字空间 a b c d。然后根据每一个子空间内的节点个数再进行细分。<strong>这里要强调一点，四叉树的细分没有具体要求，你可以按你的需求划分成每个节点能只包含一个，也可以根据平衡减少划分次数。</strong></p>
-<p><img src="http://img.blog.csdn.net/20131005154434687?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvemhvdXh1Z3VhbmcyMzY=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast"></p>
-<h3 id="TBAnnotationClustering源码讲解">TBAnnotationClustering源码讲解</h3><p>打开这个项目，粗略过一下项目结构，大致需要关注的代码如下：</p>
-<ul>
-<li>TBQuadTree.h/.m</li>
-<li>TBCoordinateQuadTree.h/.m</li>
-</ul>
-<p>让我们一个个来分析</p>
-<h4 id="TBQuadTree">TBQuadTree</h4><p>毫无疑问，从文件名称来看，我们就知道，这个类就代表基础的四叉树数据结构，首先让我们来看看数据结构的定义</p>
-<pre><code><span class="keyword">typedef</span> <span class="class"><span class="keyword">struct</span> <span class="title">TBQuadTreeNodeData</span> </span>{
-    <span class="built_in">double</span> x;
-    <span class="built_in">double</span> y;
-    <span class="keyword">void</span>* data;
-} TBQuadTreeNodeData;
-TBQuadTreeNodeData TBQuadTreeNodeDataMake(<span class="built_in">double</span> x, <span class="built_in">double</span> y, <span class="keyword">void</span>* data);
-</code></pre><p>这个毫无疑问，就是代表的坐标系的<strong>数据节点</strong>。 (x, y)表征坐标点，void *data自由的指向附加的数据。</p>
-<pre><code><span class="keyword">typedef</span> <span class="class"><span class="keyword">struct</span> <span class="title">TBBoundingBox</span> </span>{
-    <span class="built_in">double</span> x0; <span class="built_in">double</span> y0;
-    <span class="built_in">double</span> xf; <span class="built_in">double</span> yf;
-} TBBoundingBox;
-TBBoundingBox TBBoundingBoxMake(<span class="built_in">double</span> x0, <span class="built_in">double</span> y0, <span class="built_in">double</span> xf, <span class="built_in">double</span> yf);
-</code></pre><p>这个同样很简单，用两个对角点限定了一个长方形区域，也就是一个四叉树的节点究竟包含哪些范围。</p>
-<pre><code><span class="label">typedef</span> <span class="keyword">struct </span>quadTreeNode {
-    <span class="keyword">struct </span>quadTreeNode* northWest<span class="comment">;</span>
-    <span class="keyword">struct </span>quadTreeNode* northEast<span class="comment">;</span>
-    <span class="keyword">struct </span>quadTreeNode* southWest<span class="comment">;</span>
-    <span class="keyword">struct </span>quadTreeNode* southEast<span class="comment">;</span>
-    <span class="keyword">TBBoundingBox </span><span class="keyword">boundingBox;
-</span>    int <span class="keyword">bucketCapacity;
-</span>    TBQuadTreeNodeData *points<span class="comment">;</span>
-    int count<span class="comment">;</span>
-} TBQuadTreeNode<span class="comment">;</span>
-<span class="label">TBQuadTreeNode</span>* TBQuadTreeNodeMake(<span class="keyword">TBBoundingBox </span><span class="keyword">boundary, </span>int <span class="keyword">bucketCapacity);</span>
-</code></pre><p>这个稍微复杂点，是四叉树的树节点，其中</p>
-<ul>
-<li>northWest, northEast, southWest, southEast分别代表四叉树的四个子细分区域。</li>
-<li>bondingBox代表的当前这个树节点的涵盖区域。</li>
-<li>bucketCapacity表示这个树节点最大容纳的数据节点个数</li>
-<li>points 数据节点数组</li>
-<li>count 当前包含了数据节点。</li>
-</ul>
-<p><strong>再次强调，千万不要把树节点和数据节点搞混。树节点指的是四叉树上的数据结构，每个树节点最多有四个子树节点，但是可以有bucketCapacity大小的数据节点，数据节点仅仅是用来封装坐标系和其相关的数据的一个数据结构，非四叉树特有。</strong></p>
-<p>看完了数据定义，我们再来看看其实现部分。</p>
-<pre><code><span class="preprocessor">#<span class="keyword">pragma</span> mark - Constructors</span>
-
-<span class="function">TBQuadTreeNodeData <span class="title">TBQuadTreeNodeDataMake</span><span class="params">(<span class="keyword">double</span> x, <span class="keyword">double</span> y, <span class="keyword">void</span>* data)</span>
-</span>{
-    TBQuadTreeNodeData d; d.x = x; d.y = y; d.data = data;
-    <span class="keyword">return</span> d;
-}
-
-<span class="function">TBBoundingBox <span class="title">TBBoundingBoxMake</span><span class="params">(<span class="keyword">double</span> x0, <span class="keyword">double</span> y0, <span class="keyword">double</span> xf, <span class="keyword">double</span> yf)</span>
-</span>{
-    TBBoundingBox bb; bb.x0 = x0; bb.y0 = y0; bb.xf = xf; bb.yf = yf;
-    <span class="keyword">return</span> bb;
-}
-
-<span class="function">TBQuadTreeNode* <span class="title">TBQuadTreeNodeMake</span><span class="params">(TBBoundingBox boundary, <span class="keyword">int</span> bucketCapacity)</span>
-</span>{
-    TBQuadTreeNode* node = <span class="built_in">malloc</span>(<span class="keyword">sizeof</span>(TBQuadTreeNode));
-    node-&gt;northWest = <span class="literal">NULL</span>;
-    node-&gt;northEast = <span class="literal">NULL</span>;
-    node-&gt;southWest = <span class="literal">NULL</span>;
-    node-&gt;southEast = <span class="literal">NULL</span>;
-
-    node-&gt;boundingBox = boundary;
-    node-&gt;bucketCapacity = bucketCapacity;
-    node-&gt;count = <span class="number">0</span>;
-    node-&gt;points = <span class="built_in">malloc</span>(<span class="keyword">sizeof</span>(TBQuadTreeNodeData) * bucketCapacity);
-
-    <span class="keyword">return</span> node;
-}
-</code></pre><p>这三个构造函数，分别是构造<span style="color:red">数据节点</span>、长方形以及<span style="color:blue">四叉树节点</span>，默认情况下四叉树的节点<strong>并非满构造</strong>，而是初始化为空，根据需要插入新节点。</p>
-<pre><code><span class="label">#pragma</span> <span class="keyword">mark </span>- <span class="keyword">Bounding </span><span class="keyword">Box </span>Functions
-
-<span class="keyword">bool </span><span class="keyword">TBBoundingBoxContainsData(TBBoundingBox </span><span class="keyword">box, </span>TBQuadTreeNodeData <span class="preprocessor">data</span>)
-{
-    <span class="keyword">bool </span>containsX = <span class="keyword">box.x0 </span>&lt;= <span class="preprocessor">data</span>.x &amp;&amp; <span class="preprocessor">data</span>.x &lt;= <span class="keyword">box.xf;
-</span>    <span class="keyword">bool </span>containsY = <span class="keyword">box.y0 </span>&lt;= <span class="preprocessor">data</span>.y &amp;&amp; <span class="preprocessor">data</span>.y &lt;= <span class="keyword">box.yf;
-</span>
-    return containsX &amp;&amp; containsY<span class="comment">;</span>
-}
-
-<span class="keyword">bool </span><span class="keyword">TBBoundingBoxIntersectsBoundingBox(TBBoundingBox </span><span class="keyword">b1, </span><span class="keyword">TBBoundingBox </span><span class="keyword">b2)
-</span>{
-    return (<span class="keyword">b1.x0 </span>&lt;= <span class="keyword">b2.xf </span>&amp;&amp; <span class="keyword">b1.xf </span>&gt;= <span class="keyword">b2.x0 </span>&amp;&amp; <span class="keyword">b1.y0 </span>&lt;= <span class="keyword">b2.yf </span>&amp;&amp; <span class="keyword">b1.yf </span>&gt;= <span class="keyword">b2.y0);
-</span>}
-</code></pre><p>随后就是上面两个判断长方形包含和相交的方法了，包含自然是整个包围。而相交的补集是不相交，即在横坐标上一个长方形的xf另一个长方形的x0抑或是一个长方形的x0完全大于另一个长方形的xf，当然在y轴上也是同理，因此通过补集很容易就理解TBBoundingBoxIntersectsBoundingBox的实现了。</p>
-<p>然后来看看非常重要的几个函数，首先是<strong>TBQuadTreeNodeSubdivide</strong></p>
-<pre><code><span class="label">void</span> TBQuadTreeNodeSubdivide(TBQuadTreeNode* node)
-{
-    <span class="keyword">TBBoundingBox </span><span class="keyword">box </span>= node-&gt;<span class="keyword">boundingBox;
-</span>
-    double xMid = (<span class="keyword">box.xf </span>+ <span class="keyword">box.x0) </span>/ <span class="number">2</span>.<span class="number">0</span><span class="comment">;</span>
-    double yMid = (<span class="keyword">box.yf </span>+ <span class="keyword">box.y0) </span>/ <span class="number">2</span>.<span class="number">0</span><span class="comment">;</span>
-
-    <span class="keyword">TBBoundingBox </span>northWest = <span class="keyword">TBBoundingBoxMake(box.x0, </span><span class="keyword">box.y0, </span>xMid, yMid)<span class="comment">;</span>
-    node-&gt;northWest = TBQuadTreeNodeMake(northWest, node-&gt;<span class="keyword">bucketCapacity);
-</span>
-    <span class="keyword">TBBoundingBox </span>northEast = <span class="keyword">TBBoundingBoxMake(xMid, </span><span class="keyword">box.y0, </span><span class="keyword">box.xf, </span>yMid)<span class="comment">;</span>
-    node-&gt;northEast = TBQuadTreeNodeMake(northEast, node-&gt;<span class="keyword">bucketCapacity);
-</span>
-    <span class="keyword">TBBoundingBox </span>southWest = <span class="keyword">TBBoundingBoxMake(box.x0, </span>yMid, xMid, <span class="keyword">box.yf);
-</span>    node-&gt;southWest = TBQuadTreeNodeMake(southWest, node-&gt;<span class="keyword">bucketCapacity);
-</span>
-    <span class="keyword">TBBoundingBox </span>southEast = <span class="keyword">TBBoundingBoxMake(xMid, </span>yMid, <span class="keyword">box.xf, </span><span class="keyword">box.yf);
-</span>    node-&gt;southEast = TBQuadTreeNodeMake(southEast, node-&gt;<span class="keyword">bucketCapacity);
-</span>}
-</code></pre><p>这个函数负责将四叉树节点进行细分。首先获取当前节点负责的长方形区域的中点，然后根据中点到原有长方形的四个顶点，分成四个象限，进行划分。<strong>这个时候请注意</strong>，还只是进行四叉树节点的细分，还没重新更改数据节点的分布。</p>
-<pre><code><span class="keyword">bool</span> TBQuadTreeNodeInsertData(TBQuadTreeNode* node, TBQuadTreeNodeData data)
-{
-    <span class="keyword">if</span> (!TBBoundingBoxContainsData(node-&gt;boundingBox, data)) {
-        <span class="keyword">return</span> <span class="keyword">false</span>;
-    }
-
-    <span class="keyword">if</span> (node-&gt;count &lt; node-&gt;bucketCapacity) {
-        node-&gt;points[node-&gt;count++] = data;
-        <span class="keyword">return</span> <span class="keyword">true</span>;
-    }
-
-    <span class="keyword">if</span> (node-&gt;northWest == <span class="keyword">NULL</span>) {
-        TBQuadTreeNodeSubdivide(node);
-    }
-
-    <span class="keyword">if</span> (TBQuadTreeNodeInsertData(node-&gt;northWest, data)) <span class="keyword">return</span> <span class="keyword">true</span>;
-    <span class="keyword">if</span> (TBQuadTreeNodeInsertData(node-&gt;northEast, data)) <span class="keyword">return</span> <span class="keyword">true</span>;
-    <span class="keyword">if</span> (TBQuadTreeNodeInsertData(node-&gt;southWest, data)) <span class="keyword">return</span> <span class="keyword">true</span>;
-    <span class="keyword">if</span> (TBQuadTreeNodeInsertData(node-&gt;southEast, data)) <span class="keyword">return</span> <span class="keyword">true</span>;
-
-    <span class="keyword">return</span> <span class="keyword">false</span>;
-}
-</code></pre><p>这个函数则是真正的将数据插入到节点中。</p>
-<ul>
-<li>首先先判断这个数据是否落在该长方形中，不是直接滚蛋。</li>
-<li>如果当前包含的数据节点个数没有超过最大数目，直接应用在其中。</li>
-<li>如果四个子节点为空，就先创建</li>
-<li>然后再递归插入</li>
-</ul>
-<pre><code><span class="type">void</span> <span class="type">TBQuadTreeGatherDataInRange</span>(<span class="type">TBQuadTreeNode</span>* node, <span class="type">TBBoundingBox</span> <span class="type">range</span>, <span class="type">TBDataReturnBlock</span> <span class="keyword">block</span>)
-{
-    <span class="keyword">if</span> (!<span class="type">TBBoundingBoxIntersectsBoundingBox</span>(node-&gt;boundingBox, <span class="type">range</span>)) {
-        <span class="keyword">return</span>;
-    }
-
-    <span class="keyword">for</span> (<span class="type">int</span> i = <span class="number">0</span>; i &lt; node-&gt;count; i++) {
-        <span class="keyword">if</span> (<span class="type">TBBoundingBoxContainsData</span>(<span class="type">range</span>, node-&gt;points[i])) {
-            <span class="keyword">block</span>(node-&gt;points[i]);
-        }
-    }
-
-    <span class="keyword">if</span> (node-&gt;northWest == <span class="type">NULL</span>) {
-        <span class="keyword">return</span>;
-    }
-
-    <span class="type">TBQuadTreeGatherDataInRange</span>(node-&gt;northWest, <span class="type">range</span>, <span class="keyword">block</span>);
-    <span class="type">TBQuadTreeGatherDataInRange</span>(node-&gt;northEast, <span class="type">range</span>, <span class="keyword">block</span>);
-    <span class="type">TBQuadTreeGatherDataInRange</span>(node-&gt;southWest, <span class="type">range</span>, <span class="keyword">block</span>);
-    <span class="type">TBQuadTreeGatherDataInRange</span>(node-&gt;southEast, <span class="type">range</span>, <span class="keyword">block</span>);
-}
-</code></pre><p>这个就是通过DFS进行节点的遍历，一旦有落在range内的数据节点，就进行回调。</p>
-<p><strong>综上所述，就是一个基本的四叉树，可以很明显的看到，在四叉树的构建、遍历中，都用了树的递归，也就是俗称的DFS算法。</strong></p>
-<h4 id="TBCoordinateQuadTree">TBCoordinateQuadTree</h4><p>这个类呢，和实质上的四叉树或者性能优化并无太大关系，只是一层简单的封装，我们大致来了解一下就好。</p>
-<pre><code><span class="keyword">TBBoundingBox </span><span class="keyword">TBBoundingBoxForMapRect(MKMapRect </span>mapRect)
-{
-    CLLocationCoordinate2D topLeft = MKCoordinateForMapPoint(mapRect.origin)<span class="comment">;</span>
-    CLLocationCoordinate2D <span class="keyword">botRight </span>= MKCoordinateForMapPoint(MKMapPointMake(MKMapRectGetMaxX(mapRect), MKMapRectGetMaxY(mapRect)))<span class="comment">;</span>
-
-    CLLocationDegrees minLat = <span class="keyword">botRight.latitude;
-</span>    CLLocationDegrees maxLat = topLeft.latitude<span class="comment">;</span>
-
-    CLLocationDegrees minLon = topLeft.longitude<span class="comment">;</span>
-    CLLocationDegrees maxLon = <span class="keyword">botRight.longitude;
-</span>
-    return <span class="keyword">TBBoundingBoxMake(minLat, </span>minLon, maxLat, maxLon)<span class="comment">;</span>
-}
-
-<span class="label">MKMapRect</span> TBMapRectForBoundingBox(<span class="keyword">TBBoundingBox </span><span class="keyword">boundingBox)
-</span>{
-    MKMapPoint topLeft = MKMapPointForCoordinate(CLLocationCoordinate2DMake(<span class="keyword">boundingBox.x0, </span><span class="keyword">boundingBox.y0));
-</span>    MKMapPoint <span class="keyword">botRight </span>= MKMapPointForCoordinate(CLLocationCoordinate2DMake(<span class="keyword">boundingBox.xf, </span><span class="keyword">boundingBox.yf));
-</span>
-    return MKMapRectMake(topLeft.x, <span class="keyword">botRight.y, </span>fabs(<span class="keyword">botRight.x </span>- topLeft.x), fabs(<span class="keyword">botRight.y </span>- topLeft.y))<span class="comment">;</span>
-}
-</code></pre><p>这两个函数就是MKMapRect和我们的BoundingBox之间的转换，难度很小，但是很有意思啊。从中我们可以一窥MapView的一些实现。比如MapView不仅仅是传统的ContentView和ContainerView，更重要的其坐标系和传统的CGRect之间的无法换算，<strong>简而言之，就是，在MapView中，所有的东西都要拿经度纬度来谈。</strong></p>
-<pre><code>- (<span class="built_in">NSArray</span> *)clusteredAnnotationsWithinMapRect:(<span class="built_in">MKMapRect</span>)rect withZoomScale:(<span class="keyword">double</span>)zoomScale
-{
-     <span class="comment">// 1.</span>
-    <span class="keyword">double</span> TBCellSize = TBCellSizeForZoomScale(zoomScale);
-    <span class="keyword">double</span> scaleFactor = zoomScale / TBCellSize;
-
-     <span class="comment">// 2.</span>
-    <span class="built_in">NSInteger</span> minX = floor(<span class="built_in">MKMapRectGetMinX</span>(rect) * scaleFactor);
-    <span class="built_in">NSInteger</span> maxX = floor(<span class="built_in">MKMapRectGetMaxX</span>(rect) * scaleFactor);
-    <span class="built_in">NSInteger</span> minY = floor(<span class="built_in">MKMapRectGetMinY</span>(rect) * scaleFactor);
-    <span class="built_in">NSInteger</span> maxY = floor(<span class="built_in">MKMapRectGetMaxY</span>(rect) * scaleFactor);
-
-    <span class="built_in">NSMutableArray</span> *clusteredAnnotations = [[<span class="built_in">NSMutableArray</span> alloc] init];
-    <span class="keyword">for</span> (<span class="built_in">NSInteger</span> x = minX; x &lt;= maxX; x++) {
-        <span class="keyword">for</span> (<span class="built_in">NSInteger</span> y = minY; y &lt;= maxY; y++) {
-            <span class="built_in">MKMapRect</span> mapRect = <span class="built_in">MKMapRectMake</span>(x / scaleFactor, y / scaleFactor, <span class="number">1.0</span> / scaleFactor, <span class="number">1.0</span> / scaleFactor);
-
-            __block <span class="keyword">double</span> totalX = <span class="number">0</span>;
-            __block <span class="keyword">double</span> totalY = <span class="number">0</span>;
-            __block <span class="keyword">int</span> count = <span class="number">0</span>;
-
-            <span class="built_in">NSMutableArray</span> *names = [[<span class="built_in">NSMutableArray</span> alloc] init];
-            <span class="built_in">NSMutableArray</span> *phoneNumbers = [[<span class="built_in">NSMutableArray</span> alloc] init];
-
-              <span class="comment">// 3.</span>
-            TBQuadTreeGatherDataInRange(<span class="keyword">self</span><span class="variable">.root</span>, TBBoundingBoxForMapRect(mapRect), ^(TBQuadTreeNodeData data) {
-                totalX += data<span class="variable">.x</span>;
-                totalY += data<span class="variable">.y</span>;
-                count++;
-
-                TBHotelInfo hotelInfo = *(TBHotelInfo *)data<span class="variable">.data</span>;
-                [names addObject:[<span class="built_in">NSString</span> stringWithFormat:<span class="string">@"%s"</span>, hotelInfo<span class="variable">.hotelName</span>]];
-                [phoneNumbers addObject:[<span class="built_in">NSString</span> stringWithFormat:<span class="string">@"%s"</span>, hotelInfo<span class="variable">.hotelPhoneNumber</span>]];
-            });
-
-              <span class="comment">// 4.</span>
-            <span class="keyword">if</span> (count == <span class="number">1</span>) {
-                CLLocationCoordinate2D coordinate = CLLocationCoordinate2DMake(totalX, totalY);
-                TBClusterAnnotation *annotation = [[TBClusterAnnotation alloc] initWithCoordinate:coordinate count:count];
-                annotation<span class="variable">.title</span> = [names lastObject];
-                annotation<span class="variable">.subtitle</span> = [phoneNumbers lastObject];
-                [clusteredAnnotations addObject:annotation];
-            }
-
-           <span class="comment">// 5.</span>
-            <span class="keyword">if</span> (count &gt; <span class="number">1</span>) {
-                CLLocationCoordinate2D coordinate = CLLocationCoordinate2DMake(totalX / count, totalY / count);
-                TBClusterAnnotation *annotation = [[TBClusterAnnotation alloc] initWithCoordinate:coordinate count:count];
-                [clusteredAnnotations addObject:annotation];
-            }
-        }
-    }
-
-    <span class="keyword">return</span> [<span class="built_in">NSArray</span> arrayWithArray:clusteredAnnotations];
-}
-</code></pre><p>而上述的最后一个函数，就是根据传入的MKMapRect，返回簇类数组的。</p>
-<ul>
-<li>1.首先根据放缩比例，或者Cell大小。</li>
-<li>2.根据cell大小计算当前地图区域的范围所对应的minX - maxX，minY - maxY对应的网格。</li>
-</ul>
-<p>什么是网格？就是根据Cell大小将地图划分成了一块块区域，通过minX， maxX, minY - maxY找到对应的网格。类似于array[1][2]找到第二行第三列的网格（从0开始索引）。</p>
-<ul>
-<li>3.遍历每一个网格，获取当前网格对应的四叉树节点中的数据信息，并记录个数。</li>
-<li>4.如果个数是1，那么直接显示，包含数据节点的附加信息，比如在这里就是酒店名称和酒店电话。</li>
-<li>5.如果个数大于1的话，利用均值计算中心点，中心点是所有包含的数据节点平均值，同时信息只简单的显示个数。</li>
-</ul>
-<p>至此，整个代码就解读完整啦。</p>
-
-      
-    </div>
-    <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/12/11/TBAnnotationClustering/" data-id="ck6c7ncix001jhhi14q5avgla" class="article-share-link">Share</a>
-      
-        <a href="http://satanwoo.github.io/2015/12/11/TBAnnotationClustering/#disqus_thread" class="article-comment-link">Comments</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
@@ -11190,7 +10983,7 @@ s.setAttribute('data-timestamp', +new Date());
   <div class="widget-wrap">
     <h3 class="widget-title">Tags</h3>
     <div class="widget">
-      <ul class="tag-list"><li class="tag-list-item"><a class="tag-list-link" href="/tags/Android/">Android</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/C/">C</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/C/">C++</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Growth/">Growth</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/JavaScript/">JavaScript</a><span class="tag-list-count">4</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Machine-Learning/">Machine Learning</a><span class="tag-list-count">3</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Math/">Math</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Performance/">Performance</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/R/">R</a><span class="tag-list-count">2</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Reverse-Engineering/">Reverse Engineering</a><span class="tag-list-count">6</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Swift/">Swift</a><span class="tag-list-count">6</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/XNU/">XNU</a><span class="tag-list-count">2</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/c/">c++</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/iOS/">iOS</a><span class="tag-list-count">44</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/shell/">shell</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/汇编/">汇编</a><span class="tag-list-count">1</span></li></ul>
+      <ul class="tag-list"><li class="tag-list-item"><a class="tag-list-link" href="/tags/Android/">Android</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/C/">C</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/C/">C++</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Growth/">Growth</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/JavaScript/">JavaScript</a><span class="tag-list-count">4</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Machine-Learning/">Machine Learning</a><span class="tag-list-count">4</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Math/">Math</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Performance/">Performance</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/R/">R</a><span class="tag-list-count">2</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Reverse-Engineering/">Reverse Engineering</a><span class="tag-list-count">6</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Swift/">Swift</a><span class="tag-list-count">6</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/XNU/">XNU</a><span class="tag-list-count">2</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/c/">c++</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/iOS/">iOS</a><span class="tag-list-count">44</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/shell/">shell</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/汇编/">汇编</a><span class="tag-list-count">1</span></li></ul>
     </div>
   </div>
 
@@ -11199,7 +10992,7 @@ s.setAttribute('data-timestamp', +new Date());
   <div class="widget-wrap">
     <h3 class="widget-title">Tag Cloud</h3>
     <div class="widget tagcloud">
-      <a href="/tags/Android/" style="font-size: 10px;">Android</a> <a href="/tags/C/" style="font-size: 10px;">C</a> <a href="/tags/C/" style="font-size: 10px;">C++</a> <a href="/tags/Growth/" style="font-size: 10px;">Growth</a> <a href="/tags/JavaScript/" style="font-size: 16px;">JavaScript</a> <a href="/tags/Machine-Learning/" style="font-size: 14px;">Machine Learning</a> <a href="/tags/Math/" style="font-size: 10px;">Math</a> <a href="/tags/Performance/" style="font-size: 10px;">Performance</a> <a href="/tags/R/" style="font-size: 12px;">R</a> <a href="/tags/Reverse-Engineering/" style="font-size: 18px;">Reverse Engineering</a> <a href="/tags/Swift/" style="font-size: 18px;">Swift</a> <a href="/tags/XNU/" style="font-size: 12px;">XNU</a> <a href="/tags/c/" style="font-size: 10px;">c++</a> <a href="/tags/iOS/" style="font-size: 20px;">iOS</a> <a href="/tags/shell/" style="font-size: 10px;">shell</a> <a href="/tags/汇编/" style="font-size: 10px;">汇编</a>
+      <a href="/tags/Android/" style="font-size: 10px;">Android</a> <a href="/tags/C/" style="font-size: 10px;">C</a> <a href="/tags/C/" style="font-size: 10px;">C++</a> <a href="/tags/Growth/" style="font-size: 10px;">Growth</a> <a href="/tags/JavaScript/" style="font-size: 15px;">JavaScript</a> <a href="/tags/Machine-Learning/" style="font-size: 15px;">Machine Learning</a> <a href="/tags/Math/" style="font-size: 10px;">Math</a> <a href="/tags/Performance/" style="font-size: 10px;">Performance</a> <a href="/tags/R/" style="font-size: 12.5px;">R</a> <a href="/tags/Reverse-Engineering/" style="font-size: 17.5px;">Reverse Engineering</a> <a href="/tags/Swift/" style="font-size: 17.5px;">Swift</a> <a href="/tags/XNU/" style="font-size: 12.5px;">XNU</a> <a href="/tags/c/" style="font-size: 10px;">c++</a> <a href="/tags/iOS/" style="font-size: 20px;">iOS</a> <a href="/tags/shell/" style="font-size: 10px;">shell</a> <a href="/tags/汇编/" style="font-size: 10px;">汇编</a>
     </div>
   </div>
 
@@ -11208,7 +11001,7 @@ s.setAttribute('data-timestamp', +new Date());
   <div class="widget-wrap">
     <h3 class="widget-title">Archives</h3>
     <div class="widget">
-      <ul class="archive-list"><li class="archive-list-item"><a class="archive-list-link" href="/archives/2020/02/">February 2020</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2019/12/">December 2019</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2019/10/">October 2019</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2019/07/">July 2019</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2019/01/">January 2019</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2018/12/">December 2018</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2018/10/">October 2018</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2018/05/">May 2018</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2018/04/">April 2018</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2018/02/">February 2018</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2018/01/">January 2018</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/11/">November 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/10/">October 2017</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/09/">September 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/08/">August 2017</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/07/">July 2017</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/06/">June 2017</a><span class="archive-list-count">3</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/04/">April 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/01/">January 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/10/">October 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/09/">September 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/07/">July 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/05/">May 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/04/">April 2016</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/03/">March 2016</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/02/">February 2016</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/12/">December 2015</a><span class="archive-list-count">6</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/11/">November 2015</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/10/">October 2015</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/09/">September 2015</a><span class="archive-list-count">4</span></li></ul>
+      <ul class="archive-list"><li class="archive-list-item"><a class="archive-list-link" href="/archives/2020/04/">April 2020</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2020/02/">February 2020</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2019/12/">December 2019</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2019/10/">October 2019</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2019/07/">July 2019</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2019/01/">January 2019</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2018/12/">December 2018</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2018/10/">October 2018</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2018/05/">May 2018</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2018/04/">April 2018</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2018/02/">February 2018</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2018/01/">January 2018</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/11/">November 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/10/">October 2017</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/09/">September 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/08/">August 2017</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/07/">July 2017</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/06/">June 2017</a><span class="archive-list-count">3</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/04/">April 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/01/">January 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/10/">October 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/09/">September 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/07/">July 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/05/">May 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/04/">April 2016</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/03/">March 2016</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/02/">February 2016</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/12/">December 2015</a><span class="archive-list-count">6</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/11/">November 2015</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/10/">October 2015</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/09/">September 2015</a><span class="archive-list-count">4</span></li></ul>
     </div>
   </div>
 
@@ -11218,6 +11011,10 @@ s.setAttribute('data-timestamp', +new Date());
     <h3 class="widget-title">Recents</h3>
     <div class="widget">
       <ul>
+        
+          <li>
+            <a href="/2020/04/07/Selective-Search/">目标检测之 Selective Search</a>
+          </li>
         
           <li>
             <a href="/2020/02/06/MNN-Visual/">实现 MNN 模型的可视化工具</a>
@@ -11233,10 +11030,6 @@ s.setAttribute('data-timestamp', +new Date());
         
           <li>
             <a href="/2019/07/07/RevisitAutorelease2/">Revisit iOS Autorelease之二</a>
-          </li>
-        
-          <li>
-            <a href="/2019/07/02/RevisitAutorelease/">Revisit iOS Autorelease 之不经意间可能被影响的优化</a>
           </li>
         
       </ul>

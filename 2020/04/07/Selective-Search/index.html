@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  
+  <title>目标检测之 Selective Search | SatanWoo</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+  <meta name="description" content="目标检测 Selective Search 学习最近因为工作上的事，搞了一点非常基础目标检测相关的东西。正好在学习之余梳理了下之前自己认知错误的一些地方，记录一下。
+起因之前对于目标检测的了解停留于深度学习部分，比如 Fast-RCNN / Faster-RCNN / Yolo 等等，对于候选框域搜索算法主要还是对于 RPN 的认知。但是这次在工作中了解到了 Selective Search 的概">
+<meta property="og:type" content="article">
+<meta property="og:title" content="目标检测之 Selective Search">
+<meta property="og:url" content="http://satanwoo.github.io/2020/04/07/Selective-Search/index.html">
+<meta property="og:site_name" content="SatanWoo">
+<meta property="og:description" content="目标检测 Selective Search 学习最近因为工作上的事，搞了一点非常基础目标检测相关的东西。正好在学习之余梳理了下之前自己认知错误的一些地方，记录一下。
+起因之前对于目标检测的了解停留于深度学习部分，比如 Fast-RCNN / Faster-RCNN / Yolo 等等，对于候选框域搜索算法主要还是对于 RPN 的认知。但是这次在工作中了解到了 Selective Search 的概">
+<meta property="og:image" content="https://cdn.nlark.com/yuque/0/2020/jpeg/520564/1586190762414-d187819a-a5f8-467c-ac0e-b6f4fdb0facd.jpeg#align=left&display=inline&height=416&originHeight=416&originWidth=813&size=0&status=done&style=none&width=813">
+<meta property="og:image" content="https://cdn.nlark.com/yuque/0/2020/jpeg/520564/1586190762646-b0f5a4d4-ea6d-4223-a427-3dcab2360020.jpeg#align=left&display=inline&height=389&originHeight=389&originWidth=794&size=0&status=done&style=none&width=794">
+<meta property="og:image" content="https://cdn.nlark.com/yuque/0/2020/png/520564/1586190762438-1360cd20-f297-4977-8835-07cd1d7ac43b.png#align=left&display=inline&height=389&originHeight=389&originWidth=452&size=0&status=done&style=none&width=452">
+<meta property="og:image" content="https://cdn.nlark.com/yuque/0/2020/png/520564/1586190829238-e23f2c94-b271-499f-9cc7-230e005a8d94.png#align=left&display=inline&height=522&name=%E6%88%AA%E5%B1%8F2020-04-07%E4%B8%8A%E5%8D%8812.33.29.png&originHeight=522&originWidth=1656&size=1153243&status=done&style=none&width=1656">
+<meta property="og:updated_time" content="2020-04-06T16:37:51.610Z">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="目标检测之 Selective Search">
+<meta name="twitter:description" content="目标检测 Selective Search 学习最近因为工作上的事，搞了一点非常基础目标检测相关的东西。正好在学习之余梳理了下之前自己认知错误的一些地方，记录一下。
+起因之前对于目标检测的了解停留于深度学习部分，比如 Fast-RCNN / Faster-RCNN / Yolo 等等，对于候选框域搜索算法主要还是对于 RPN 的认知。但是这次在工作中了解到了 Selective Search 的概">
+  
+    <link rel="alternative" href="/atom.xml" title="SatanWoo" type="application/atom+xml">
+  
+  
+    <link rel="icon" href="/favicon.png">
+  
+  <link rel="stylesheet" href="/css/style.css" type="text/css">
+  
+
+</head>
+<body>
+  <div id="container">
+    <div id="wrap">
+      <header id="header">
+  <div id="banner"></div>
+  <div id="header-outer" class="outer">
+    <div id="header-title" class="inner">
+      <h1 id="logo-wrap">
+        <a href="/" id="logo">SatanWoo</a>
+      </h1>
+      
+    </div>
+    <div id="header-inner" class="inner">
+      <nav id="main-nav">
+        <a id="main-nav-toggle" class="nav-icon"></a>
+        
+          <a class="main-nav-link" href="/">Home</a>
+        
+          <a class="main-nav-link" href="/archives">Archives</a>
+        
+          <a class="main-nav-link" href="/sitemap.xml">map</a>
+        
+      </nav>
+      <nav id="sub-nav">
+        
+          <a id="nav-rss-link" class="nav-icon" href="/atom.xml" title="RSS Feed"></a>
+        
+        <a id="nav-search-btn" class="nav-icon" title="Search"></a>
+      </nav>
+      <div id="search-form-wrap">
+        <form action="//google.com/search" method="get" accept-charset="UTF-8" class="search-form"><input type="search" name="q" results="0" class="search-form-input" placeholder="Search"><button type="submit" class="search-form-submit">&#xF002;</button><input type="hidden" name="sitesearch" value="http://satanwoo.github.io"></form>
+      </div>
+    </div>
+  </div>
+</header>
+      <div class="outer">
+        <section id="main"><article id="post-Selective-Search" class="article article-type-post" itemscope itemprop="blogPost">
+  <div class="article-meta">
+    <a href="/2020/04/07/Selective-Search/" class="article-date">
+  <time datetime="2020-04-06T16:36:44.000Z" itemprop="datePublished">2020-04-07</time>
+</a>
+    
+  </div>
+  <div class="article-inner">
+    
+    
+      <header class="article-header">
+        
+  
+    <h1 class="article-title" itemprop="name">
+      目标检测之 Selective Search
+    </h1>
+  
+
+      </header>
+    
+    <div class="article-entry" itemprop="articleBody">
+      
+        <h2 id="目标检测_Selective_Search_学习">目标检测 Selective Search 学习</h2><p><br>最近因为工作上的事，搞了一点非常基础目标检测相关的东西。正好在学习之余梳理了下之前自己认知错误的一些地方，记录一下。<br></p>
+<h3 id="起因">起因</h3><p><br>之前对于目标检测的了解停留于深度学习部分，比如 Fast-RCNN / Faster-RCNN / Yolo 等等，对于候选框域搜索算法主要还是对于 RPN 的认知。<br><br><br>但是这次在工作中了解到了 Selective Search 的概念，没想到在小样本训练的过程中精度也不错，性能还很好，哈哈。因此决定深入研究下。Selective Search 从大类上也可以属于 Region Proposal 的思想，但是主要的思想却是来源于传统的图像处理。<br><br><br>相关的论文发表于 IJCV 2013 《Selective Search for Object Detection》，大家可自行阅读获取更多细节。<br></p>
+<blockquote>
+<p>主要还是学习目的，业界主流的还是采用 Faster-RCNN 的做法。</p>
+</blockquote>
+<h3 id="Selective_Search">Selective Search</h3><p><br>目标检测问题相对来说比图像分类复杂点，因为一般情况下要同时检测出多个子物体的位置（及可能需要的分类目的）。最原始的做法就是对于一张图像的每个可能位置都进行搜索，但是这里会产生一个两个互相增加复杂度的问题？<br></p>
+<ul>
+<li>我们要识别的物体在哪？我们要识别的物体大小是多少？长宽比要不要考虑？</li>
+</ul>
+<p><br><strong>简单来说，假设知道一个待识别的物体左上角顶点处于（x, y），那么长和宽分别设置多少呢？设置小了，可能没有办法得到正确要识别的物体；设置大了，可能又把要分开区分的两个或多个物体合在了一起。</strong><br><br><br>因此，这种传统的做法产生的搜索空间基本可以认为是无穷尽的。<br><br><br><strong>那么自然而然地，我们的优化的想法肯定是减少搜索空间的大小！怎么做呢？</strong><br><br><br>答案说难也不难，就是<strong>只找哪些可能是物体的区域。从区域这个维度进行搜索，而不是全图像的像素级查询。</strong><br></p>
+<blockquote>
+<p>全图搜索绝大多数的搜索像素包含区域是不包含物体的，实质上是浪费，可以通过如下两张图进行直观对比。</p>
+</blockquote>
+<p><br><img src="https://cdn.nlark.com/yuque/0/2020/jpeg/520564/1586190762414-d187819a-a5f8-467c-ac0e-b6f4fdb0facd.jpeg#align=left&amp;display=inline&amp;height=416&amp;originHeight=416&amp;originWidth=813&amp;size=0&amp;status=done&amp;style=none&amp;width=813" alt=""><br><br><br><img src="https://cdn.nlark.com/yuque/0/2020/jpeg/520564/1586190762646-b0f5a4d4-ea6d-4223-a427-3dcab2360020.jpeg#align=left&amp;display=inline&amp;height=389&amp;originHeight=389&amp;originWidth=794&amp;size=0&amp;status=done&amp;style=none&amp;width=794" alt=""><br><br><br>基于此，作者首先利用图像分割的想法，来获取可能是物体的区域；<strong>当然，这种层次的分割肯定不准<br><br><br>进一步地，考虑掉物体之间诸如包含等关系，通过</strong>合并<strong>的方式来构建</strong>层次化**的潜在物体区域。<br><br><br>所以整篇论文的核心就可以归纳为如下的数学公式：<br><br><br><img src="https://cdn.nlark.com/yuque/0/2020/png/520564/1586190762438-1360cd20-f297-4977-8835-07cd1d7ac43b.png#align=left&amp;display=inline&amp;height=389&amp;originHeight=389&amp;originWidth=452&amp;size=0&amp;status=done&amp;style=none&amp;width=452" alt=""><br></p>
+<ul>
+<li>通过图像分割算法得到初始区域集合 R = {r1, ….. rn}，这个很容易理解吧，就是图像分割。</li>
+<li>设定一个相似集合 S，初始为<strong>空</strong>。</li>
+<li>对于初始区域集合<strong>相邻</strong>中的每一对(ri, rj)，计算<strong>相似度（下文会说如何计算相似度）</strong>，得到 s(ri, rj)，将其加入之前的相似集合 S 中。</li>
+<li>当 S 不为空的时候，从 S 中获取相似度最大的一对 s(ri, rj)，将这两个 ri, rj 区域合并，称为 rt。</li>
+<li>把所有和 ri, rj 相关的<strong>相似度对</strong>都从 S 中移除掉。（ri, rj 已经不存在了，变身为 rt）</li>
+<li>把新得到的 rt，在分别和其邻区域的 rx 们，计算相似度对，存入 S 中。</li>
+<li>把 rt 加入到区域集合 R 中。</li>
+<li>重复步骤，知道合并到最后只有一个区域了（即 S 为空）。</li>
+</ul>
+<p><br>这个时候，R 集合中的所有区域，就是通过 Selective Search 得到的候选框区域。<br><br><br><strong>值得注意的是，这种计算方式得到的 R，本身就包含了多层次的关系。</strong><br></p>
+<p><a name="3a2cccf8"></a></p>
+<h4 id="如何合并">如何合并</h4><p><br>前面我们提到了，我们初始的待定区域是基于图像分割得到的一批候选集，但是这些候选集的质量还比较“糙”，粒度也不一定对，需要合并甚至多次合并来处理一下。<strong>因此，如何合并也是一个相对值得思考的问题。</strong><br><strong><br></strong><img src="https://cdn.nlark.com/yuque/0/2020/png/520564/1586190829238-e23f2c94-b271-499f-9cc7-230e005a8d94.png#align=left&amp;display=inline&amp;height=522&amp;name=%E6%88%AA%E5%B1%8F2020-04-07%E4%B8%8A%E5%8D%8812.33.29.png&amp;originHeight=522&amp;originWidth=1656&amp;size=1153243&amp;status=done&amp;style=none&amp;width=1656" alt="截屏2020-04-07上午12.33.29.png"><strong><br></strong></p>
+<blockquote>
+<p>上两张图不难看出，初始化的图像分割对于目标检测来说是不能直接使用的。</p>
+</blockquote>
+<p><br><strong>其实这篇文章，作者也坦诚道：图片的样式千变万化，某些图片里面可行的方案到了另外一些图片中就不适用了。</strong> 因此，作者采用了多种方案混合的合并方法。<br></p>
+<ul>
+<li>比如，背景色大块区域和前景色不同的主体可以很明显区分。</li>
+<li>比如，材质 / 纹理等也可以比较明显区分出待检测的物体。</li>
+<li>比如，形状和大小也可以做为检测手段区分待检测物体。</li>
+</ul>
+<p><br>有了这些可以参考的思路，作者设计了<strong>四合一的合并公式。</strong><br></p>
+<ul>
+<li>颜色相似度</li>
+<li>纹理相似度，这里使用了 SIFT 算法。</li>
+<li>小区域合并优先级度。这里解释下，作者为了避免出现“大鱼吃小鱼”的现象，即一块区域不断膨胀，吞并周围区域，所以采用了尽量将小区域先分别合并，始终保持大小类似的方式。</li>
+<li>距离。如果区域ri包含在rj内，毫无疑问应该立刻合并，另一方面，如果ri很难与rj相接，不应该合并在一块。这里定义区域的合适度距离主要是为了衡量两个区域是否更加“吻合”，其指标是合并后的区域的Bounding Box（能够框住区域的最小矩形BBij）越小，其吻合度越高。</li>
+</ul>
+<p><a name="72f1243d"></a></p>
+<h3 id="Selective_Search_代码理解">Selective Search 代码理解</h3><p><br>读顶尖学术会议论文的好处就是一般对应的代码都会开源，即使论文读的云里雾里，但是只要能大致理解思路，配合源代码深入分析，总是能懂。<br><br><br>这篇论文对应的代码开源在<a href="https://github.com/AlpacaDB/selectivesearch" target="_blank" rel="external">Selective Search</a>，代码总计也就 <strong>300+</strong> 行（当然有些非核心代码直接依赖了库），很容易理解。<br></p>
+<figure class="highlight sql"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br><span class="line">34</span><br><span class="line">35</span><br><span class="line">36</span><br><span class="line">37</span><br><span class="line">38</span><br><span class="line">39</span><br><span class="line">40</span><br><span class="line">41</span><br><span class="line">42</span><br><span class="line">43</span><br><span class="line">44</span><br><span class="line">45</span><br><span class="line">46</span><br><span class="line">47</span><br><span class="line">48</span><br><span class="line">49</span><br><span class="line">50</span><br><span class="line">51</span><br><span class="line">52</span><br><span class="line">53</span><br><span class="line">54</span><br><span class="line">55</span><br><span class="line">56</span><br><span class="line">57</span><br><span class="line">58</span><br><span class="line">59</span><br><span class="line">60</span><br><span class="line">61</span><br><span class="line">62</span><br><span class="line">63</span><br><span class="line">64</span><br><span class="line">65</span><br><span class="line">66</span><br><span class="line">67</span><br><span class="line">68</span><br><span class="line">69</span><br><span class="line">70</span><br><span class="line">71</span><br></pre></td><td class="code"><pre><span class="line">def selective_search(</span><br><span class="line">        im_orig, scale=1.0, sigma=0.8, min_size=50):</span><br><span class="line">    '''Selective Search</span><br><span class="line">    </span><br><span class="line"> 	 assert im_orig.shape[2] == 3, "3ch image is expected"</span><br><span class="line"></span><br><span class="line">    # <span class="operator"><span class="keyword">load</span> image <span class="keyword">and</span> <span class="keyword">get</span> smallest regions</span><br><span class="line">    # region label <span class="keyword">is</span> <span class="keyword">stored</span> <span class="keyword">in</span> the <span class="number">4</span>th <span class="keyword">value</span> <span class="keyword">of</span> <span class="keyword">each</span> pixel [r,<span class="keyword">g</span>,b,(region)]</span><br><span class="line">    </span><br><span class="line">    </span><br><span class="line">   【<span class="number">1</span>】图像分割</span><br><span class="line">    img = _generate_segments(im_orig, scale, sigma, min_size)</span><br><span class="line"></span><br><span class="line">    <span class="keyword">if</span> img <span class="keyword">is</span> <span class="keyword">None</span>:</span><br><span class="line">        <span class="keyword">return</span> <span class="keyword">None</span>, &#123;&#125;</span><br><span class="line">        </span><br><span class="line">        </span><br><span class="line">	【<span class="number">2</span>】获取对象总大小</span><br><span class="line">    imsize = img.shape[<span class="number">0</span>] * img.shape[<span class="number">1</span>]</span><br><span class="line">    </span><br><span class="line">   【<span class="number">3</span>】获取初始集合</span><br><span class="line">    R = _extract_regions(img)</span><br><span class="line"></span><br><span class="line">    # <span class="keyword">extract</span> neighbouring information</span><br><span class="line">    </span><br><span class="line">   【<span class="number">4</span>】计算相邻的区域</span><br><span class="line">    neighbours = _extract_neighbours(R)</span><br><span class="line"></span><br><span class="line">   【<span class="number">5</span>】计算初始化的相邻区域相似度</span><br><span class="line">    S = &#123;&#125;</span><br><span class="line">    <span class="keyword">for</span> (ai, ar), (bi, br) <span class="keyword">in</span> neighbours:</span><br><span class="line">        S[(ai, bi)] = _calc_sim(ar, br, imsize)</span><br><span class="line">        </span><br><span class="line">        </span><br><span class="line">	【<span class="number">6</span>】就是之前我们说的搜索过程</span><br><span class="line">    # hierarchal <span class="keyword">search</span></span><br><span class="line">    <span class="keyword">while</span> S != &#123;&#125;:</span><br><span class="line"></span><br><span class="line">        # <span class="keyword">get</span> highest similarity</span><br><span class="line">        <span class="keyword">i</span>, j = sorted(S.items(), <span class="keyword">key</span>=lambda <span class="keyword">i</span>: <span class="keyword">i</span>[<span class="number">1</span>])[-<span class="number">1</span>][<span class="number">0</span>]</span><br><span class="line"></span><br><span class="line">        # <span class="keyword">merge</span> <span class="keyword">corresponding</span> regions</span><br><span class="line">        <span class="keyword">t</span> = <span class="keyword">max</span>(R.<span class="keyword">keys</span>()) + <span class="number">1.0</span></span><br><span class="line">        R[<span class="keyword">t</span>] = _merge_regions(R[<span class="keyword">i</span>], R[j])</span><br><span class="line"></span><br><span class="line">        # mark similarities <span class="keyword">for</span> regions <span class="keyword">to</span> be removed</span><br><span class="line">        key_to_delete = []</span><br><span class="line">        <span class="keyword">for</span> <span class="keyword">k</span>, v <span class="keyword">in</span> <span class="keyword">list</span>(S.items()):</span><br><span class="line">            <span class="keyword">if</span> (<span class="keyword">i</span> <span class="keyword">in</span> <span class="keyword">k</span>) <span class="keyword">or</span> (j <span class="keyword">in</span> <span class="keyword">k</span>):</span><br><span class="line">                key_to_delete.append(<span class="keyword">k</span>)</span><br><span class="line"></span><br><span class="line">        # remove <span class="keyword">old</span> similarities <span class="keyword">of</span> related regions</span><br><span class="line">        <span class="keyword">for</span> <span class="keyword">k</span> <span class="keyword">in</span> key_to_delete:</span><br><span class="line">            del S[<span class="keyword">k</span>]</span><br><span class="line"></span><br><span class="line">        # calculate similarity <span class="keyword">set</span> <span class="keyword">with</span> the <span class="keyword">new</span> region</span><br><span class="line">        <span class="keyword">for</span> <span class="keyword">k</span> <span class="keyword">in</span> [a <span class="keyword">for</span> a <span class="keyword">in</span> key_to_delete <span class="keyword">if</span> a != (<span class="keyword">i</span>, j)]:</span><br><span class="line">            <span class="keyword">n</span> = <span class="keyword">k</span>[<span class="number">1</span>] <span class="keyword">if</span> <span class="keyword">k</span>[<span class="number">0</span>] <span class="keyword">in</span> (<span class="keyword">i</span>, j) <span class="keyword">else</span> <span class="keyword">k</span>[<span class="number">0</span>]</span><br><span class="line">            S[(<span class="keyword">t</span>, <span class="keyword">n</span>)] = _calc_sim(R[<span class="keyword">t</span>], R[<span class="keyword">n</span>], imsize)</span><br><span class="line"></span><br><span class="line">    regions = []</span><br><span class="line">    <span class="keyword">for</span> <span class="keyword">k</span>, r <span class="keyword">in</span> <span class="keyword">list</span>(R.items()):</span><br><span class="line">        regions.append(&#123;</span><br><span class="line">            <span class="string">'rect'</span>: (</span><br><span class="line">                r[<span class="string">'min_x'</span>], r[<span class="string">'min_y'</span>],</span><br><span class="line">                r[<span class="string">'max_x'</span>] - r[<span class="string">'min_x'</span>], r[<span class="string">'max_y'</span>] - r[<span class="string">'min_y'</span>]),</span><br><span class="line">            <span class="string">'size'</span>: r[<span class="string">'size'</span>],</span><br><span class="line">            <span class="string">'labels'</span>: r[<span class="string">'labels'</span>]</span><br><span class="line">        &#125;)</span><br><span class="line"></span><br><span class="line">    <span class="keyword">return</span> img, regions</span></span><br></pre></td></tr></table></figure>
+<ul>
+<li>第一步，通过经典的图像分割算法获取分割的块。这一步留到后续研究 felzenszwalb 算法再说吧，<strong>暂时我也不会。</strong></li>
+<li>其实第一步已经得到对应的区域了，但是在算法实现上只是做了一个个标记，所以还需要处理下，变成我们需要的 R 集合。这步里面已经做好了大量的计算处理，后续直接按照论文<strong>层级化</strong>调用就行。</li>
+<li>计算相邻的区域，对应产生初始的 S 集合。</li>
+<li>对相邻的区域计算最大相似度，然后合并。</li>
+<li>后面就重复我上问的内容了。</li>
+</ul>
+<p><br>大致内容就这样，当然细节还有不少值得研究的，可以继续深入，后续再读读。<br><br><br>最后，作者这 Python 写的真是溜。</p>
+
+      
+    </div>
+    <footer class="article-footer">
+      <a data-url="http://satanwoo.github.io/2020/04/07/Selective-Search/" data-id="ck8op7oq4001yw8i1ahdfzyfa" class="article-share-link">Share</a>
+      
+        <a href="http://satanwoo.github.io/2020/04/07/Selective-Search/#disqus_thread" class="article-comment-link">Comments</a>
+      
+      
+  <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Machine-Learning/">Machine Learning</a></li></ul>
+
+    </footer>
+  </div>
+  
+    
+<nav id="article-nav">
+  
+  
+    <a href="/2020/02/06/MNN-Visual/" id="article-nav-older" class="article-nav-link-wrap">
+      <strong class="article-nav-caption">Older</strong>
+      <div class="article-nav-title">实现 MNN 模型的可视化工具</div>
+    </a>
+  
+</nav>
+
+  
+</article>
+
+<div id="disqus_thread"></div>
+<script>
+
+/**
+*  RECOMMENDED CONFIGURATION VARIABLES: EDIT AND UNCOMMENT THE SECTION BELOW TO INSERT DYNAMIC VALUES FROM YOUR PLATFORM OR CMS.
+*  LEARN WHY DEFINING THESE VARIABLES IS IMPORTANT: https://disqus.com/admin/universalcode/#configuration-variables*/
+/*
+var disqus_config = function () {
+this.page.url = PAGE_URL;  // Replace PAGE_URL with your page's canonical URL variable
+this.page.identifier = PAGE_IDENTIFIER; // Replace PAGE_IDENTIFIER with your page's unique identifier variable
+};
+*/
+(function() { // DON'T EDIT BELOW THIS LINE
+var d = document, s = d.createElement('script');
+s.src = 'https://satanwoo-2.disqus.com/embed.js';
+s.setAttribute('data-timestamp', +new Date());
+(d.head || d.body).appendChild(s);
+})();
+</script>
+<noscript>Please enable JavaScript to view the <a href="https://disqus.com/?ref_noscript">comments powered by Disqus.</a></noscript>
+                                
+  <section id="comments">
+    <div id="disqus_thread">
+      <noscript>Please enable JavaScript to view the <a href="//disqus.com/?ref_noscript">comments powered by Disqus.</a></noscript>
+    </div>
+  </section>
+</section>
+        
+          <aside id="sidebar">
+  
+    
+  
+    
+  <div class="widget-wrap">
+    <h3 class="widget-title">Tags</h3>
+    <div class="widget">
+      <ul class="tag-list"><li class="tag-list-item"><a class="tag-list-link" href="/tags/Android/">Android</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/C/">C</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/C/">C++</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Growth/">Growth</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/JavaScript/">JavaScript</a><span class="tag-list-count">4</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Machine-Learning/">Machine Learning</a><span class="tag-list-count">4</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Math/">Math</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Performance/">Performance</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/R/">R</a><span class="tag-list-count">2</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Reverse-Engineering/">Reverse Engineering</a><span class="tag-list-count">6</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Swift/">Swift</a><span class="tag-list-count">6</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/XNU/">XNU</a><span class="tag-list-count">2</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/c/">c++</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/iOS/">iOS</a><span class="tag-list-count">44</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/shell/">shell</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/汇编/">汇编</a><span class="tag-list-count">1</span></li></ul>
+    </div>
+  </div>
+
+  
+    
+  <div class="widget-wrap">
+    <h3 class="widget-title">Tag Cloud</h3>
+    <div class="widget tagcloud">
+      <a href="/tags/Android/" style="font-size: 10px;">Android</a> <a href="/tags/C/" style="font-size: 10px;">C</a> <a href="/tags/C/" style="font-size: 10px;">C++</a> <a href="/tags/Growth/" style="font-size: 10px;">Growth</a> <a href="/tags/JavaScript/" style="font-size: 15px;">JavaScript</a> <a href="/tags/Machine-Learning/" style="font-size: 15px;">Machine Learning</a> <a href="/tags/Math/" style="font-size: 10px;">Math</a> <a href="/tags/Performance/" style="font-size: 10px;">Performance</a> <a href="/tags/R/" style="font-size: 12.5px;">R</a> <a href="/tags/Reverse-Engineering/" style="font-size: 17.5px;">Reverse Engineering</a> <a href="/tags/Swift/" style="font-size: 17.5px;">Swift</a> <a href="/tags/XNU/" style="font-size: 12.5px;">XNU</a> <a href="/tags/c/" style="font-size: 10px;">c++</a> <a href="/tags/iOS/" style="font-size: 20px;">iOS</a> <a href="/tags/shell/" style="font-size: 10px;">shell</a> <a href="/tags/汇编/" style="font-size: 10px;">汇编</a>
+    </div>
+  </div>
+
+  
+    
+  <div class="widget-wrap">
+    <h3 class="widget-title">Archives</h3>
+    <div class="widget">
+      <ul class="archive-list"><li class="archive-list-item"><a class="archive-list-link" href="/archives/2020/04/">April 2020</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2020/02/">February 2020</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2019/12/">December 2019</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2019/10/">October 2019</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2019/07/">July 2019</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2019/01/">January 2019</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2018/12/">December 2018</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2018/10/">October 2018</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2018/05/">May 2018</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2018/04/">April 2018</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2018/02/">February 2018</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2018/01/">January 2018</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/11/">November 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/10/">October 2017</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/09/">September 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/08/">August 2017</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/07/">July 2017</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/06/">June 2017</a><span class="archive-list-count">3</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/04/">April 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/01/">January 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/10/">October 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/09/">September 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/07/">July 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/05/">May 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/04/">April 2016</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/03/">March 2016</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/02/">February 2016</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/12/">December 2015</a><span class="archive-list-count">6</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/11/">November 2015</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/10/">October 2015</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/09/">September 2015</a><span class="archive-list-count">4</span></li></ul>
+    </div>
+  </div>
+
+  
+    
+  <div class="widget-wrap">
+    <h3 class="widget-title">Recents</h3>
+    <div class="widget">
+      <ul>
+        
+          <li>
+            <a href="/2020/04/07/Selective-Search/">目标检测之 Selective Search</a>
+          </li>
+        
+          <li>
+            <a href="/2020/02/06/MNN-Visual/">实现 MNN 模型的可视化工具</a>
+          </li>
+        
+          <li>
+            <a href="/2019/12/01/SIMD-1/">了解 SIMD 指令</a>
+          </li>
+        
+          <li>
+            <a href="/2019/10/27/MNN1/">浅谈移动工程师跨界机器学习之路</a>
+          </li>
+        
+          <li>
+            <a href="/2019/07/07/RevisitAutorelease2/">Revisit iOS Autorelease之二</a>
+          </li>
+        
+      </ul>
+    </div>
+  </div>
+
+  
+</aside>
+        
+      </div>
+      <footer id="footer">
+  
+  <div class="outer">
+    <div id="footer-info" class="inner">
+      &copy; 2020 SatanWoo<br>
+      Powered by <a href="http://hexo.io/" target="_blank">Hexo</a>
+    </div>
+  </div>
+</footer>
+    </div>
+    <nav id="mobile-nav">
+  
+    <a href="/" class="mobile-nav-link">Home</a>
+  
+    <a href="/archives" class="mobile-nav-link">Archives</a>
+  
+    <a href="/sitemap.xml" class="mobile-nav-link">map</a>
+  
+</nav>
+    
+<script>
+  var disqus_shortname = 'satanwoo-2';
+  
+  var disqus_url = 'http://satanwoo.github.io/2020/04/07/Selective-Search/';
+  
+  (function(){
+    var dsq = document.createElement('script');
+    dsq.type = 'text/javascript';
+    dsq.async = true;
+    dsq.src = '//' + disqus_shortname + '.disqus.com/embed.js';
+    (document.getElementsByTagName('head')[0] || document.getElementsByTagName('body')[0]).appendChild(dsq);
+  })();
+</script>
+
+
+
+  <link rel="stylesheet" href="/fancybox/jquery.fancybox.css" type="text/css">
+  <script src="/fancybox/jquery.fancybox.pack.js" type="text/javascript"></script>
+
+
+<script src="/js/script.js" type="text/javascript"></script>
+
+  </div>
+</body>
+</html>

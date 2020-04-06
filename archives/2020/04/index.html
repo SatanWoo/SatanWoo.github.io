@@ -3,30 +3,17 @@
 <head>
   <meta charset="utf-8">
   
-  <title>Check Pods Manifest.lock | SatanWoo</title>
+  <title>Archives: 2020/4 | SatanWoo</title>
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
-  <meta name="description" content="初次看到这个题目的你，可能还不了解这是个啥。但是，我想下面这个错误提示，你肯定会非常熟悉：
-error: The sandbox is not in sync with the  
-Podfile.lock. Run &apos;pod install&apos; or update 
-your CocoaPods installation.
-没错，当我们使用cocoapods的时候，经常会遇到的一个问题。其原因在于">
-<meta property="og:type" content="article">
-<meta property="og:title" content="Check Pods Manifest.lock">
-<meta property="og:url" content="http://satanwoo.github.io/2016/02/27/check-manifest/index.html">
+  <meta name="description">
+<meta property="og:type" content="website">
+<meta property="og:title" content="SatanWoo">
+<meta property="og:url" content="http://satanwoo.github.io/archives/2020/04/index.html">
 <meta property="og:site_name" content="SatanWoo">
-<meta property="og:description" content="初次看到这个题目的你，可能还不了解这是个啥。但是，我想下面这个错误提示，你肯定会非常熟悉：
-error: The sandbox is not in sync with the  
-Podfile.lock. Run &apos;pod install&apos; or update 
-your CocoaPods installation.
-没错，当我们使用cocoapods的时候，经常会遇到的一个问题。其原因在于">
-<meta property="og:updated_time" content="2016-02-27T10:31:40.000Z">
+<meta property="og:description">
 <meta name="twitter:card" content="summary">
-<meta name="twitter:title" content="Check Pods Manifest.lock">
-<meta name="twitter:description" content="初次看到这个题目的你，可能还不了解这是个啥。但是，我想下面这个错误提示，你肯定会非常熟悉：
-error: The sandbox is not in sync with the  
-Podfile.lock. Run &apos;pod install&apos; or update 
-your CocoaPods installation.
-没错，当我们使用cocoapods的时候，经常会遇到的一个问题。其原因在于">
+<meta name="twitter:title" content="SatanWoo">
+<meta name="twitter:description">
   
     <link rel="alternative" href="/atom.xml" title="SatanWoo" type="application/atom+xml">
   
@@ -73,130 +60,39 @@ your CocoaPods installation.
   </div>
 </header>
       <div class="outer">
-        <section id="main"><article id="post-check-manifest" class="article article-type-post" itemscope itemprop="blogPost">
-  <div class="article-meta">
-    <a href="/2016/02/27/check-manifest/" class="article-date">
-  <time datetime="2016-02-27T10:23:21.000Z" itemprop="datePublished">2016-02-27</time>
-</a>
-    
-  </div>
-  <div class="article-inner">
-    
-    
-      <header class="article-header">
-        
+        <section id="main">
   
-    <h1 class="article-title" itemprop="name">
-      Check Pods Manifest.lock
+  
+    
+    
+      
+      
+      <section class="archives-wrap">
+        <div class="archive-year-wrap">
+          <a href="/archives/2020" class="archive-year">2020</a>
+        </div>
+        <div class="archives">
+    
+    <article class="archive-article archive-type-post">
+  <div class="archive-article-inner">
+    <header class="archive-article-header">
+      <a href="/2020/04/07/Selective-Search/" class="archive-article-date">
+  <time datetime="2020-04-06T16:36:44.000Z" itemprop="datePublished">Apr 7</time>
+</a>
+      
+  
+    <h1 itemprop="name">
+      <a class="archive-article-title" href="/2020/04/07/Selective-Search/">目标检测之 Selective Search</a>
     </h1>
   
 
-      </header>
-    
-    <div class="article-entry" itemprop="articleBody">
-      
-        <p>初次看到这个题目的你，可能还不了解这是个啥。但是，我想下面这个错误提示，你肯定会非常熟悉：</p>
-<pre><code><span class="keyword">error</span>: The sandbox <span class="keyword">is</span> <span class="keyword">not</span> <span class="keyword">in</span> sync <span class="keyword">with</span> <span class="keyword">the</span>  
-Podfile.lock. Run 'pod install' <span class="keyword">or</span> update 
-your CocoaPods installation.
-</code></pre><p>没错，当我们使用<code>cocoapods</code>的时候，经常会遇到的一个问题。其原因在于我们本地的<code>manifest.lock</code>和通过<code>git</code>同步的<code>Pod.lock</code>的产生了差异。</p>
-<p><strong>注：manifest.lock简单可以理解为我们在本地执行一次<code>pod install</code>后生成的当前Podfile的状态的表征文件。而Pod.lock是同步他人更新过Podfile后的状态。</strong></p>
-<p>那么，这个差异报错的原因是什么呢？我们可以打开Xcode项目中对应的<code>Target</code>的<code>Build Phase</code>，可以发现，其中存在在一项名为<code>Check Pods Manifest.lock</code>，是一个<code>shell script</code>，内容如下：</p>
-<pre><code>// <span class="number">1.</span>
-diff <span class="string">"${PODS_ROOT}/../Podfile.lock"</span> <span class="string">"${PODS_ROOT}/Manifest.lock"</span> &gt; /dev/null
-
-// <span class="number">2.</span>
-<span class="keyword">if</span> <span class="string">[[ $? != 0 ]]</span> ; <span class="keyword">then</span>
-
-// <span class="number">3.</span>
-    cat &lt;&lt; EOM
-<span class="built_in">error</span>: The sandbox is <span class="keyword">not</span> <span class="keyword">in</span> sync with the Podfile.lock. Run <span class="string">'pod install'</span> <span class="keyword">or</span> update your CocoaPods installation.
-EOM
-    exit <span class="number">1</span>
-fi
-</code></pre><p>我们来解读下这段代码的意思：</p>
-<ol>
-<li><p>通过diff命令来检查<code>Podfile.lock</code>和<code>Manifest.lock</code>的区别。这个命令中的<code>&gt; /dev/null</code> 可以视为一个<strong>黑洞</strong>，等价于一个只读文件，所有写入它的内容都会永远丢失. 而尝试从它那儿读取内容则什么也读不到。由于在执行<code>diff</code>命令的过程中可能产生大量的标准输出，可能会干扰我们的的工作流程执行，所以我们将它们全部丢弃给<strong>黑洞</strong>，只关心<strong>返回值</strong>。</p>
-</li>
-<li><p><code>if [[ $? != 0 ]] then</code>这个命令指的上一个命令的返回值如果不等于0，就执行xxxx。其中$?也就代表着上一个命令<code>diff</code>的返回值。</p>
-</li>
-<li><p>好，如果返回值不为0，说明有差异，因此通过<code>cat &lt;&lt; EOM</code> 和 <code>EOM</code>将处于这两者之前的内容输出到标准输出。</p>
-</li>
-</ol>
-<h3 id="改造脚本">改造脚本</h3><p>好，既然我们已经读懂了上述的<code>shell script</code>，我们不如将这个错误的提示来进行整改，当有差异的情况下，自动去进行<code>pod install</code>。</p>
-<p>整体改造后的代码如下：</p>
-<pre><code><span class="comment">// 1.</span>
-diff <span class="string">"<span class="subst">${PODS_ROOT}</span>/../Podfile.lock"</span> <span class="string">"<span class="subst">${PODS_ROOT}</span>/Manifest.lock"</span> &gt; /dev/<span class="keyword">null</span>
-
-<span class="comment">// 2.</span>
-<span class="keyword">if</span> [[ $? != <span class="number">0</span> ]] ; then
-
-<span class="comment">// 3.</span>
-    pod install --project-directory=<span class="string">"<span class="subst">${PODS_ROOT}</span>/../"</span>
-fi
-</code></pre>
-      
-    </div>
-    <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/02/27/check-manifest/" data-id="ck8op7oom0016w8i16a3xlw6n" class="article-share-link">Share</a>
-      
-        <a href="http://satanwoo.github.io/2016/02/27/check-manifest/#disqus_thread" class="article-comment-link">Comments</a>
-      
-      
-  <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/shell/">shell</a></li></ul>
-
-    </footer>
+    </header>
   </div>
-  
-    
-<nav id="article-nav">
-  
-    <a href="/2016/03/14/DXXcodeConsoleUnicodePlugin/" id="article-nav-newer" class="article-nav-link-wrap">
-      <strong class="article-nav-caption">Newer</strong>
-      <div class="article-nav-title">
-        
-          DXXcodeConsoleUnicodePlugin源码解析
-        
-      </div>
-    </a>
-  
-  
-    <a href="/2016/02/27/pod-install-plugin/" id="article-nav-older" class="article-nav-link-wrap">
-      <strong class="article-nav-caption">Older</strong>
-      <div class="article-nav-title">开发一个简单的Pod Install 插件</div>
-    </a>
-  
-</nav>
-
-  
 </article>
-
-<div id="disqus_thread"></div>
-<script>
-
-/**
-*  RECOMMENDED CONFIGURATION VARIABLES: EDIT AND UNCOMMENT THE SECTION BELOW TO INSERT DYNAMIC VALUES FROM YOUR PLATFORM OR CMS.
-*  LEARN WHY DEFINING THESE VARIABLES IS IMPORTANT: https://disqus.com/admin/universalcode/#configuration-variables*/
-/*
-var disqus_config = function () {
-this.page.url = PAGE_URL;  // Replace PAGE_URL with your page's canonical URL variable
-this.page.identifier = PAGE_IDENTIFIER; // Replace PAGE_IDENTIFIER with your page's unique identifier variable
-};
-*/
-(function() { // DON'T EDIT BELOW THIS LINE
-var d = document, s = d.createElement('script');
-s.src = 'https://satanwoo-2.disqus.com/embed.js';
-s.setAttribute('data-timestamp', +new Date());
-(d.head || d.body).appendChild(s);
-})();
-</script>
-<noscript>Please enable JavaScript to view the <a href="https://disqus.com/?ref_noscript">comments powered by Disqus.</a></noscript>
-                                
-  <section id="comments">
-    <div id="disqus_thread">
-      <noscript>Please enable JavaScript to view the <a href="//disqus.com/?ref_noscript">comments powered by Disqus.</a></noscript>
-    </div>
-  </section>
+  
+  
+    </div></section>
+  
 </section>
         
           <aside id="sidebar">
@@ -287,13 +183,11 @@ s.setAttribute('data-timestamp', +new Date());
 <script>
   var disqus_shortname = 'satanwoo-2';
   
-  var disqus_url = 'http://satanwoo.github.io/2016/02/27/check-manifest/';
-  
   (function(){
     var dsq = document.createElement('script');
     dsq.type = 'text/javascript';
     dsq.async = true;
-    dsq.src = '//' + disqus_shortname + '.disqus.com/embed.js';
+    dsq.src = '//' + disqus_shortname + '.disqus.com/count.js';
     (document.getElementsByTagName('head')[0] || document.getElementsByTagName('body')[0]).appendChild(dsq);
   })();
 </script>
