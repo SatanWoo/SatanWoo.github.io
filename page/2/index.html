@@ -62,6 +62,134 @@
       <div class="outer">
         <section id="main">
   
+    <article id="post-LLDB-1" class="article article-type-post" itemscope itemprop="blogPost">
+  <div class="article-meta">
+    <a href="/2015/12/11/LLDB-1/" class="article-date">
+  <time datetime="2015-12-11T08:50:04.000Z" itemprop="datePublished">2015-12-11</time>
+</a>
+    
+  </div>
+  <div class="article-inner">
+    
+    
+      <header class="article-header">
+        
+  
+    <h1 itemprop="name">
+      <a class="article-title" href="/2015/12/11/LLDB-1/">浅入浅出LLDB（1）</a>
+    </h1>
+  
+
+      </header>
+    
+    <div class="article-entry" itemprop="articleBody">
+      
+        <p>这周开始好好钻研一下LLDB相关的知识，这是一系列的文章。有些初级知识可能大家都有所涉猎，嘿嘿，懂得自然懂，看我的博客，什么时候会收获小。</p>
+<h3 id="基础语法">基础语法</h3><p>1.<code>help</code> 有啥不会，就直接输入help，你会得到如下的一系列信息，</p>
+<pre><code>command           -- A <span class="keyword">set</span> <span class="keyword">of</span> commands <span class="keyword">for</span> managing <span class="keyword">or</span> customizing the
+                   debugger commands.
+disassemble       -- Disassemble bytes <span class="keyword">in</span> the current <span class="keyword">function</span>, <span class="keyword">or</span> elsewhere
+                   <span class="keyword">in</span> the executable program <span class="keyword">as</span> specified <span class="keyword">by</span> the user.
+</code></pre><p>2.<code>print</code> 输出变量值<br>比如，对于如下的程序语句 <code>let haha = 5;</code> 你只要在LLDB里面输入 <code>print haha</code> 就可以得到如下输出结果。</p>
+<pre><code>(lldb) p haha
+(Int) <span class="variable">$R0</span> = <span class="number">5</span>
+</code></pre><p><strong>请注意</strong>，在<a href="http://objccn.io/issue-19-2/" target="_blank" rel="external">与调试器共舞- LLDB 的华尔兹</a>一文中曾经提出会输出类似于 <code>$0 = 5</code>，并指出<strong>$0是当前的输出值</strong>。这个说话其实是不严谨的，正确的说法是，应该是<strong>当前的haha的值5存在了R0寄存器里。</strong></p>
+<p>比如，当我们构建如下的程序语句时，</p>
+<pre><code><span class="keyword">let</span> haha = <span class="number">5</span>;
+<span class="keyword">let</span> <span class="keyword">object</span> = <span class="string">"jkjksdjf"</span>;
+</code></pre><p>我们在分别<code>print haha</code>以及    <code>print object</code>就会分别得到<code>(Int) $R0 = 5</code>和<code>(String) $R1 = &quot;jkjksdjf&quot;</code></p>
+<p>这说明haha的值和object的值分别以int型和string型存在了R0和R1寄存器之中。</p>
+<p><strong>当然，图快速的话</strong>，可以像我上面一样将print简写成p。</p>
+<p>3.<code>po</code><br>输出变量值  </p>
+<p>哎，有人奇怪了，po也是输出变量值，那和p有啥区别啊？本质上没啥区别，如果真要说，就是<strong>po = e -O –</strong>，具体我们后续再说啦。</p>
+<p>4.<code>breakpoubt l</code> 输出所有的断点，可以得到如下的结果</p>
+<pre><code>Current breakpoints:
+<span class="number">1</span>: file = <span class="string">'xxx/ViewController.swift'</span>, line = <span class="number">19</span>, locations = <span class="number">1</span>, resolved = <span class="number">1</span>, hit count = <span class="number">1</span>
+
+<span class="number">1.1</span>: where = xxx<span class="class">.ViewController</span><span class="class">.viewDidLoad</span> (xxx.ViewController)() -&gt; () + <span class="number">131</span> at ViewController<span class="class">.swift</span>:<span class="number">19</span>, <span class="tag">address</span> = <span class="number">0</span>x0000000108d0a443, resolved, hit count = <span class="number">1</span> 
+</code></pre><p>其中 <strong>1: file</strong>的这个1就是ID号。<br>那这里的1.1是什么鬼？<strong>嘿嘿，当里使用Symbolic Breakpoint的时候，你一个断点很有可能截获了多个地方，比如AViewController和BViewController的viewDidLoad都被加上了断点，这个时候就需要靠诸如1.1和1.2之类的细分ID来进行区别了。</strong></p>
+<p>当然，有人会问，输出这个断点有什么用啊。嘿嘿，当你使用<strong>Xcode Symbolic Breakpoint</strong>的时候，你就会发现究竟在多少个地方下了断点了。</p>
+<p><strong>同样的</strong>，你可以将breakpoint简写成br。</p>
+<p>5.<code>br delete ID</code> 这里的ID就是之前的断点的ID号<br>通过这个命令，可以删除ID对应的断点</p>
+<p>6.<code>br e ID</code> 启用一个ID号对应的断点</p>
+<p>7.<code>br di ID</code> 禁用一个ID号对应的断点</p>
+<p>8.<code>b xxx.swift:lineY</code> 在xxx文件的第lineY行设置一个断点<br>如 <code>b ViewController.swift:10</code> 就是在ViewController的第10号下了一个断点。</p>
+<p><strong>需要注意的是，</strong>通过b命令设置的断点，无法直观的在Xcode界面上显示出来，而<code>br delete</code>删除一个断点可以直接在Xcode上看出效果。</p>
+<p>9.<code>br set -n functionName</code> 对functionName设置Symbolic Breakpoint<br>如<code>br set -n viewDidLoad</code> 就是对所有的viewDidLoad设置了Symboloc Breakpoint</p>
+<p>10.<code>br mod -C &quot;Condition&quot; ID</code> 对ID号对应的breakpoint添加条件触发<br>假设我们有下面这样的一段代码</p>
+<pre><code><span class="number">1.</span> <span class="comment">//ViewController.swift</span>
+<span class="number">2.</span> <span class="keyword">for</span> var value in money {
+<span class="number">3.</span>     totalValue += value
+<span class="number">4.</span> }
+</code></pre><p>我们首先先使用<code>b ViewController.swift:3</code>设置一个断点，然后使用<code>br l</code>查询到对应的ID为3。<br>然后我们使用<code>br mod -C &quot;totalValue &gt; 50&quot; 3</code>对这个断点设置条件触发，条件为<strong>当totalValue 大于50时候才触发</strong>。</p>
+<p>当然，可能有些人会问，如果我不想删除断点，只是想移除条件触发怎么办？很简单，只要输入<code>br mod -C &quot;&quot; ID</code>，将其中的Condition部分设置为空即可。</p>
+<p>11.<code>continue</code> 继续运行程序<br>12.<code>n</code>        step over单步调试<br>13.<code>s</code>        step in进行函数<br>14.<code>finish</code>   step out退出函数</p>
+<h3 id="大杀器">大杀器</h3><p>上面的命令是不是很多，一个个敲实在是太麻烦，那如果我想对一个断点执行多条语句怎么办？<br>嘿嘿，大杀器来了。</p>
+<p><code>br com add ID</code> 对ID对应的断点进入交互式指定。如：</p>
+<pre><code><span class="keyword">br</span> <span class="keyword">com</span> <span class="built_in">add</span> <span class="number">2</span>
+&gt; bt
+&gt; <span class="keyword">continue</span>
+&gt; DONE
+</code></pre><p> 上面的语句指的是，对2号断点进行交互式指定，当这个断点触发的时候，首先执行<code>bt</code>(具体bt命令的意思我们后续再说，粗略理解就是backtrace输出调用栈，可以简单看下面的例子)，然后执行<code>continue</code>，最后通过关键字<strong>Done</strong>退出指定，这里的Done类似于shell里面的exit。</p>
+<pre><code>frame <span class="preprocessor">#<span class="number">0</span>: xxx`xxx.ViewController.viewDidLoad (self=<span class="number">0x00007faf52439c20</span>)() -&gt; () + <span class="number">470</span> at ViewController.swift:<span class="number">27</span></span>
+frame <span class="preprocessor">#<span class="number">1</span>: xxx`@objc xxx.ViewController.viewDidLoad (xxx.ViewController)() -&gt; () + <span class="number">34</span> at ViewController.swift:<span class="number">0</span></span>
+frame <span class="preprocessor">#<span class="number">2</span>: UIKit`-[UIViewController loadViewIfRequired] + <span class="number">1198</span></span>
+frame <span class="preprocessor">#<span class="number">3</span>: UIKit`-[UIViewController view] + <span class="number">27</span></span>
+frame <span class="preprocessor">#<span class="number">4</span>: UIKit`-[UIWindow addRootViewControllerViewIfPossible] + <span class="number">61</span></span>
+frame <span class="preprocessor">#<span class="number">5</span>: UIKit`-[UIWindow _setHidden:forced:] + <span class="number">282</span></span>
+frame <span class="preprocessor">#<span class="number">6</span>: UIKit`-[UIWindow makeKeyAndVisible] + <span class="number">42</span></span>
+frame <span class="preprocessor">#<span class="number">7</span>: UIKit`-[UIApplication _callInitializationDelegatesForMainScene:transitionContext:] + <span class="number">4131</span></span>
+frame <span class="preprocessor">#<span class="number">8</span>: UIKit`-[UIApplication _runWithMainScene:transitionContext:completion:] + <span class="number">1760</span></span>
+frame <span class="preprocessor">#<span class="number">9</span>: UIKit`-[UIApplication workspaceDidEndTransaction:] + <span class="number">188</span></span>
+frame <span class="preprocessor">#<span class="number">10</span>: FrontBoardServices`-[FBSSerialQueue _performNext] + <span class="number">192</span></span>
+frame <span class="preprocessor">#<span class="number">11</span>: FrontBoardServices`-[FBSSerialQueue _performNextFromRunLoopSource] + <span class="number">45</span></span>
+frame <span class="preprocessor">#<span class="number">12</span>: CoreFoundation`__CFRUNLOOP_IS_CALLING_OUT_TO_A_SOURCE0_PERFORM_FUNCTION__ + <span class="number">17</span></span>
+frame <span class="preprocessor">#<span class="number">13</span>: CoreFoundation`__CFRunLoopDoSources0 + <span class="number">556</span></span>
+frame <span class="preprocessor">#<span class="number">14</span>: CoreFoundation`__CFRunLoopRun + <span class="number">867</span></span>
+frame <span class="preprocessor">#<span class="number">15</span>: CoreFoundation`CFRunLoopRunSpecific + <span class="number">488</span></span>
+frame <span class="preprocessor">#<span class="number">16</span>: UIKit`-[UIApplication _run] + <span class="number">402</span></span>
+frame <span class="preprocessor">#<span class="number">17</span>: UIKit`UIApplicationMain + <span class="number">171</span></span>
+frame <span class="preprocessor">#<span class="number">18</span>: xxx`main + <span class="number">109</span> at AppDelegate.swift:<span class="number">12</span></span>
+frame <span class="preprocessor">#<span class="number">19</span>: libdyld.dylib`start + <span class="number">1</span></span>
+frame <span class="preprocessor">#<span class="number">20</span>: libdyld.dylib`start + <span class="number">1</span></span>
+</code></pre>
+      
+    </div>
+    <footer class="article-footer">
+      <a data-url="http://satanwoo.github.io/2015/12/11/LLDB-1/" data-id="ck9a3yubn003c88i19qe9p2k6" class="article-share-link">Share</a>
+      
+        <a href="http://satanwoo.github.io/2015/12/11/LLDB-1/#disqus_thread" class="article-comment-link">Comments</a>
+      
+      
+  <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
+
+    </footer>
+  </div>
+  
+</article>
+
+<div id="disqus_thread"></div>
+<script>
+
+/**
+*  RECOMMENDED CONFIGURATION VARIABLES: EDIT AND UNCOMMENT THE SECTION BELOW TO INSERT DYNAMIC VALUES FROM YOUR PLATFORM OR CMS.
+*  LEARN WHY DEFINING THESE VARIABLES IS IMPORTANT: https://disqus.com/admin/universalcode/#configuration-variables*/
+/*
+var disqus_config = function () {
+this.page.url = PAGE_URL;  // Replace PAGE_URL with your page's canonical URL variable
+this.page.identifier = PAGE_IDENTIFIER; // Replace PAGE_IDENTIFIER with your page's unique identifier variable
+};
+*/
+(function() { // DON'T EDIT BELOW THIS LINE
+var d = document, s = d.createElement('script');
+s.src = 'https://satanwoo-2.disqus.com/embed.js';
+s.setAttribute('data-timestamp', +new Date());
+(d.head || d.body).appendChild(s);
+})();
+</script>
+<noscript>Please enable JavaScript to view the <a href="https://disqus.com/?ref_noscript">comments powered by Disqus.</a></noscript>
+                                
+  
     <article id="post-TBAnnotationClustering" class="article article-type-post" itemscope itemprop="blogPost">
   <div class="article-meta">
     <a href="/2015/12/11/TBAnnotationClustering/" class="article-date">
@@ -349,7 +477,7 @@ TBBoundingBox TBBoundingBoxMake(<span class="built_in">double</span> x0, <span c
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/12/11/TBAnnotationClustering/" data-id="ck8op9v0d001jxji16uks9ex8" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/12/11/TBAnnotationClustering/" data-id="ck9a3yu8j001j88i1eaxyx8hx" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2015/12/11/TBAnnotationClustering/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -596,7 +724,7 @@ BOOL success = class_addMethod(<span class="keyword">class</span>, originalSelec
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/11/26/FDFullScreenPopGesture-Source-Code/" data-id="ck8op9v52003rxji145h0hjpm" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/11/26/FDFullScreenPopGesture-Source-Code/" data-id="ck9a3yucg003v88i1aluwhc4j" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2015/11/26/FDFullScreenPopGesture-Source-Code/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -728,7 +856,7 @@ replicationLayer.instanceDelay = <span class="number">0.3</span>
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/11/17/Fun-of-CAReplicationLayer/" data-id="ck8op9v50003pxji1m9qvv024" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/11/17/Fun-of-CAReplicationLayer/" data-id="ck9a3yucd003t88i1wut9eosa" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2015/11/17/Fun-of-CAReplicationLayer/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -956,7 +1084,7 @@ modalVC<span class="class">.modalPresentationStyle</span> = <span class="class">
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/11/12/Swift-UITransition-iOS8/" data-id="ck8op9v0m001nxji1eo8x1ykg" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/11/12/Swift-UITransition-iOS8/" data-id="ck9a3yu8r001n88i1dacvvdmz" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2015/11/12/Swift-UITransition-iOS8/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -1138,7 +1266,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/11/05/Understand-Viper/" data-id="ck8op9v01001exji1glnoqyl7" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/11/05/Understand-Viper/" data-id="ck9a3yu8d001e88i1xpvppof7" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2015/11/05/Understand-Viper/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -1389,7 +1517,7 @@ objectPath.<span class="keyword">get</span>(obj, <span class="string">'a.\u1200'
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/11/05/Object-Path-Source-Code/" data-id="ck8op9v33002lxji1isjx25y8" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/11/05/Object-Path-Source-Code/" data-id="ck9a3yuaj002l88i1sypi215e" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2015/11/05/Object-Path-Source-Code/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -1474,7 +1602,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/10/29/Learn-Android-Day-by-Day/" data-id="ck8op9v440035xji10it4rl77" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/10/29/Learn-Android-Day-by-Day/" data-id="ck9a3yubl003988i1bonvg3si" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2015/10/29/Learn-Android-Day-by-Day/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -1708,7 +1836,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/10/29/Swift-Count-Down-Label/" data-id="ck8op9v0u001pxji1u4izxt97" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/10/29/Swift-Count-Down-Label/" data-id="ck9a3yu8u001p88i1s1sz953r" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2015/10/29/Swift-Count-Down-Label/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -1861,7 +1989,7 @@ func computeAngle(p1:<span class="type">CGPoint</span> , p2:<span class="type">C
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/10/27/Swift-Circle-Slider/" data-id="ck8op9v0z001rxji1q7ehk1i4" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/10/27/Swift-Circle-Slider/" data-id="ck9a3yu99001r88i1ru3g6mrd" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2015/10/27/Swift-Circle-Slider/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -2105,7 +2233,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/10/14/GLCalendarView/" data-id="ck8op9v4x003nxji1v5qght7x" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/10/14/GLCalendarView/" data-id="ck9a3yuca003r88i1j5op3p9j" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2015/10/14/GLCalendarView/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -2348,7 +2476,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/09/30/Debounce-and-Throttle-in-iOS/" data-id="ck8op9v5b0040xji1h0s589d8" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/09/30/Debounce-and-Throttle-in-iOS/" data-id="ck9a3yucs004488i1wsae9wcy" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2015/09/30/Debounce-and-Throttle-in-iOS/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -2671,7 +2799,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/09/23/flux-js-part-one/" data-id="ck8op9uz1000wxji1j3b1qhrn" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/09/23/flux-js-part-one/" data-id="ck9a3yu7n000w88i1la9bg2ia" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2015/09/23/flux-js-part-one/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -3365,7 +3493,7 @@ CountryModel<span class="keyword">*</span> country = [[CountryModel alloc] initW
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/09/17/code-of-JSONModel/" data-id="ck8op9uzh0014xji1mn45ub4i" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/09/17/code-of-JSONModel/" data-id="ck9a3yu7z001488i1wtiwheg1" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2015/09/17/code-of-JSONModel/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -3435,7 +3563,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/09/11/A-New-Start/" data-id="ck8op9uui0000xji1v27no7hc" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/09/11/A-New-Start/" data-id="ck9a3yu4k000088i1ec2pmihi" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2015/09/11/A-New-Start/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -3484,7 +3612,7 @@ s.setAttribute('data-timestamp', +new Date());
   <div class="widget-wrap">
     <h3 class="widget-title">Tags</h3>
     <div class="widget">
-      <ul class="tag-list"><li class="tag-list-item"><a class="tag-list-link" href="/tags/Android/">Android</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/C/">C</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/C/">C++</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Growth/">Growth</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/JavaScript/">JavaScript</a><span class="tag-list-count">4</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Machine-Learning/">Machine Learning</a><span class="tag-list-count">4</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Math/">Math</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Performance/">Performance</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/R/">R</a><span class="tag-list-count">2</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Reverse-Engineering/">Reverse Engineering</a><span class="tag-list-count">6</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Swift/">Swift</a><span class="tag-list-count">6</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/XNU/">XNU</a><span class="tag-list-count">2</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/c/">c++</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/iOS/">iOS</a><span class="tag-list-count">44</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/shell/">shell</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/汇编/">汇编</a><span class="tag-list-count">1</span></li></ul>
+      <ul class="tag-list"><li class="tag-list-item"><a class="tag-list-link" href="/tags/Android/">Android</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Assembly/">Assembly</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/C/">C</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/C/">C++</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Growth/">Growth</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/JavaScript/">JavaScript</a><span class="tag-list-count">4</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Machine-Learning/">Machine Learning</a><span class="tag-list-count">4</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Math/">Math</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Performance/">Performance</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/R/">R</a><span class="tag-list-count">2</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Reverse-Engineering/">Reverse Engineering</a><span class="tag-list-count">6</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Swift/">Swift</a><span class="tag-list-count">6</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/XNU/">XNU</a><span class="tag-list-count">2</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/c/">c++</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/iOS/">iOS</a><span class="tag-list-count">45</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/shell/">shell</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/汇编/">汇编</a><span class="tag-list-count">1</span></li></ul>
     </div>
   </div>
 
@@ -3493,7 +3621,7 @@ s.setAttribute('data-timestamp', +new Date());
   <div class="widget-wrap">
     <h3 class="widget-title">Tag Cloud</h3>
     <div class="widget tagcloud">
-      <a href="/tags/Android/" style="font-size: 10px;">Android</a> <a href="/tags/C/" style="font-size: 10px;">C</a> <a href="/tags/C/" style="font-size: 10px;">C++</a> <a href="/tags/Growth/" style="font-size: 10px;">Growth</a> <a href="/tags/JavaScript/" style="font-size: 15px;">JavaScript</a> <a href="/tags/Machine-Learning/" style="font-size: 15px;">Machine Learning</a> <a href="/tags/Math/" style="font-size: 10px;">Math</a> <a href="/tags/Performance/" style="font-size: 10px;">Performance</a> <a href="/tags/R/" style="font-size: 12.5px;">R</a> <a href="/tags/Reverse-Engineering/" style="font-size: 17.5px;">Reverse Engineering</a> <a href="/tags/Swift/" style="font-size: 17.5px;">Swift</a> <a href="/tags/XNU/" style="font-size: 12.5px;">XNU</a> <a href="/tags/c/" style="font-size: 10px;">c++</a> <a href="/tags/iOS/" style="font-size: 20px;">iOS</a> <a href="/tags/shell/" style="font-size: 10px;">shell</a> <a href="/tags/汇编/" style="font-size: 10px;">汇编</a>
+      <a href="/tags/Android/" style="font-size: 10px;">Android</a> <a href="/tags/Assembly/" style="font-size: 10px;">Assembly</a> <a href="/tags/C/" style="font-size: 10px;">C</a> <a href="/tags/C/" style="font-size: 10px;">C++</a> <a href="/tags/Growth/" style="font-size: 10px;">Growth</a> <a href="/tags/JavaScript/" style="font-size: 15px;">JavaScript</a> <a href="/tags/Machine-Learning/" style="font-size: 15px;">Machine Learning</a> <a href="/tags/Math/" style="font-size: 10px;">Math</a> <a href="/tags/Performance/" style="font-size: 10px;">Performance</a> <a href="/tags/R/" style="font-size: 12.5px;">R</a> <a href="/tags/Reverse-Engineering/" style="font-size: 17.5px;">Reverse Engineering</a> <a href="/tags/Swift/" style="font-size: 17.5px;">Swift</a> <a href="/tags/XNU/" style="font-size: 12.5px;">XNU</a> <a href="/tags/c/" style="font-size: 10px;">c++</a> <a href="/tags/iOS/" style="font-size: 20px;">iOS</a> <a href="/tags/shell/" style="font-size: 10px;">shell</a> <a href="/tags/汇编/" style="font-size: 10px;">汇编</a>
     </div>
   </div>
 
@@ -3502,7 +3630,7 @@ s.setAttribute('data-timestamp', +new Date());
   <div class="widget-wrap">
     <h3 class="widget-title">Archives</h3>
     <div class="widget">
-      <ul class="archive-list"><li class="archive-list-item"><a class="archive-list-link" href="/archives/2020/04/">April 2020</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2020/02/">February 2020</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2019/12/">December 2019</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2019/10/">October 2019</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2019/07/">July 2019</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2019/01/">January 2019</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2018/12/">December 2018</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2018/10/">October 2018</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2018/05/">May 2018</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2018/04/">April 2018</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2018/02/">February 2018</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2018/01/">January 2018</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/11/">November 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/10/">October 2017</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/09/">September 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/08/">August 2017</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/07/">July 2017</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/06/">June 2017</a><span class="archive-list-count">3</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/04/">April 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/01/">January 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/10/">October 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/09/">September 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/07/">July 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/05/">May 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/04/">April 2016</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/03/">March 2016</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/02/">February 2016</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/12/">December 2015</a><span class="archive-list-count">6</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/11/">November 2015</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/10/">October 2015</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/09/">September 2015</a><span class="archive-list-count">4</span></li></ul>
+      <ul class="archive-list"><li class="archive-list-item"><a class="archive-list-link" href="/archives/2020/04/">April 2020</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2020/02/">February 2020</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2019/12/">December 2019</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2019/10/">October 2019</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2019/07/">July 2019</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2019/01/">January 2019</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2018/12/">December 2018</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2018/10/">October 2018</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2018/05/">May 2018</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2018/04/">April 2018</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2018/02/">February 2018</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2018/01/">January 2018</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/11/">November 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/10/">October 2017</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/09/">September 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/08/">August 2017</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/07/">July 2017</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/06/">June 2017</a><span class="archive-list-count">3</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/04/">April 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/01/">January 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/10/">October 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/09/">September 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/07/">July 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/05/">May 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/04/">April 2016</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/03/">March 2016</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/02/">February 2016</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/12/">December 2015</a><span class="archive-list-count">6</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/11/">November 2015</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/10/">October 2015</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/09/">September 2015</a><span class="archive-list-count">4</span></li></ul>
     </div>
   </div>
 
@@ -3512,6 +3640,10 @@ s.setAttribute('data-timestamp', +new Date());
     <h3 class="widget-title">Recents</h3>
     <div class="widget">
       <ul>
+        
+          <li>
+            <a href="/2020/04/22/NewBridgeHook/">基于桥的全量方法 Hook 方案（2） - 全新升级</a>
+          </li>
         
           <li>
             <a href="/2020/04/07/Selective-Search/">目标检测之 Selective Search</a>
@@ -3527,10 +3659,6 @@ s.setAttribute('data-timestamp', +new Date());
         
           <li>
             <a href="/2019/10/27/MNN1/">浅谈移动工程师跨界机器学习之路</a>
-          </li>
-        
-          <li>
-            <a href="/2019/07/07/RevisitAutorelease2/">Revisit iOS Autorelease之二</a>
           </li>
         
       </ul>
