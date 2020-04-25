@@ -62,6 +62,198 @@
       <div class="outer">
         <section id="main">
   
+    <article id="post-TrampolineHookOpenSource" class="article article-type-post" itemscope itemprop="blogPost">
+  <div class="article-meta">
+    <a href="/2020/04/26/TrampolineHookOpenSource/" class="article-date">
+  <time datetime="2020-04-25T16:28:53.000Z" itemprop="datePublished">2020-04-26</time>
+</a>
+    
+  </div>
+  <div class="article-inner">
+    
+    
+      <header class="article-header">
+        
+  
+    <h1 itemprop="name">
+      <a class="article-title" href="/2020/04/26/TrampolineHookOpenSource/">基于桥的全量方法 Hook 方案（3）- 开源 TrampolineHook</a>
+    </h1>
+  
+
+      </header>
+    
+    <div class="article-entry" itemprop="articleBody">
+      
+        <blockquote>
+<p>本来以为是双休日，结果五一调休本周末只休一天，懵逼。不过还算完成了承诺，赶了出来。</p>
+</blockquote>
+<p>开源地址：<a href="https://github.com/SatanWoo/TrampolineHook" target="_blank" rel="external">https://github.com/SatanWoo/TrampolineHook</a>  </p>
+<h3 id="TrampolineHook_是什么">TrampolineHook 是什么</h3><p>之前<b style="color:red">中国90后 iOS 第一人杨萧玉</b>在看到我<a href="http://satanwoo.github.io/2020/04/22/NewBridgeHook/">《基于桥的全量方法 Hook 方案（2） - 全新升级》</a> 后就问我这个和直接用 <code>method_exchangeImplementation</code> 之类的 <code>runtime</code> 方法交换 <code>IMP</code> 性能对比咋样？</p>
+<p>所以这篇文章开头先占用大家宝贵的两分钟，简要说明下。</p>
+<p><code>TrampolineHook</code> 本质上不是用来 <code>Swizzling</code> 的框架，取 <code>Hook</code> 这个名字只是为了读起来顺口。<b style="color:red">它实际上是一个中心重定向框架。</b> 换句话说，你可以认为它是为了通过<strong>一个函数替换/拦截所有你想要函数的框架。</strong></p>
+<p>其实这个中心重定向的思想并不新潮，很多人（包括我自己）在内就曾经利用重载 <code>objc_msgForward</code> 干过这样的事。</p>
+<p>但是这个方式我在之前的文章里也提到过对应的缺点，比如：</p>
+<ul>
+<li>性能慢</li>
+<li>不能替换/拦截同一个继承链上的多个类。</li>
+</ul>
+<p>所以可以认为 <code>TrampolineHook</code> 是一个让你<strong>不用关注底层架构Calling Convention（因为涉及到汇编），不用关心上下文信息保存、恢复，不用担心引入传统 Swizzle 方案在大型项目中有奇奇怪怪 Crash 问题的中心重定向框架。</strong></p>
+<h3 id="TrampolineHook_技术原理">TrampolineHook 技术原理</h3><p>整个技术原理其实可以分为三部分：</p>
+<ul>
+<li><p><code>vm_remap</code> 技术。</p>
+</li>
+<li><p>流程设计。</p>
+</li>
+<li><p>汇编实现。</p>
+</li>
+</ul>
+<h4 id="vm_remap_的价值">vm_remap 的价值</h4><p>通俗意义上，我们访问的内存都是按照页来组织。而在程序加载后分配的页之中，会对应有不同的权限，比如代码占用的页，就是可读且可执行，但是一般不具备可写的权限；而存放数据的页呢，就对应是可读且可写，但不能拥有可执行权限。</p>
+<p><strong>在绝大多数情况下</strong>，当我们编写完一个程序运行的时候，动态分配的页都是用来做数据保存、访问的，不太会有涉及执行权限。</p>
+<p>而要做到可以将动态分配出来的内存页具备可执行权限，就需要利用 <code>vm_remap</code>。 它的定义是这样的：</p>
+<p>On Darwin, vm_remap() provides support for mapping an existing code page at new address, while retaining the existing page protections; using vm_remap(), we can create multiple copies of existing, executable code, placed at arbitrary addresses. </p>
+<p>从定义中我们可以知道两点信息：</p>
+<ul>
+<li><p><code>vm_remap</code> 可以让内存页具备被 map 的页的特性，如果是可执行页被 map，那新创建的页自然而然页具备了这个权限。</p>
+</li>
+<li><p><code>vm_remap</code> 也不是肆无忌惮的创建任何可执行的页，通俗理解，它只是一个 copy 映射。</p>
+</li>
+</ul>
+<p><img src="https://landonf.org/static/blog/code/objc/blockimp_vm_remap.png" alt=""></p>
+<p><img src="https://landonf.org/static/blog/code/objc/blockimp_vm_remap_data.png" alt=""></p>
+<p>因此，我们可以通过在编写代码的过程中，<b style="color:red">精心构造、预留在程序二进制的代码页</b>，在运行时不断<strong>“复制映射”</strong>，来完成特殊的使命。</p>
+<p>在我们的定义中，我们是构造了<b style="color:red">连续的两个页</b>。</p>
+<h4 id="流程设计">流程设计</h4><p>要构造特殊的程序二进制代码，首先还是要梳理我们的目的，<b style="color:red">我们的诉求是所有的函数都能先进入我们的一个中心重定向函数，执行自定义的操作，然后返回原函数，同时这个调用栈不能乱。</b></p>
+<ul>
+<li>把一个我们要替换的原方法 IMP A 取出来，保存起来。</li>
+<li>给这个原方法塞一个动态分配的可执行地址 B。</li>
+<li>当执行这个原方法的时候，会跳转到 可执行地址 B。</li>
+<li>这个 B 经过一段简短的运算操作，可以获取到原先保存的 IMP A。</li>
+<li>在跳转回 IMP A 之前，统一拦截函数先做些事情，比如检查是不是主线程调用之类的。</li>
+</ul>
+<p><b style="color:red">【注意】：在整个过程中，我们要保证参数寄存器、返回地址等不能错乱。</b></p>
+<h4 id="汇编实现">汇编实现</h4><p>既然 <code>vm_remap</code> 是按页的维度来映射，我们要构造的代码自然而然要<b style="color:red">页对齐</b>。<strong>在 arm64 中，一页是 0x4000，也就是 16KB</strong>，所以首先就是 <code>.align 14</code> 来确保。</p>
+<p>然后上一下最关键部分的代码，感兴趣的还是去 <a href="https://github.com/SatanWoo/TrampolineHook" target="_blank" rel="external">Github</a> 上阅读完整的代码吧。</p>
+<pre><code><span class="label">_th_entry</span>:
+
+// 不要小看这五行汇编
+<span class="keyword">nop
+</span><span class="keyword">nop
+</span><span class="keyword">nop
+</span><span class="keyword">nop
+</span><span class="keyword">nop
+</span>
+<span class="keyword">sub </span>x12, <span class="literal">lr</span>,   <span class="number">#0x8</span>
+<span class="keyword">sub </span>x12, x12,  <span class="number">#0x4000</span>
+<span class="keyword">mov </span><span class="literal">lr</span>,  x13
+
+<span class="keyword">ldr </span>x10, [x12]
+
+<span class="label">stp</span> <span class="literal">q0</span>,  <span class="literal">q1</span>,   [<span class="literal">sp</span>, #-<span class="number">32</span>]!
+<span class="label">stp</span> <span class="literal">q2</span>,  <span class="literal">q3</span>,   [<span class="literal">sp</span>, #-<span class="number">32</span>]!
+<span class="label">stp</span> <span class="literal">q4</span>,  <span class="literal">q5</span>,   [<span class="literal">sp</span>, #-<span class="number">32</span>]!
+<span class="label">stp</span> <span class="literal">q6</span>,  <span class="literal">q7</span>,   [<span class="literal">sp</span>, #-<span class="number">32</span>]!
+
+<span class="label">stp</span> <span class="literal">lr</span>,  x10,  [<span class="literal">sp</span>, #-<span class="number">16</span>]!
+<span class="label">stp</span> x0,  x1,   [<span class="literal">sp</span>, #-<span class="number">16</span>]!
+<span class="label">stp</span> x2,  x3,   [<span class="literal">sp</span>, #-<span class="number">16</span>]!
+<span class="label">stp</span> x4,  x5,   [<span class="literal">sp</span>, #-<span class="number">16</span>]!
+<span class="label">stp</span> x6,  x7,   [<span class="literal">sp</span>, #-<span class="number">16</span>]!
+<span class="keyword">str </span>x8,        [<span class="literal">sp</span>, #-<span class="number">16</span>]!
+
+// 加载自定义的拦截器，并跳转过去。
+<span class="keyword">ldr </span>x8,  interceptor
+<span class="keyword">blr </span>x8
+
+<span class="keyword">ldr </span>x8,        [<span class="literal">sp</span>], <span class="number">#16</span>
+<span class="label">ldp</span> x6,  x7,   [<span class="literal">sp</span>], <span class="number">#16</span>
+<span class="label">ldp</span> x4,  x5,   [<span class="literal">sp</span>], <span class="number">#16</span>
+<span class="label">ldp</span> x2,  x3,   [<span class="literal">sp</span>], <span class="number">#16</span>
+<span class="label">ldp</span> x0,  x1,   [<span class="literal">sp</span>], <span class="number">#16</span>
+<span class="label">ldp</span> <span class="literal">lr</span>,  x10,  [<span class="literal">sp</span>], <span class="number">#16</span>
+
+<span class="label">ldp</span> <span class="literal">q6</span>,  <span class="literal">q7</span>,   [<span class="literal">sp</span>], <span class="number">#32</span>
+<span class="label">ldp</span> <span class="literal">q4</span>,  <span class="literal">q5</span>,   [<span class="literal">sp</span>], <span class="number">#32</span>
+<span class="label">ldp</span> <span class="literal">q2</span>,  <span class="literal">q3</span>,   [<span class="literal">sp</span>], <span class="number">#32</span>
+<span class="label">ldp</span> <span class="literal">q0</span>,  <span class="literal">q1</span>,   [<span class="literal">sp</span>], <span class="number">#32</span>
+
+<span class="keyword">br </span> x10
+
+<span class="label">.rept</span> <span class="number">2032</span>
+<span class="keyword">mov </span>x13, <span class="literal">lr</span>
+<span class="keyword">bl </span>_th_entry<span class="comment">;</span>
+<span class="label">.endr</span>
+</code></pre><p>整段汇编可以分为几个部分：</p>
+<ul>
+<li><p>设计一大堆的动态可执行地址，即：</p>
+<pre><code><span class="label">.rept</span> <span class="number">2032</span>
+<span class="keyword">mov </span>x13, <span class="literal">lr</span>
+<span class="keyword">bl </span>_th_entry<span class="comment">;</span>
+<span class="label">.endr</span>
+</code></pre><p>这里最早我的实现是复制粘贴一大堆重复性代码，<b style="color:red">在 HookZZ 作者的指导下，我优化成了上述这样。</b></p>
+</li>
+<li><p>执行统一的运行过程，通过偏移计算等方式获取保留的原始 IMP。</p>
+</li>
+<li><p>要注意特定的寄存器用处，<code>x8-x18</code>是临时寄存器，里面的值在函数调用后可能被修改，这些寄存器为caller-saved。<b style="color:red">所以在我们自身函数可以用，但是要在调用别的函数之前保存好。</b></p>
+</li>
+<li><p>要特别注意对 LR 寄存器的处理，没处理好，调用栈就回不去了。</p>
+</li>
+<li><p>保存对应的参数、浮点参数等寄存器，避免上下文被我们自己的处理函数破坏。</p>
+</li>
+<li><p><code>b / bl</code> 的跳转范围非常有限，由于我们是动态地址分配，不能保证拦截函数的范围偏移，所以要采用 <code>blr</code> 的方式。</p>
+</li>
+</ul>
+<h3 id="TrampolineHook_用处">TrampolineHook 用处</h3><p>和传统的 <code>Swizzle</code> 需要提供对应的替换后的函数实现不同，中心化重定向思想可以帮助你实现很多有意思的事情：</p>
+<ul>
+<li><p>比如网上很常见的 <code>hook objc_msgSend</code>，可以帮你查看任意被 Hook 二进制中的函数耗时和调用链路。</p>
+</li>
+<li><p>比如 <code>Bang</code> / <code>AnyMethodLog</code> 这样的重定向 Log 日志框架等等。</p>
+</li>
+</ul>
+<p><b style="color:red">苹果著名的 <code>MainThreadChecker</code> 也用了类似的技术。由于我才疏学浅，只是大致完成了对其实现的逆向，通过 <code>TrampolineHook</code> 进行了重写。</b> 因为效果还不错，所以也开源了出来，地址是：<a href="https://github.com/SatanWoo/TrampolineHook/tree/master/Example/MainThreadChecker" target="_blank" rel="external">https://github.com/SatanWoo/TrampolineHook/tree/master/Example/MainThreadChecker</a></p>
+<p>这次在重写 <code>MainThreadChecker</code> 的过程中，我也对比了下和 2017 年苹果实现的差异。在整体流程上没有比较大的差异，但是还是有一些细节可以分享分享：</p>
+<ul>
+<li>iOS 10 的时候对应的二进制是 <code>UIKit</code>，到了 iOS 12/13 成了 <code>UIKitCore</code>，所以原先获取二进制的逻辑失效了，为了避免后续版本的变更干扰，我采用了苹果自身的守候，通过 <code>class_getImageName([UIResponder class])</code> 来保证获取的就是我们理解上的 <code>UIKit</code> 动态库。</li>
+</ul>
+<p>当然 <code>TrampolineHook</code> 的作用不止于此，争取过段时间把我的一些想法做完善再和大家交流。</p>
+<h3 id="后续思考">后续思考</h3><p>如果有朋友对 arm64 的汇编比较熟悉，同时对函数调用也比较了解的话，会很快的发现我上述提供的汇编代码存在一个漏洞（虽然这个漏洞绝大多数人用不到），感兴趣的朋友可以微信交流下。</p>
+
+      
+    </div>
+    <footer class="article-footer">
+      <a data-url="http://satanwoo.github.io/2020/04/26/TrampolineHookOpenSource/" data-id="ck9fy2gfc001j2ni1ef74x1sg" class="article-share-link">Share</a>
+      
+        <a href="http://satanwoo.github.io/2020/04/26/TrampolineHookOpenSource/#disqus_thread" class="article-comment-link">Comments</a>
+      
+      
+  <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Assembly-Language/">Assembly Language</a></li><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li></ul>
+
+    </footer>
+  </div>
+  
+</article>
+
+<div id="disqus_thread"></div>
+<script>
+
+/**
+*  RECOMMENDED CONFIGURATION VARIABLES: EDIT AND UNCOMMENT THE SECTION BELOW TO INSERT DYNAMIC VALUES FROM YOUR PLATFORM OR CMS.
+*  LEARN WHY DEFINING THESE VARIABLES IS IMPORTANT: https://disqus.com/admin/universalcode/#configuration-variables*/
+/*
+var disqus_config = function () {
+this.page.url = PAGE_URL;  // Replace PAGE_URL with your page's canonical URL variable
+this.page.identifier = PAGE_IDENTIFIER; // Replace PAGE_IDENTIFIER with your page's unique identifier variable
+};
+*/
+(function() { // DON'T EDIT BELOW THIS LINE
+var d = document, s = d.createElement('script');
+s.src = 'https://satanwoo-2.disqus.com/embed.js';
+s.setAttribute('data-timestamp', +new Date());
+(d.head || d.body).appendChild(s);
+})();
+</script>
+<noscript>Please enable JavaScript to view the <a href="https://disqus.com/?ref_noscript">comments powered by Disqus.</a></noscript>
+                                
+  
     <article id="post-NewBridgeHook" class="article article-type-post" itemscope itemprop="blogPost">
   <div class="article-meta">
     <a href="/2020/04/22/NewBridgeHook/" class="article-date">
@@ -163,7 +355,7 @@ bl _template_page;
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2020/04/22/NewBridgeHook/" data-id="ck9a3yuan002n88i1cndrb1dp" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2020/04/22/NewBridgeHook/" data-id="ck9fy2gh6002r2ni121ymzaqu" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2020/04/22/NewBridgeHook/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -277,7 +469,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2020/04/07/Selective-Search/" data-id="ck9a3yu9l001y88i1bqhqogor" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2020/04/07/Selective-Search/" data-id="ck9fy2gg200222ni1h0hxx94u" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2020/04/07/Selective-Search/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -625,7 +817,7 @@ get hasMain() {
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2020/02/06/MNN-Visual/" data-id="ck9a3yub3002y88i1nvdglsvc" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2020/02/06/MNN-Visual/" data-id="ck9fy2ghi00322ni1yhsjr7z6" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2020/02/06/MNN-Visual/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -820,7 +1012,7 @@ _mm256_store_pd(<span class="literal">result</span>, c);
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2019/12/01/SIMD-1/" data-id="ck9a3yu9p002188i1vaga6t0l" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2019/12/01/SIMD-1/" data-id="ck9fy2gg500252ni1xmhrhwhn" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2019/12/01/SIMD-1/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -968,7 +1160,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2019/10/27/MNN1/" data-id="ck9a3yub0002v88i1a9v4p3be" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2019/10/27/MNN1/" data-id="ck9fy2ghf002z2ni1z95thdf1" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2019/10/27/MNN1/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -1173,7 +1365,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2019/07/07/RevisitAutorelease2/" data-id="ck9a3yu9x002788i10h5rpi1k" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2019/07/07/RevisitAutorelease2/" data-id="ck9fy2ggc002b2ni19ab5vfvl" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2019/07/07/RevisitAutorelease2/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -1514,7 +1706,7 @@ _pthread_tsd_cleanup_key(<span class="keyword">pthread_t</span> self, <span clas
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2019/07/02/RevisitAutorelease/" data-id="ck9a3yua4002988i1bdsh2cec" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2019/07/02/RevisitAutorelease/" data-id="ck9fy2ggg002d2ni1g2d23maj" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2019/07/02/RevisitAutorelease/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -1688,7 +1880,7 @@ Data *data = <span class="keyword">new</span> Data();
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2019/01/26/RAII/" data-id="ck9a3yuac002g88i187blcy5r" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2019/01/26/RAII/" data-id="ck9fy2ggx002k2ni16fvuuj6d" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2019/01/26/RAII/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -1794,7 +1986,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2019/01/26/LD-2/" data-id="ck9a3yubp003e88i1dp5w3jcj" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2019/01/26/LD-2/" data-id="ck9fy2gi0003i2ni1iun39cry" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2019/01/26/LD-2/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -1892,7 +2084,7 @@ NSLog(@<span class="string">"haha"</span>);
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2019/01/26/shared-ptr/" data-id="ck9a3yu6p000988i1vexcjv6v" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2019/01/26/shared-ptr/" data-id="ck9fy2gdg00092ni1ybtcry27" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2019/01/26/shared-ptr/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -2284,7 +2476,7 @@ lockp-&gt;unlock();
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2019/01/01/Synchronized/" data-id="ck9a3yu8m001l88i1uefmwmwi" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2019/01/01/Synchronized/" data-id="ck9fy2gfk001p2ni1hd8qewao" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2019/01/01/Synchronized/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -2524,7 +2716,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2018/12/22/LD-1/" data-id="ck9a3yubt003g88i16jp0z8bq" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2018/12/22/LD-1/" data-id="ck9fy2gi2003k2ni1vdp0gc17" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2018/12/22/LD-1/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -2647,7 +2839,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2018/10/06/JSDebugger-INTRO/" data-id="ck9a3yuc7003p88i1klxjlfuw" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2018/10/06/JSDebugger-INTRO/" data-id="ck9fy2gii003t2ni14aj0v4qy" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2018/10/06/JSDebugger-INTRO/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -2783,7 +2975,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2018/05/09/MNIST/" data-id="ck9a3yub7003288i1qohmc128" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2018/05/09/MNIST/" data-id="ck9fy2ghm00362ni1vuu5zfj5" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2018/05/09/MNIST/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -2995,7 +3187,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2018/04/01/jsengine/" data-id="ck9a3yu79000m88i15rk3f5cm" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2018/04/01/jsengine/" data-id="ck9fy2gdz000m2ni15iml9nij" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2018/04/01/jsengine/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -3241,7 +3433,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2018/02/04/iOS-iVar/" data-id="ck9a3yu7k000u88i159e9w0ts" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2018/02/04/iOS-iVar/" data-id="ck9fy2gec000u2ni198ll07vv" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2018/02/04/iOS-iVar/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -3866,7 +4058,7 @@ StartAgain: ;
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2018/01/14/iOS-virtual/" data-id="ck9a3yu7g000q88i17ceeh9q2" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2018/01/14/iOS-virtual/" data-id="ck9fy2ge6000q2ni1xpfg4g1q" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2018/01/14/iOS-virtual/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -4077,7 +4269,7 @@ remover.keyPath = identifier.copy<span class="comment">;</span>
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2017/11/27/KVO-Swizzle/" data-id="ck9a3yubv003i88i1tl4czfcv" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2017/11/27/KVO-Swizzle/" data-id="ck9fy2gi5003m2ni1vj0njka7" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2017/11/27/KVO-Swizzle/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -4239,7 +4431,7 @@ frame <span class="preprocessor">#<span class="number">14</span>: <span class="n
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2017/11/02/load-twice/" data-id="ck9a3yu74000k88i1ip0ay4wn" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2017/11/02/load-twice/" data-id="ck9fy2gdv000k2ni1lxavscz6" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2017/11/02/load-twice/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -4640,7 +4832,7 @@ NSDate* bootTime = [NSDate dateWithTimeIntervalSince1970:timestamp];
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2017/10/18/abort/" data-id="ck9a3yu88001b88i1w7eysio7" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2017/10/18/abort/" data-id="ck9fy2gf3001b2ni12lxcqq1v" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2017/10/18/abort/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -5026,7 +5218,7 @@ WKContentExtensionStore
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2017/09/24/mainthreadchecker1/" data-id="ck9a3yu71000g88i1bmcl4og7" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2017/09/24/mainthreadchecker1/" data-id="ck9fy2gds000g2ni1imjqoqwy" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2017/09/24/mainthreadchecker1/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -5353,7 +5545,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2017/09/11/KVO-CRASH/" data-id="ck9a3yuby003k88i1j7zh2nct" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2017/09/11/KVO-CRASH/" data-id="ck9fy2gic003o2ni1agrum3ag" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2017/09/11/KVO-CRASH/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -5649,7 +5841,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2017/08/06/UITableViewController/" data-id="ck9a3yu8g001g88i1gnlbrokq" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2017/08/06/UITableViewController/" data-id="ck9fy2gfa001g2ni1h3rtnwif" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2017/08/06/UITableViewController/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -5940,7 +6132,7 @@ BOOT_RUN_EXIT(appender_close);
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2017/07/30/xlog/" data-id="ck9a3yu65000388i13adi2rgy" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2017/07/30/xlog/" data-id="ck9fy2gd300032ni1h3ap3amt" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2017/07/30/xlog/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -6243,7 +6435,7 @@ ldp    x9, x17, [x12]        <span class="comment">// {x9, x17} = *bucket</span>
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2017/06/29/Macho-2/" data-id="ck9a3yuar002r88i190hp9ew5" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2017/06/29/Macho-2/" data-id="ck9fy2gha002v2ni18iab3x7c" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2017/06/29/Macho-2/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -6532,7 +6724,7 @@ _magic = [cursor readBigInt32];
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2017/06/13/Macho-1/" data-id="ck9a3yuau002t88i14r2u78vr" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2017/06/13/Macho-1/" data-id="ck9fy2ghc002x2ni1ilpz4onf" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2017/06/13/Macho-1/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -6794,7 +6986,7 @@ _attribute__((section (<span class="string">"__DATA, MinyiSpecific"</span>))) <s
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2017/06/01/FBTweak/" data-id="ck9a3yucj003x88i1yir2bmeg" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2017/06/01/FBTweak/" data-id="ck9fy2gis00412ni19d6gutv2" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2017/06/01/FBTweak/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -6934,7 +7126,7 @@ foo(&amp;s, <span class="number">1</span>, <span class="number">2</span>);
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2017/04/23/ARM64IndirectReturn/" data-id="ck9a3yud1004e88i1jvr1lyb6" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2017/04/23/ARM64IndirectReturn/" data-id="ck9fy2gj9004i2ni16yrqjr1e" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2017/04/23/ARM64IndirectReturn/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -7105,7 +7297,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2017/04/18/CalculateTwoArrayDiff/" data-id="ck9a3yucy004a88i16d45dokq" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2017/04/18/CalculateTwoArrayDiff/" data-id="ck9fy2gj6004e2ni1x23bpq33" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2017/04/18/CalculateTwoArrayDiff/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -7295,7 +7487,7 @@ dispatch_group_create(<span class="keyword">void</span>)
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2017/01/07/DispatchGroupCrash/" data-id="ck9a3yucp004188i1ed17wyxg" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2017/01/07/DispatchGroupCrash/" data-id="ck9fy2giw00452ni1v307hvaq" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2017/01/07/DispatchGroupCrash/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -7543,7 +7735,7 @@ func <span class="function"><span class="title">resultFromBatchObjects</span><sp
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2017/01/07/JSONRPCKit/" data-id="ck9a3yuc3003n88i1qbdawbxr" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2017/01/07/JSONRPCKit/" data-id="ck9fy2gif003r2ni12qn1e86r" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2017/01/07/JSONRPCKit/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -7827,7 +8019,7 @@ dispatch_sync(dq, ^{
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/10/23/multithread-dangling-pointer/" data-id="ck9a3yu6w000e88i1rq7o1qtd" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/10/23/multithread-dangling-pointer/" data-id="ck9fy2gdp000e2ni1xdxxbz5d" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/10/23/multithread-dangling-pointer/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -7983,7 +8175,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/09/17/uiwindow-iOS/" data-id="ck9a3yu6m000788i161r0eeuh" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/09/17/uiwindow-iOS/" data-id="ck9fy2gdd00072ni12toihgua" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/09/17/uiwindow-iOS/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -8143,7 +8335,7 @@ OSSpinUnlock(&amp;_lock)<span class="comment">;</span>
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/07/10/immutable-thread/" data-id="ck9a3yu7c000o88i1lb39zgo8" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/07/10/immutable-thread/" data-id="ck9fy2ge3000o2ni1savso44c" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/07/10/immutable-thread/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -8267,7 +8459,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/05/02/Spotify/" data-id="ck9a3yu9d001t88i12qlwz5p3" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/05/02/Spotify/" data-id="ck9fy2gfx001x2ni1vvj0m516" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/05/02/Spotify/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -8395,7 +8587,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/04/26/blank-space-in-html/" data-id="ck9a3yu85001988i1hf9vioa7" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/04/26/blank-space-in-html/" data-id="ck9fy2gf000192ni16fwyi92k" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/04/26/blank-space-in-html/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -8653,7 +8845,7 @@ Elapsed application CPU <span class="keyword">time</span> (seconds): <span class
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/04/11/dispatch-once/" data-id="ck9a3yu7q000z88i1l5oyr19e" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/04/11/dispatch-once/" data-id="ck9fy2gei000z2ni1esgpmvax" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/04/11/dispatch-once/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -8870,7 +9062,7 @@ a4.<span class="function"><span class="title">staticInfo</span><span class="para
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/03/22/dispatch-in-swift/" data-id="ck9a3yu7v001188i1remc17so" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/03/22/dispatch-in-swift/" data-id="ck9fy2gem00112ni1ypu2r0e3" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/03/22/dispatch-in-swift/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -8984,7 +9176,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/03/14/RxSwift/" data-id="ck9a3yu9t002588i1mw0bsxbp" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/03/14/RxSwift/" data-id="ck9fy2gg800292ni1mj8dwcoo" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/03/14/RxSwift/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -9094,7 +9286,7 @@ val = edx(<span class="literal">true</span>)
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/03/14/SizeUp/" data-id="ck9a3yu9i001w88i1oobl9tx1" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/03/14/SizeUp/" data-id="ck9fy2gfz00202ni13dmq7sy1" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/03/14/SizeUp/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -9256,7 +9448,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/03/14/DXXcodeConsoleUnicodePlugin/" data-id="ck9a3yucu004688i1mv2bdcud" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/03/14/DXXcodeConsoleUnicodePlugin/" data-id="ck9fy2gj0004a2ni19n0dp1cn" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/03/14/DXXcodeConsoleUnicodePlugin/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -9355,7 +9547,7 @@ fi
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/02/27/check-manifest/" data-id="ck9a3yu81001688i1xzsegfbk" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/02/27/check-manifest/" data-id="ck9fy2gew00162ni1hxfqh85r" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/02/27/check-manifest/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -9487,7 +9679,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/02/27/pod-install-plugin/" data-id="ck9a3yu6s000c88i1p41vys7f" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/02/27/pod-install-plugin/" data-id="ck9fy2gdk000c2ni1yqc2ki0t" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/02/27/pod-install-plugin/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -9765,7 +9957,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/02/27/FBKVOController/" data-id="ck9a3yucm003z88i1tjoy3ngn" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/02/27/FBKVOController/" data-id="ck9fy2giu00432ni1w57e6nhz" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/02/27/FBKVOController/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -9901,7 +10093,7 @@ selectedTitleLabelsContentView<span class="class">.layer</span><span class="clas
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/02/05/DGRunKeeperSwitch/" data-id="ck9a3yucx004888i1u91ktxq8" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/02/05/DGRunKeeperSwitch/" data-id="ck9fy2gj2004c2ni17j9etm6y" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/02/05/DGRunKeeperSwitch/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -10179,7 +10371,7 @@ NSLayoutConstraint *constraint = [NSLayoutConstraint <span class="string">constr
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/02/05/PureLayout/" data-id="ck9a3yuag002j88i1vqsagjz2" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/02/05/PureLayout/" data-id="ck9fy2gh1002n2ni1i2zxsz7i" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/02/05/PureLayout/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -10527,7 +10719,7 @@ extension Task {
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/12/30/Refactor-Mega-ViewController/" data-id="ck9a3yua9002e88i1ku9algtv" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/12/30/Refactor-Mega-ViewController/" data-id="ck9fy2ggl002i2ni1ghnesiwn" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2015/12/30/Refactor-Mega-ViewController/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -10700,7 +10892,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/12/20/Learn-R-2/" data-id="ck9a3yubb003488i1memuqw4x" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/12/20/Learn-R-2/" data-id="ck9fy2ghp00382ni1g9olx6sy" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2015/12/20/Learn-R-2/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -10776,177 +10968,12 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/12/15/Regression-Model-1/" data-id="ck9a3yua6002b88i1d14jkoq3" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/12/15/Regression-Model-1/" data-id="ck9fy2ggi002f2ni1x82rxjiy" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2015/12/15/Regression-Model-1/#disqus_thread" class="article-comment-link">Comments</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Math/">Math</a></li></ul>
-
-    </footer>
-  </div>
-  
-</article>
-
-<div id="disqus_thread"></div>
-<script>
-
-/**
-*  RECOMMENDED CONFIGURATION VARIABLES: EDIT AND UNCOMMENT THE SECTION BELOW TO INSERT DYNAMIC VALUES FROM YOUR PLATFORM OR CMS.
-*  LEARN WHY DEFINING THESE VARIABLES IS IMPORTANT: https://disqus.com/admin/universalcode/#configuration-variables*/
-/*
-var disqus_config = function () {
-this.page.url = PAGE_URL;  // Replace PAGE_URL with your page's canonical URL variable
-this.page.identifier = PAGE_IDENTIFIER; // Replace PAGE_IDENTIFIER with your page's unique identifier variable
-};
-*/
-(function() { // DON'T EDIT BELOW THIS LINE
-var d = document, s = d.createElement('script');
-s.src = 'https://satanwoo-2.disqus.com/embed.js';
-s.setAttribute('data-timestamp', +new Date());
-(d.head || d.body).appendChild(s);
-})();
-</script>
-<noscript>Please enable JavaScript to view the <a href="https://disqus.com/?ref_noscript">comments powered by Disqus.</a></noscript>
-                                
-  
-    <article id="post-Learn-R-1" class="article article-type-post" itemscope itemprop="blogPost">
-  <div class="article-meta">
-    <a href="/2015/12/13/Learn-R-1/" class="article-date">
-  <time datetime="2015-12-13T07:03:36.000Z" itemprop="datePublished">2015-12-13</time>
-</a>
-    
-  </div>
-  <div class="article-inner">
-    
-    
-      <header class="article-header">
-        
-  
-    <h1 itemprop="name">
-      <a class="article-title" href="/2015/12/13/Learn-R-1/">一步步学R（1）</a>
-    </h1>
-  
-
-      </header>
-    
-    <div class="article-entry" itemprop="articleBody">
-      
-        <h3 id="系列连载">系列连载</h3><p><a href="http://satanwoo.github.io/2015/12/13/Learn-R-1/">一步步学R（1）</a><br><a href="http://satanwoo.github.io/2015/12/20/Learn-R-2/">一步步学R（2）</a></p>
-<p>嘿嘿，作为一名天才，当然要掌握一定的数据分析能力啦，所以从今天起，我们来一步步学习R这门有意思的语言。</p>
-<p>这一系列的文章的开发环境都是基于Mac的。</p>
-<h3 id="安装">安装</h3><ol>
-<li>首先你要安装R语言的环境 <a href="https://cran.r-project.org/" target="_blank" rel="external">安装点我</a></li>
-<li>可选：安装RStudio（类似于Matlab），安装之前必须已经安装了R <a href="https://www.rstudio.com/" target="_blank" rel="external">安装点我</a></li>
-</ol>
-<h3 id="基础知识">基础知识</h3><h4 id="R里面的基础类型">R里面的基础类型</h4><ul>
-<li>Character，如 “a”，”haha”</li>
-<li>Number（实数），如 5， 5.5</li>
-<li><p>Integer（整数），如 5，6</p>
-<p>  <strong>要注意的是，默认情况，所有的整数类型都为实数，如果要特定为整数，需要加L，如5L</strong></p>
-</li>
-<li><p>Logical，如TRUE, FALSE</p>
-<p>  <strong>FALSE = 0，TRUE为一切非0数，可以简写为F/T</strong></p>
-</li>
-<li><p>Complex（复数），如 5 + 7i</p>
-</li>
-</ul>
-<h4 id="操作">操作</h4><p><code>x &lt;- 5</code> 表示将5赋值给x<br><code>x</code>      表示输出x，效果等同于<code>print(x)</code></p>
-<h4 id="向量">向量</h4><p>虽然向量不是一个基本类型，但是却是R语言中非常关键的一种数据结构</p>
-<p><code>x &lt;- 5</code> 这句语句虽然表面上看起来是定义了一个<strong>Number</strong>类型的x，值为5。但是实质上却是构建了一个大小为1的向量，通过<code>x</code>语句我们可以得到一下结果：</p>
-<pre><code>&gt; x
-[<span class="number">1</span>] <span class="number">5</span>
-</code></pre><p>所以<code>x</code> 等同于语句 <code>x[1]</code>，会输出5。</p>
-<p><strong>注意：R语言里面的数据索引从1开始</strong></p>
-<p>除了默认构造的向量以外，我们可以通过<code>vector(class, size)</code>来构建指定类型和大小的向量，如：</p>
-<pre><code>&gt; k &lt;- <span class="function"><span class="title">vector</span><span class="params">(<span class="string">'logical'</span>, <span class="number">5</span>L)</span></span>
-&gt; z &lt;- <span class="function"><span class="title">vector</span><span class="params">(<span class="string">"complex"</span>, <span class="number">7</span>)</span></span>
-</code></pre><p>以上两句我们分别构建了一个名为k的logical向量，大小5以及一个复数向量，大小为7。</p>
-<p><strong>注意：在R的向量里，同一个向量只能包含相同类型的对象，如果包含了不相同，会进行隐式转换，如果不能转换就会报错。</strong></p>
-<p>如：</p>
-<pre><code>&gt; k &lt;- <span class="function"><span class="title">c</span><span class="params">(T, <span class="string">"a"</span>)</span></span>
-&gt; k
-[<span class="number">1</span>] <span class="string">"TRUE"</span> <span class="string">"a"</span> 
-</code></pre><p>当然也可以强制转换：</p>
-<p><code>as.character</code>， <code>as.logical</code>， <code>as.numeric</code>，<code>as.complex</code>，<code>as.integer</code></p>
-<h4 id="list">list</h4><p>list是一种可以同时保存多个类型对象的数据结构，通过<code>list(a, b, c, d)</code>进行构建。</p>
-<h4 id="Matrix">Matrix</h4><p>matrix就是多维向量，通过函数<code>matrix(data, nrows, ncols)</code> 构建，默认是按列排列数据，可以通过更改byrow=T来按照行来构建。</p>
-<h4 id="Factor">Factor</h4><p>简单理解，就是分类定义的数组，比如，<code>x &lt;- factor(c(&#39;yes&#39;, &#39;no&#39;, &#39;yes&#39;, &#39;no&#39;, &#39;yes&#39;))</code>  ，虽然看起来构建了一个和Character类型的向量差不多，但是实质上，我们可以通过</p>
-<pre><code>&gt; x &lt;- <span class="function"><span class="title">factor</span><span class="params">(c(<span class="string">'yes'</span>, <span class="string">'no'</span>, <span class="string">'yes'</span>)</span></span>)
-&gt; <span class="function"><span class="title">levels</span><span class="params">(x)</span></span>
-[<span class="number">1</span>] <span class="string">"no"</span>  <span class="string">"yes"</span>
-</code></pre><p>这个向量代表了几种分类。</p>
-<h4 id="Missing_Values">Missing Values</h4><p>Na和NaN, <strong>NaN仅代表数值计算的不存在，而Na是代表一切的不存在，即Na包含NaN</strong><br>我们可以通过<code>is.Na</code>和<code>is.NaN</code>来进行判断。</p>
-<h4 id="Data_Frames">Data Frames</h4><p>Data Frames简单理解就是一个表格，但是与Matrix不同的是，她可以包含不同类型的data，也就是说，<strong>DataFrames的每一列都是一个list</strong>。</p>
-<pre><code>&gt; k &lt;- data.<span class="function"><span class="title">frame</span><span class="params">(foo = <span class="number">1</span>:<span class="number">3</span>, w = c(T, F, F)</span></span>, row<span class="class">.names</span> = <span class="function"><span class="title">c</span><span class="params">(<span class="string">'1'</span>, <span class="string">'a'</span>, <span class="string">'k'</span>)</span></span>)
-&gt; k
-  foo     w
-<span class="number">1</span>   <span class="number">1</span>  TRUE
-<span class="tag">a</span>   <span class="number">2</span> FALSE
-k   <span class="number">3</span> FALSE
-</code></pre><p><strong>需要注意的是，每一个list的长度，都必须完全一样</strong>。</p>
-<h4 id="Names（别名）">Names（别名）</h4><p>对于一个向量、list或者matrix等等，我们都可以为里面的元素加上别名，如:</p>
-<pre><code>&gt; x &lt;- <span class="number">1</span>:<span class="number">3</span>
-&gt; <span class="function"><span class="title">names</span><span class="params">(x)</span></span> &lt;- <span class="function"><span class="title">c</span><span class="params">(T, F, <span class="string">"ha"</span>)</span></span>
-&gt; x
- TRUE FALSE    ha 
-    <span class="number">1</span>     <span class="number">2</span>     <span class="number">3</span> 
-</code></pre><p>其中，这些别名都会以字符串的形式存在，因此，你可以通过x[“TRUE”]来访问元素1。</p>
-<hr>
-<h3 id="进阶的R_哈哈哈">进阶的R 哈哈哈</h3><h4 id="Partical_Matching">Partical Matching</h4><p>R里面有个很酷的特性叫做Partial Matching。比如你定义了如下的list：<code>x &lt;- list(caonikljslkdfj = 5)</code>，每次都要输入<code>caonikljslkdfj</code>势必很麻烦，因此你可以使用<strong>$</strong>来获取，如<code>x$c</code> 即可以得到5了。</p>
-<h4 id="Subset">Subset</h4><p>在R里面，获取数据或者构建数据简直就是a piece of cake。(哈哈哈，英语好就是屌啊)</p>
-<p>比如有这样一个向量<code>x &lt;- c(1, 2, 3, 4, 5)</code>，</p>
-<p>你可以<code>x[1]</code> 来获取元素1，也可以通过<code>x[1:3]</code>来获取元素1到元素3。同样，你也可以通过<code>x[x &gt; 2]</code> 来获取元素中值比2大的元素。</p>
-<p>你也可以通过logical来构建另外的向量，如：</p>
-<pre><code>&gt; u &lt;- x &gt; <span class="number">2</span>
-&gt; u
-[<span class="number">1</span>] <span class="literal">FALSE</span> <span class="literal">FALSE</span>  <span class="literal">TRUE</span>  <span class="literal">TRUE</span>  <span class="literal">TRUE</span>
-</code></pre><p>而对于Matrix类型来说，<code>c &lt;- matrix(1:3, nrows = 3, ncols = 1)</code>，你可以使用<code>c[1, ]</code>来获取第一行所有列的数据，或者<code>c[,1]</code>来获取第一列所有行的数据。</p>
-<h4 id="[]_vs_[[]]_vs_$">[] vs [[]] vs $</h4><p>首先，这三个符号都可以获取元素，但是区别在于：</p>
-<ul>
-<li>[]返回的是和变量本身类型相同的东西，如果对list使用[]，那么返回的就是list，如果对向量使用，返回的就是向量，无关取出的元素本身的类型。</li>
-<li>[]可以获取多个元素，而[[]]和$不行。</li>
-<li>$可以模糊匹配（Partial Matching），而[[]]不行，如果要启用模糊匹配，得使用[[name, exact = F]]</li>
-<li>$不可以使用计算值，[[]]可以</li>
-</ul>
-<p>是不是很拗口？让我们来看几个例子，在看例子之前强调一点，</p>
-<p><strong>元素并非特指一个，而是一个基本的数据结构，比如对于向量 <code>x &lt;- 1:5</code>来说，里面的元素1到元素5分别都是一个元素。而对于<code>c&lt;- list(foo = 1:3, bar = 0.5)</code>来说，foo和bar都分别是一个元素，尽管foo本身仍然是个向量。</strong></p>
-<h5 id="例子">例子</h5><p>对于<code>c &lt;- list(foo = 1:3, bar = 0.6)</code>定义的一个list，我们分别使用：</p>
-<pre><code>&gt; c[<span class="string">"foo"</span>]
-$foo
-[<span class="number">1</span>] <span class="number">1</span> <span class="number">2</span> <span class="number">3</span>
-
-&gt; c[[<span class="string">"foo"</span>]]
-[<span class="number">1</span>] <span class="number">1</span> <span class="number">2</span> <span class="number">3</span>
-&gt; c$foo
-[<span class="number">1</span>] <span class="number">1</span> <span class="number">2</span> <span class="number">3</span>
-</code></pre><p>可以看到，通过［］取出的foo元素仍然是list，而[[]]和$取出的都是向量元素本身了。</p>
-<p>再比如计算变量的差别：</p>
-<pre><code>&gt; name &lt;- <span class="string">"foo"</span>
-&gt; c[[name]]
-[<span class="number">1</span>] <span class="number">1</span> <span class="number">2</span> <span class="number">3</span>
-&gt; c$name
-<span class="literal">NULL</span>
-</code></pre><p>可以看到，[[]]可以使用计算变量，而$不可以。<strong>这点其实和JavaScript里面的dot和[]操作符很类似的</strong></p>
-<p>模糊匹配差别：</p>
-<pre><code>&gt; c$f
-[<span class="number">1</span>] <span class="number">1</span> <span class="number">2</span> <span class="number">3</span>
-&gt; c[[<span class="string">"f"</span>]]
-<span class="literal">NULL</span>
-&gt; c[[<span class="string">"f"</span>, exact = F]]
-[<span class="number">1</span>] <span class="number">1</span> <span class="number">2</span> <span class="number">3</span>
-</code></pre><h4 id="向量化操作">向量化操作</h4><p><strong>R里面的所有计算操作都是并行的</strong>。</p>
-<p>因此，如果要计算两个Matrix的乘积，需要使用<code>%*%</code>，否则如果直接使用<code>*</code>就是对应位置的元素相乘而已。</p>
-
-      
-    </div>
-    <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/12/13/Learn-R-1/" data-id="ck9a3yubh003788i1nl4m5od5" class="article-share-link">Share</a>
-      
-        <a href="http://satanwoo.github.io/2015/12/13/Learn-R-1/#disqus_thread" class="article-comment-link">Comments</a>
-      
-      
-  <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/R/">R</a></li></ul>
 
     </footer>
   </div>
@@ -10990,7 +11017,7 @@ s.setAttribute('data-timestamp', +new Date());
   <div class="widget-wrap">
     <h3 class="widget-title">Tags</h3>
     <div class="widget">
-      <ul class="tag-list"><li class="tag-list-item"><a class="tag-list-link" href="/tags/Android/">Android</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Assembly/">Assembly</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/C/">C</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/C/">C++</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Growth/">Growth</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/JavaScript/">JavaScript</a><span class="tag-list-count">4</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Machine-Learning/">Machine Learning</a><span class="tag-list-count">4</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Math/">Math</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Performance/">Performance</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/R/">R</a><span class="tag-list-count">2</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Reverse-Engineering/">Reverse Engineering</a><span class="tag-list-count">6</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Swift/">Swift</a><span class="tag-list-count">6</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/XNU/">XNU</a><span class="tag-list-count">2</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/c/">c++</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/iOS/">iOS</a><span class="tag-list-count">45</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/shell/">shell</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/汇编/">汇编</a><span class="tag-list-count">1</span></li></ul>
+      <ul class="tag-list"><li class="tag-list-item"><a class="tag-list-link" href="/tags/Android/">Android</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Assembly/">Assembly</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Assembly-Language/">Assembly Language</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/C/">C</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/C/">C++</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Growth/">Growth</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/JavaScript/">JavaScript</a><span class="tag-list-count">4</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Machine-Learning/">Machine Learning</a><span class="tag-list-count">4</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Math/">Math</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Performance/">Performance</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/R/">R</a><span class="tag-list-count">2</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Reverse-Engineering/">Reverse Engineering</a><span class="tag-list-count">6</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Swift/">Swift</a><span class="tag-list-count">6</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/XNU/">XNU</a><span class="tag-list-count">2</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/c/">c++</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/iOS/">iOS</a><span class="tag-list-count">46</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/shell/">shell</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/汇编/">汇编</a><span class="tag-list-count">1</span></li></ul>
     </div>
   </div>
 
@@ -10999,7 +11026,7 @@ s.setAttribute('data-timestamp', +new Date());
   <div class="widget-wrap">
     <h3 class="widget-title">Tag Cloud</h3>
     <div class="widget tagcloud">
-      <a href="/tags/Android/" style="font-size: 10px;">Android</a> <a href="/tags/Assembly/" style="font-size: 10px;">Assembly</a> <a href="/tags/C/" style="font-size: 10px;">C</a> <a href="/tags/C/" style="font-size: 10px;">C++</a> <a href="/tags/Growth/" style="font-size: 10px;">Growth</a> <a href="/tags/JavaScript/" style="font-size: 15px;">JavaScript</a> <a href="/tags/Machine-Learning/" style="font-size: 15px;">Machine Learning</a> <a href="/tags/Math/" style="font-size: 10px;">Math</a> <a href="/tags/Performance/" style="font-size: 10px;">Performance</a> <a href="/tags/R/" style="font-size: 12.5px;">R</a> <a href="/tags/Reverse-Engineering/" style="font-size: 17.5px;">Reverse Engineering</a> <a href="/tags/Swift/" style="font-size: 17.5px;">Swift</a> <a href="/tags/XNU/" style="font-size: 12.5px;">XNU</a> <a href="/tags/c/" style="font-size: 10px;">c++</a> <a href="/tags/iOS/" style="font-size: 20px;">iOS</a> <a href="/tags/shell/" style="font-size: 10px;">shell</a> <a href="/tags/汇编/" style="font-size: 10px;">汇编</a>
+      <a href="/tags/Android/" style="font-size: 10px;">Android</a> <a href="/tags/Assembly/" style="font-size: 10px;">Assembly</a> <a href="/tags/Assembly-Language/" style="font-size: 10px;">Assembly Language</a> <a href="/tags/C/" style="font-size: 10px;">C</a> <a href="/tags/C/" style="font-size: 10px;">C++</a> <a href="/tags/Growth/" style="font-size: 10px;">Growth</a> <a href="/tags/JavaScript/" style="font-size: 15px;">JavaScript</a> <a href="/tags/Machine-Learning/" style="font-size: 15px;">Machine Learning</a> <a href="/tags/Math/" style="font-size: 10px;">Math</a> <a href="/tags/Performance/" style="font-size: 10px;">Performance</a> <a href="/tags/R/" style="font-size: 12.5px;">R</a> <a href="/tags/Reverse-Engineering/" style="font-size: 17.5px;">Reverse Engineering</a> <a href="/tags/Swift/" style="font-size: 17.5px;">Swift</a> <a href="/tags/XNU/" style="font-size: 12.5px;">XNU</a> <a href="/tags/c/" style="font-size: 10px;">c++</a> <a href="/tags/iOS/" style="font-size: 20px;">iOS</a> <a href="/tags/shell/" style="font-size: 10px;">shell</a> <a href="/tags/汇编/" style="font-size: 10px;">汇编</a>
     </div>
   </div>
 
@@ -11008,7 +11035,7 @@ s.setAttribute('data-timestamp', +new Date());
   <div class="widget-wrap">
     <h3 class="widget-title">Archives</h3>
     <div class="widget">
-      <ul class="archive-list"><li class="archive-list-item"><a class="archive-list-link" href="/archives/2020/04/">April 2020</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2020/02/">February 2020</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2019/12/">December 2019</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2019/10/">October 2019</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2019/07/">July 2019</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2019/01/">January 2019</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2018/12/">December 2018</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2018/10/">October 2018</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2018/05/">May 2018</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2018/04/">April 2018</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2018/02/">February 2018</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2018/01/">January 2018</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/11/">November 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/10/">October 2017</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/09/">September 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/08/">August 2017</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/07/">July 2017</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/06/">June 2017</a><span class="archive-list-count">3</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/04/">April 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/01/">January 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/10/">October 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/09/">September 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/07/">July 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/05/">May 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/04/">April 2016</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/03/">March 2016</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/02/">February 2016</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/12/">December 2015</a><span class="archive-list-count">6</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/11/">November 2015</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/10/">October 2015</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/09/">September 2015</a><span class="archive-list-count">4</span></li></ul>
+      <ul class="archive-list"><li class="archive-list-item"><a class="archive-list-link" href="/archives/2020/04/">April 2020</a><span class="archive-list-count">3</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2020/02/">February 2020</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2019/12/">December 2019</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2019/10/">October 2019</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2019/07/">July 2019</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2019/01/">January 2019</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2018/12/">December 2018</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2018/10/">October 2018</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2018/05/">May 2018</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2018/04/">April 2018</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2018/02/">February 2018</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2018/01/">January 2018</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/11/">November 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/10/">October 2017</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/09/">September 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/08/">August 2017</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/07/">July 2017</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/06/">June 2017</a><span class="archive-list-count">3</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/04/">April 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/01/">January 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/10/">October 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/09/">September 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/07/">July 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/05/">May 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/04/">April 2016</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/03/">March 2016</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/02/">February 2016</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/12/">December 2015</a><span class="archive-list-count">6</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/11/">November 2015</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/10/">October 2015</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/09/">September 2015</a><span class="archive-list-count">4</span></li></ul>
     </div>
   </div>
 
@@ -11018,6 +11045,10 @@ s.setAttribute('data-timestamp', +new Date());
     <h3 class="widget-title">Recents</h3>
     <div class="widget">
       <ul>
+        
+          <li>
+            <a href="/2020/04/26/TrampolineHookOpenSource/">基于桥的全量方法 Hook 方案（3）- 开源 TrampolineHook</a>
+          </li>
         
           <li>
             <a href="/2020/04/22/NewBridgeHook/">基于桥的全量方法 Hook 方案（2） - 全新升级</a>
@@ -11033,10 +11064,6 @@ s.setAttribute('data-timestamp', +new Date());
         
           <li>
             <a href="/2019/12/01/SIMD-1/">了解 SIMD 指令</a>
-          </li>
-        
-          <li>
-            <a href="/2019/10/27/MNN1/">浅谈移动工程师跨界机器学习之路</a>
           </li>
         
       </ul>
