@@ -4,7 +4,7 @@
   
   <link href="/atom.xml" rel="self"/>
   <link href="http://satanwoo.github.io/"/>
-  <updated>2020-04-25T18:18:54.797Z</updated>
+  <updated>2020-04-26T14:48:53.632Z</updated>
   <id>http://satanwoo.github.io/</id>
   
   <author>
@@ -15,16 +15,16 @@
   <generator uri="http://hexo.io/">Hexo</generator>
   
   <entry>
-    <title><![CDATA[基于桥的全量方法 Hook 方案（3）- 开源 TrampolineHook]]></title>
+    <title><![CDATA[基于桥的全量方法 Hook 方案（3）- TrampolineHook]]></title>
     <link href="http://satanwoo.github.io/2020/04/26/TrampolineHookOpenSource/"/>
     <id>http://satanwoo.github.io/2020/04/26/TrampolineHookOpenSource/</id>
     <published>2020-04-25T16:28:53.000Z</published>
-    <updated>2020-04-25T18:18:54.797Z</updated>
+    <updated>2020-04-26T14:48:53.632Z</updated>
     <content type="html"><![CDATA[<blockquote>
 <p>本来以为是双休日，结果五一调休本周末只休一天，懵逼。不过还算完成了承诺，赶了出来。</p>
 </blockquote>
 <p>开源地址：<a href="https://github.com/SatanWoo/TrampolineHook" target="_blank" rel="external">https://github.com/SatanWoo/TrampolineHook</a>  </p>
-<h3 id="TrampolineHook_是什么">TrampolineHook 是什么</h3><p>之前<b style="color:red">中国90后 iOS 第一人杨萧玉</b>在看到我<a href="http://satanwoo.github.io/2020/04/22/NewBridgeHook/">《基于桥的全量方法 Hook 方案（2） - 全新升级》</a> 后就问我这个和直接用 <code>method_exchangeImplementation</code> 之类的 <code>runtime</code> 方法交换 <code>IMP</code> 性能对比咋样？</p>
+<h3 id="TrampolineHook_是什么">TrampolineHook 是什么</h3><p>之前<strong>杨萧玉</strong>在看到我<a href="http://satanwoo.github.io/2020/04/22/NewBridgeHook/">《基于桥的全量方法 Hook 方案（2） - 全新升级》</a> 后就问我这个和直接用 <code>method_exchangeImplementation</code> 之类的 <code>runtime</code> 方法交换 <code>IMP</code> 性能对比咋样？</p>
 <p>所以这篇文章开头先占用大家宝贵的两分钟，简要说明下。</p>
 <p><code>TrampolineHook</code> 本质上不是用来 <code>Swizzling</code> 的框架，取 <code>Hook</code> 这个名字只是为了读起来顺口。<b style="color:red">它实际上是一个中心重定向框架。</b> 换句话说，你可以认为它是为了通过<strong>一个函数替换/拦截所有你想要函数的框架。</strong></p>
 <p>其实这个中心重定向的思想并不新潮，很多人（包括我自己）在内就曾经利用重载 <code>objc_msgForward</code> 干过这样的事。</p>
@@ -56,6 +56,9 @@
 </ul>
 <p><img src="https://landonf.org/static/blog/code/objc/blockimp_vm_remap.png" alt=""></p>
 <p><img src="https://landonf.org/static/blog/code/objc/blockimp_vm_remap_data.png" alt=""></p>
+<blockquote>
+<p>上述图片引用自<a href="https://landonf.org/code/objc/imp_implementationWithBlock.20110413.html" target="_blank" rel="external">Implementing imp_implementationWithBlock()</a></p>
+</blockquote>
 <p>因此，我们可以通过在编写代码的过程中，<b style="color:red">精心构造、预留在程序二进制的代码页</b>，在运行时不断<strong>“复制映射”</strong>，来完成特殊的使命。</p>
 <p>在我们的定义中，我们是构造了<b style="color:red">连续的两个页</b>。</p>
 <h4 id="流程设计">流程设计</h4><p>要构造特殊的程序二进制代码，首先还是要梳理我们的目的，<b style="color:red">我们的诉求是所有的函数都能先进入我们的一个中心重定向函数，执行自定义的操作，然后返回原函数，同时这个调用栈不能乱。</b></p>
@@ -151,7 +154,9 @@
 <li>iOS 10 的时候对应的二进制是 <code>UIKit</code>，到了 iOS 12/13 成了 <code>UIKitCore</code>，所以原先获取二进制的逻辑失效了，为了避免后续版本的变更干扰，我采用了苹果自身的守候，通过 <code>class_getImageName([UIResponder class])</code> 来保证获取的就是我们理解上的 <code>UIKit</code> 动态库。</li>
 </ul>
 <p>当然 <code>TrampolineHook</code> 的作用不止于此，争取过段时间把我的一些想法做完善再和大家交流。</p>
-<h3 id="后续思考">后续思考</h3><p>如果有朋友对 arm64 的汇编比较熟悉，同时对函数调用也比较了解的话，会很快的发现我上述提供的汇编代码存在一个漏洞（虽然这个漏洞绝大多数人用不到），感兴趣的朋友可以微信交流下。</p>
+<h3 id="后续思考">后续思考</h3><p>本质上 <code>Trampoline</code> 和 <code>vm_remap</code> 技术不是新的技术，很早就有人应用了，构造 <code>Trampoline</code> 实际上在苹果自身关于 <code>Block</code> 的实现中就有。业界也有 <code>SwiftTrace</code> 也是用了对应的技术。</p>
+<p>真正的关键在于你用 <code>Trampoline</code> 做什么？用途的不同也决定了效果的不同，这也是我把之前的代码重写 <code>TrampolineHook</code> 中所收获的，而且随着 <code>TrampolineHook</code> 相对我自身之前实现的优化，我发现眼前豁然开朗，能玩的事情还有很多，哈哈。</p>
+<p>对了，如果有朋友对 arm64 的汇编比较熟悉，同时对函数调用也比较了解的话，会很快的发现我上述提供的汇编代码存在一个漏洞（虽然这个漏洞绝大多数人用不到），感兴趣的朋友可以微信交流下。</p>
 <p><b style="color:red">开源地址：<a href="https://github.com/SatanWoo/TrampolineHook" target="_blank" rel="external">https://github.com/SatanWoo/TrampolineHook</a> </b> 如果大家有什么想法或者遇到了自身项目中的 Bug，欢迎 issue。</p>
 ]]></content>
     <summary type="html">
@@ -161,9 +166,9 @@
 <p>开源地址：<a href="https://github.com/SatanWoo/TrampolineHook" tar]]>
     </summary>
     
-      <category term="Assembly Language" scheme="http://satanwoo.github.io/tags/Assembly-Language/"/>
-    
       <category term="iOS" scheme="http://satanwoo.github.io/tags/iOS/"/>
+    
+      <category term="汇编" scheme="http://satanwoo.github.io/tags/%E6%B1%87%E7%BC%96/"/>
     
   </entry>
   
