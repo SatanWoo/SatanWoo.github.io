@@ -4,7 +4,7 @@
   
   <link href="/atom.xml" rel="self"/>
   <link href="http://satanwoo.github.io/"/>
-  <updated>2020-05-17T17:32:24.397Z</updated>
+  <updated>2020-05-17T17:32:46.496Z</updated>
   <id>http://satanwoo.github.io/</id>
   
   <author>
@@ -19,7 +19,7 @@
     <link href="http://satanwoo.github.io/2020/05/18/TrampolineHookStack/"/>
     <id>http://satanwoo.github.io/2020/05/18/TrampolineHookStack/</id>
     <published>2020-05-17T17:27:45.000Z</published>
-    <updated>2020-05-17T17:32:24.397Z</updated>
+    <updated>2020-05-17T17:32:46.496Z</updated>
     <content type="html"><![CDATA[<p>在之前的文章<a href="http://satanwoo.github.io/2020/04/26/TrampolineHookOpenSource/">《基于桥的全量方法 Hook 方案（3）- TrampolineHook》</a> 的文末，我说如果对汇编熟悉的同学可能会发现我之前实现的一个漏洞。</p>
 <p><b style="color:red">这个漏洞实际上是关于上下文污染的。</b> 一提到到上下文污染，可能我们绝大多数人想到的都是<b style="color:red">寄存器污染</b>，但是实际上还有一个不容我们忽视的上下文资源：<strong>栈</strong>。</p>
 <h3 id="先看一个例子">先看一个例子</h3><p>假设有这样一个类 <code>TestObject</code>和 不定参函数 <code>method</code>，定义如下：</p>
