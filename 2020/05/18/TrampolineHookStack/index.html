@@ -1,0 +1,465 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  
+  <title>TrampolineHook - 解决栈污染问题支持变参 Hook | SatanWoo</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+  <meta name="description" content="在之前的文章《基于桥的全量方法 Hook 方案（3）- TrampolineHook》 的文末，我说如果对汇编熟悉的同学可能会发现我之前实现的一个漏洞。
+这个漏洞实际上是关于上下文污染的。 一提到到上下文污染，可能我们绝大多数人想到的都是寄存器污染，但是实际上还有一个不容我们忽视的上下文资源：栈。
+先看一个例子假设有这样一个类 TestObject和 不定参函数 method，定义如下：
+@int">
+<meta property="og:type" content="article">
+<meta property="og:title" content="TrampolineHook - 解决栈污染问题支持变参 Hook">
+<meta property="og:url" content="http://satanwoo.github.io/2020/05/18/TrampolineHookStack/index.html">
+<meta property="og:site_name" content="SatanWoo">
+<meta property="og:description" content="在之前的文章《基于桥的全量方法 Hook 方案（3）- TrampolineHook》 的文末，我说如果对汇编熟悉的同学可能会发现我之前实现的一个漏洞。
+这个漏洞实际上是关于上下文污染的。 一提到到上下文污染，可能我们绝大多数人想到的都是寄存器污染，但是实际上还有一个不容我们忽视的上下文资源：栈。
+先看一个例子假设有这样一个类 TestObject和 不定参函数 method，定义如下：
+@int">
+<meta property="og:image" content="https://upload-images.jianshu.io/upload_images/4292627-35ce3b243cc8e2bf.png?imageMogr2/auto-orient/strip%7CimageView2/2/w/1240">
+<meta property="og:image" content="https://upload-images.jianshu.io/upload_images/4292627-6420b181488d73f5.png?imageMogr2/auto-orient/strip%7CimageView2/2/w/1240">
+<meta property="og:image" content="https://upload-images.jianshu.io/upload_images/4292627-78690d2c7c2ef001.png?imageMogr2/auto-orient/strip%7CimageView2/2/w/1240">
+<meta property="og:updated_time" content="2020-05-17T17:32:24.397Z">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="TrampolineHook - 解决栈污染问题支持变参 Hook">
+<meta name="twitter:description" content="在之前的文章《基于桥的全量方法 Hook 方案（3）- TrampolineHook》 的文末，我说如果对汇编熟悉的同学可能会发现我之前实现的一个漏洞。
+这个漏洞实际上是关于上下文污染的。 一提到到上下文污染，可能我们绝大多数人想到的都是寄存器污染，但是实际上还有一个不容我们忽视的上下文资源：栈。
+先看一个例子假设有这样一个类 TestObject和 不定参函数 method，定义如下：
+@int">
+  
+    <link rel="alternative" href="/atom.xml" title="SatanWoo" type="application/atom+xml">
+  
+  
+    <link rel="icon" href="/favicon.png">
+  
+  <link rel="stylesheet" href="/css/style.css" type="text/css">
+  
+
+</head>
+<body>
+  <div id="container">
+    <div id="wrap">
+      <header id="header">
+  <div id="banner"></div>
+  <div id="header-outer" class="outer">
+    <div id="header-title" class="inner">
+      <h1 id="logo-wrap">
+        <a href="/" id="logo">SatanWoo</a>
+      </h1>
+      
+    </div>
+    <div id="header-inner" class="inner">
+      <nav id="main-nav">
+        <a id="main-nav-toggle" class="nav-icon"></a>
+        
+          <a class="main-nav-link" href="/">Home</a>
+        
+          <a class="main-nav-link" href="/archives">Archives</a>
+        
+          <a class="main-nav-link" href="/sitemap.xml">map</a>
+        
+      </nav>
+      <nav id="sub-nav">
+        
+          <a id="nav-rss-link" class="nav-icon" href="/atom.xml" title="RSS Feed"></a>
+        
+        <a id="nav-search-btn" class="nav-icon" title="Search"></a>
+      </nav>
+      <div id="search-form-wrap">
+        <form action="//google.com/search" method="get" accept-charset="UTF-8" class="search-form"><input type="search" name="q" results="0" class="search-form-input" placeholder="Search"><button type="submit" class="search-form-submit">&#xF002;</button><input type="hidden" name="sitesearch" value="http://satanwoo.github.io"></form>
+      </div>
+    </div>
+  </div>
+</header>
+      <div class="outer">
+        <section id="main"><article id="post-TrampolineHookStack" class="article article-type-post" itemscope itemprop="blogPost">
+  <div class="article-meta">
+    <a href="/2020/05/18/TrampolineHookStack/" class="article-date">
+  <time datetime="2020-05-17T17:27:45.000Z" itemprop="datePublished">2020-05-18</time>
+</a>
+    
+  </div>
+  <div class="article-inner">
+    
+    
+      <header class="article-header">
+        
+  
+    <h1 class="article-title" itemprop="name">
+      TrampolineHook - 解决栈污染问题支持变参 Hook
+    </h1>
+  
+
+      </header>
+    
+    <div class="article-entry" itemprop="articleBody">
+      
+        <p>在之前的文章<a href="http://satanwoo.github.io/2020/04/26/TrampolineHookOpenSource/">《基于桥的全量方法 Hook 方案（3）- TrampolineHook》</a> 的文末，我说如果对汇编熟悉的同学可能会发现我之前实现的一个漏洞。</p>
+<p><b style="color:red">这个漏洞实际上是关于上下文污染的。</b> 一提到到上下文污染，可能我们绝大多数人想到的都是<b style="color:red">寄存器污染</b>，但是实际上还有一个不容我们忽视的上下文资源：<strong>栈</strong>。</p>
+<h3 id="先看一个例子">先看一个例子</h3><p>假设有这样一个类 <code>TestObject</code>和 不定参函数 <code>method</code>，定义如下：</p>
+<pre><code>@interface <span class="type">TestObject</span> : <span class="type">NSObject</span>
+@<span class="keyword">end</span>
+
+@implementation <span class="type">TestObject</span>
+
+- (void)<span class="keyword">method</span>:(<span class="built_in">int</span> *)<span class="keyword">value</span>,...
+{
+      va_list <span class="built_in">list</span>;
+    va_start(<span class="built_in">list</span>, <span class="keyword">value</span>);
+
+    <span class="keyword">while</span> (<span class="keyword">value</span>) {
+        <span class="type">NSLog</span>(@<span class="string">"orig value is %d"</span>, *<span class="keyword">value</span>);
+        <span class="keyword">value</span> = va_arg(<span class="built_in">list</span>, <span class="built_in">int</span> *);
+    }
+    va_end(<span class="built_in">list</span>);
+}
+
+@<span class="keyword">end</span>
+</code></pre><p>如果要使用 <code>TrampolineHook</code> 来拦截 <code>method</code> 的调用，也非常简单。如下所示：</p>
+<pre><code><span class="type">THInterceptor</span> *sharedInterceptor = [<span class="type">THInterceptor</span> sharedInterceptorWithFunction:(<span class="type">IMP</span>)wzq_check_variadic];
+
+<span class="type">Method</span> m = class_getInstanceMethod([<span class="type">TestObject</span> class], @selector(<span class="keyword">method</span>:));
+<span class="type">IMP</span> imp = method_getImplementation(m);
+
+<span class="type">THInterceptorResult</span> *<span class="literal">result</span> = [sharedInterceptor interceptFunction:(<span class="type">IMP</span>)imp];
+<span class="keyword">if</span> (<span class="literal">result</span>.state == <span class="type">THInterceptStateSuccess</span>) {
+    method_setImplementation(m, (<span class="type">IMP</span>)<span class="literal">result</span>.replacedAddress);
+}
+
+// 拦截函数
+<span class="type">void</span> wzq_check_variadic(id a, <span class="type">char</span> * methodName, <span class="type">int</span> *v, ...)
+{
+        <span class="type">NSLog</span>(@<span class="string">"haha checked %@ %s"</span>, a, methodName);
+}
+</code></pre><p>当我们使用如下方式调用 <code>-[TestObject method:]</code> 的时候，<b style="color:red">你会发现一切正常，毫无问题。</b></p>
+<pre><code><span class="type">TestObject</span> *obj = [[<span class="type">TestObject</span> alloc] init];
+<span class="type">int</span> a = <span class="number">0</span>;
+<span class="type">int</span> b = <span class="number">1</span>;
+<span class="type">int</span> c = <span class="number">2</span>;
+<span class="type">int</span> d = <span class="number">3</span>;
+<span class="type">int</span> e = <span class="number">4</span>;
+<span class="type">int</span> f = <span class="number">5</span>;
+<span class="type">int</span> g = <span class="number">6</span>;
+<span class="type">int</span> h = <span class="number">7</span>;
+<span class="type">int</span> i = <span class="number">8</span>;
+[obj <span class="keyword">method</span>:&amp;a, &amp;b, &amp;c, &amp;d, &amp;e, &amp;f, &amp;g, &amp;h, &amp;i, <span class="keyword">nil</span>];
+</code></pre><p>但是如果你将拦截函数中添加打印参数的语句后，<b style="color:red">你会发现出现了必现的崩溃情形，而且是必定崩溃在第二次读取变参的时候。</b></p>
+<pre><code><span class="keyword">void</span> wzq_check_variadic(<span class="keyword">id</span> a, <span class="keyword">char</span> * methodName, <span class="keyword">int</span> *v, ...)
+{
+    <span class="built_in">NSLog</span>(<span class="string">@"haha checked %@ %s"</span>, a, methodName);
+    va_list args;
+    va_start(args, v);
+    <span class="keyword">while</span> (v != <span class="literal">NULL</span>) { 
+        <span class="built_in">NSLog</span>(<span class="string">@"v is %d"</span>, *v);
+        v = va_arg(args, <span class="keyword">int</span> *); <span class="comment">// crash </span>
+    }
+    va_end(args);
+}
+</code></pre><p>为什么添加了读取参数的代码就导致运行崩溃了？有点意思。</p>
+<h3 id="了解变参的传递过程。">了解变参的传递过程。</h3><blockquote>
+<p>为了避免优化的干扰，如下汇编生成的优化选项为 <code>-O0</code></p>
+</blockquote>
+<p>为了看运行时的栈结构是如何生成的，我们通过汇编结合图的形式来一探究竟没 Hook 的时候的调用情况。</p>
+<p>首先先看 Caller 函数，即 <code>[obj method:&amp;a, &amp;b, &amp;c, &amp;d, &amp;e, &amp;f, &amp;g, &amp;h, &amp;i, nil];</code> 这段代码所处的函数，汇编如下：</p>
+<pre><code> <span class="comment">// prologue</span>
+<span class="number">0x1009dc428</span> &lt;+<span class="number">0</span>&gt;:   sub    sp, sp, <span class="preprocessor">#<span class="number">0xb0</span>             ; =<span class="number">0xb0</span> </span>
+<span class="number">0x1009dc42c</span> &lt;+<span class="number">4</span>&gt;:   stp    x29, x30, [sp, <span class="preprocessor">#<span class="number">0xa0</span>]</span>
+<span class="number">0x1009dc430</span> &lt;+<span class="number">8</span>&gt;:   add    x29, sp, <span class="preprocessor">#<span class="number">0xa0</span>            ; =<span class="number">0xa0</span> </span>
+
+<span class="comment">// 构造 int 变量 0 - 8</span>
+<span class="number">0x1009dc498</span> &lt;+<span class="number">112</span>&gt;: stur   wzr, [x29, <span class="preprocessor">#-<span class="number">0x2c</span>]</span>
+<span class="number">0x1009dc49c</span> &lt;+<span class="number">116</span>&gt;: mov    w11, <span class="preprocessor">#<span class="number">0x1</span></span>
+<span class="number">0x1009dc4a0</span> &lt;+<span class="number">120</span>&gt;: stur   w11, [x29, <span class="preprocessor">#-<span class="number">0x30</span>]</span>
+<span class="number">0x1009dc4a4</span> &lt;+<span class="number">124</span>&gt;: mov    w11, <span class="preprocessor">#<span class="number">0x2</span></span>
+<span class="number">0x1009dc4a8</span> &lt;+<span class="number">128</span>&gt;: stur   w11, [x29, <span class="preprocessor">#-<span class="number">0x34</span>]</span>
+<span class="number">0x1009dc4ac</span> &lt;+<span class="number">132</span>&gt;: mov    w11, <span class="preprocessor">#<span class="number">0x3</span></span>
+<span class="number">0x1009dc4b0</span> &lt;+<span class="number">136</span>&gt;: stur   w11, [x29, <span class="preprocessor">#-<span class="number">0x38</span>]</span>
+<span class="number">0x1009dc4b4</span> &lt;+<span class="number">140</span>&gt;: mov    w11, <span class="preprocessor">#<span class="number">0x4</span></span>
+<span class="number">0x1009dc4b8</span> &lt;+<span class="number">144</span>&gt;: stur   w11, [x29, <span class="preprocessor">#-<span class="number">0x3c</span>]</span>
+<span class="number">0x1009dc4bc</span> &lt;+<span class="number">148</span>&gt;: mov    w11, <span class="preprocessor">#<span class="number">0x5</span></span>
+<span class="number">0x1009dc4c0</span> &lt;+<span class="number">152</span>&gt;: stur   w11, [x29, <span class="preprocessor">#-<span class="number">0x40</span>]</span>
+<span class="number">0x1009dc4c4</span> &lt;+<span class="number">156</span>&gt;: mov    w11, <span class="preprocessor">#<span class="number">0x6</span></span>
+<span class="number">0x1009dc4c8</span> &lt;+<span class="number">160</span>&gt;: stur   w11, [x29, <span class="preprocessor">#-<span class="number">0x44</span>]</span>
+<span class="number">0x1009dc4cc</span> &lt;+<span class="number">164</span>&gt;: mov    w11, <span class="preprocessor">#<span class="number">0x7</span></span>
+<span class="number">0x1009dc4d0</span> &lt;+<span class="number">168</span>&gt;: stur   w11, [x29, <span class="preprocessor">#-<span class="number">0x48</span>]</span>
+<span class="number">0x1009dc4d4</span> &lt;+<span class="number">172</span>&gt;: mov    w11, <span class="preprocessor">#<span class="number">0x8</span></span>
+<span class="number">0x1009dc4d8</span> &lt;+<span class="number">176</span>&gt;: stur   w11, [x29, <span class="preprocessor">#-<span class="number">0x4c</span>]</span>
+<span class="number">0x1009dc4dc</span> &lt;+<span class="number">180</span>&gt;: ldur   x9, [x29, <span class="preprocessor">#-<span class="number">0x28</span>]</span>
+<span class="number">0x1009dc4e0</span> &lt;+<span class="number">184</span>&gt;: ldr    x1, [x8]
+<span class="number">0x1009dc4e4</span> &lt;+<span class="number">188</span>&gt;: mov    x8, sp
+<span class="number">0x1009dc4e8</span> &lt;+<span class="number">192</span>&gt;: mov    x10, <span class="preprocessor">#<span class="number">0x0</span></span>
+
+<span class="comment">// 把对应 int 变量的地址存入栈中 </span>
+<span class="number">0x1009dc4ec</span> &lt;+<span class="number">196</span>&gt;: str    x10, [x8, <span class="preprocessor">#<span class="number">0x40</span>]</span>
+<span class="number">0x1009dc4f0</span> &lt;+<span class="number">200</span>&gt;: sub    x10, x29, <span class="preprocessor">#<span class="number">0x4c</span>           ; =<span class="number">0x4c</span> </span>
+<span class="number">0x1009dc4f4</span> &lt;+<span class="number">204</span>&gt;: str    x10, [x8, <span class="preprocessor">#<span class="number">0x38</span>]</span>
+<span class="number">0x1009dc4f8</span> &lt;+<span class="number">208</span>&gt;: sub    x10, x29, <span class="preprocessor">#<span class="number">0x48</span>           ; =<span class="number">0x48</span> </span>
+<span class="number">0x1009dc4fc</span> &lt;+<span class="number">212</span>&gt;: str    x10, [x8, <span class="preprocessor">#<span class="number">0x30</span>]</span>
+<span class="number">0x1009dc500</span> &lt;+<span class="number">216</span>&gt;: sub    x10, x29, <span class="preprocessor">#<span class="number">0x44</span>           ; =<span class="number">0x44</span> </span>
+<span class="number">0x1009dc504</span> &lt;+<span class="number">220</span>&gt;: str    x10, [x8, <span class="preprocessor">#<span class="number">0x28</span>]</span>
+<span class="number">0x1009dc508</span> &lt;+<span class="number">224</span>&gt;: sub    x10, x29, <span class="preprocessor">#<span class="number">0x40</span>           ; =<span class="number">0x40</span> </span>
+<span class="number">0x1009dc50c</span> &lt;+<span class="number">228</span>&gt;: str    x10, [x8, <span class="preprocessor">#<span class="number">0x20</span>]</span>
+<span class="number">0x1009dc510</span> &lt;+<span class="number">232</span>&gt;: sub    x10, x29, <span class="preprocessor">#<span class="number">0x3c</span>           ; =<span class="number">0x3c</span> </span>
+<span class="number">0x1009dc514</span> &lt;+<span class="number">236</span>&gt;: str    x10, [x8, <span class="preprocessor">#<span class="number">0x18</span>]</span>
+<span class="number">0x1009dc518</span> &lt;+<span class="number">240</span>&gt;: sub    x10, x29, <span class="preprocessor">#<span class="number">0x38</span>           ; =<span class="number">0x38</span> </span>
+<span class="number">0x1009dc51c</span> &lt;+<span class="number">244</span>&gt;: str    x10, [x8, <span class="preprocessor">#<span class="number">0x10</span>]</span>
+<span class="number">0x1009dc520</span> &lt;+<span class="number">248</span>&gt;: sub    x10, x29, <span class="preprocessor">#<span class="number">0x34</span>           ; =<span class="number">0x34</span> </span>
+<span class="number">0x1009dc524</span> &lt;+<span class="number">252</span>&gt;: str    x10, [x8, <span class="preprocessor">#<span class="number">0x8</span>]</span>
+<span class="number">0x1009dc528</span> &lt;+<span class="number">256</span>&gt;: sub    x10, x29, <span class="preprocessor">#<span class="number">0x30</span>           ; =<span class="number">0x30</span> </span>
+<span class="number">0x1009dc52c</span> &lt;+<span class="number">260</span>&gt;: str    x10, [x8]
+
+ <span class="comment">// 其余参数 x0, x1, x2</span>
+<span class="number">0x1009dc530</span> &lt;+<span class="number">264</span>&gt;: sub    x2, x29, <span class="preprocessor">#<span class="number">0x2c</span>            ; =<span class="number">0x2c</span> </span>
+<span class="number">0x1009dc534</span> &lt;+<span class="number">268</span>&gt;: mov    x0, x9
+
+<span class="comment">// 调用 method 函数</span>
+<span class="number">0x1009dc538</span> &lt;+<span class="number">272</span>&gt;: bl     <span class="number">0x1009e8d9c</span>               ; symbol stub <span class="keyword">for</span>: objc_msgSend
+</code></pre><p>上述这段函数，简要而言，就是干了四件事：</p>
+<ul>
+<li><p>分配 176 byte 的栈内存</p>
+</li>
+<li><p>在栈上分配 a = 0, b = 1 等等 9 个变量</p>
+</li>
+<li><p>把 &amp;b, &amp;c 等 8个 int 变量的地址压栈。</p>
+</li>
+<li><p>x0 (obj), x1 (method), x2(&amp;a) </p>
+</li>
+<li><p>调用 method 函数</p>
+</li>
+</ul>
+<p>如果不理解, 可以参考这张图：</p>
+<p><img src="https://upload-images.jianshu.io/upload_images/4292627-35ce3b243cc8e2bf.png?imageMogr2/auto-orient/strip%7CimageView2/2/w/1240" alt=""></p>
+<p>而当进入 <code>method:</code> 函数时，汇编如下：</p>
+<p><img src="https://upload-images.jianshu.io/upload_images/4292627-6420b181488d73f5.png?imageMogr2/auto-orient/strip%7CimageView2/2/w/1240" alt=""></p>
+<p><b style="color:red">重点看两行蓝色汇编断点的地方，暗示一种循环。</b></p>
+<p>简要来说，就是从变参列表的第一参数（寄存器中的值代表地址），开始读取，循环遍历。这里的循环利用了栈空间在函数调用间的连续性，不断将偏移地址从原来 caller 函数的 sp 回溯，读取处于高地址的 caller 栈空间中的 int 变量地址。</p>
+<p><img src="https://upload-images.jianshu.io/upload_images/4292627-78690d2c7c2ef001.png?imageMogr2/auto-orient/strip%7CimageView2/2/w/1240" alt=""></p>
+<p>看到这，我想大家也知道了<b style="color:red">为什么是必定崩溃在第二次读取变参的时候。</b></p>
+<ul>
+<li><p>x0, x1 不用说，是寄存器参数。和变参不变参函数无关，这也能解释为什么只读取 id obj 和 SEL selector 不会崩溃。</p>
+</li>
+<li><p>x2，即变参函数列表的第一个参数，我这里把他成为变参的<b style="color:red">锚点参数</b>，它也是通过寄存器传递，所以读取的时候没问题。</p>
+</li>
+<li><p>变参列表的后续参数都是分配在调用函数（caller）中，而 TrampolineHook 在调用 interceptor 之前利用了栈（操作 SP）来保存上下文，<b style="color:red">破坏了上下文，导致循环从栈地址获取参数的时候崩溃</b></p>
+<pre><code><span class="label">stp</span> <span class="literal">q0</span>,  <span class="literal">q1</span>,   [<span class="literal">sp</span>, #-<span class="number">32</span>]!
+<span class="label">stp</span> <span class="literal">q2</span>,  <span class="literal">q3</span>,   [<span class="literal">sp</span>, #-<span class="number">32</span>]!
+<span class="label">stp</span> <span class="literal">q4</span>,  <span class="literal">q5</span>,   [<span class="literal">sp</span>, #-<span class="number">32</span>]!
+<span class="label">stp</span> <span class="literal">q6</span>,  <span class="literal">q7</span>,   [<span class="literal">sp</span>, #-<span class="number">32</span>]!
+<span class="label">stp</span> <span class="literal">lr</span>,  x10,  [<span class="literal">sp</span>, #-<span class="number">16</span>]!
+<span class="label">stp</span> x0,  x1,   [<span class="literal">sp</span>, #-<span class="number">16</span>]!
+</code></pre></li>
+<li><p>而调用原函数的时候，<b style="color:red">由于栈已经复原了，所以就不会出现崩溃了。</b></p>
+</li>
+</ul>
+<h3 id="解决方案">解决方案</h3><p>了解了问题出现的原因，解决办法就很简单了，我们要让调用 inteceptor 时候的上下文和调用原函数一样。</p>
+<ul>
+<li><p>还是构造一堆的动态trampoline，让原函数替换到 trampoline，同时保存原函数的 IMP。</p>
+</li>
+<li><p>依然保存原先需要的上下文，比如通用寄存器、浮点寄存器，<strong>但是不能使用栈了。</strong></p>
+</li>
+<li><p>调用 interceptor。</p>
+</li>
+<li><p>恢复上下文，调用到原函数。</p>
+</li>
+</ul>
+<p>其实真个步骤和原先基本一样，唯一需要考虑的就是<b style="color:red">一点也不用</b>栈的话我们保存在哪？</p>
+<p><b style="color:red">堆上。</b><br><b style="color:red">堆上。</b><br><b style="color:red">堆上。</b>  </p>
+<p>简单而言，我们把上下文一股脑都保存到堆上就行。需要保存的上下文大致类似于一个结构体：</p>
+<pre><code><span class="keyword">typedef</span> <span class="keyword">struct</span> _THPageVariadicContext {
+    <span class="keyword">int64_t</span> gR[<span class="number">10</span>];              <span class="comment">// general registers x0-x8 + x13</span>
+    <span class="keyword">int64_t</span> vR[<span class="number">16</span>];              <span class="comment">// float   registers q0-q7</span>
+    <span class="keyword">int64_t</span> linkRegister;        <span class="comment">// lr</span>
+    <span class="keyword">int64_t</span> originIMPRegister;   <span class="comment">// origin</span>
+} THPageVariadicContext;
+</code></pre><p><b style="color:red"> 当然，这里的结构体只是形象化表示内存中的数据顺序和含义，真正使用汇编操作内存的时候，没有结构体。</b></p>
+<p>保存上下文解决了我们不污染栈的诉求，但是同时也引出了一个新的问题，堆分配的地址我们保存在哪？跨函数调用后恢复上下文必须要让我们分配出的堆地址得到“持久化”存储啊。</p>
+<blockquote>
+<p>当然，这里的持久化肯定不是存到硬盘上，那太二了。</p>
+</blockquote>
+<ul>
+<li><p>保存到栈上？这肯定不可能，自己打自己脸嘛。</p>
+</li>
+<li><p>保存到寄存器上？如果是 caller-saved 寄存器，那不能保证跨函数调用完后，寄存器里面的内容还是我们原先设定的那样；而如果是 callee-saved 寄存器，确实可以解决跨函数调用后数据还原成我们保存的那样。但是同样的，我们自身也是其他 caller 函数的 callee，我们侵占了一个寄存器，怎么在返回到caller 函数之前复原这个 callee-saved 寄存器呢？</p>
+</li>
+</ul>
+<blockquote>
+<p>上面这段话有点绕。</p>
+</blockquote>
+<p><b style="color:red">所以，我们在分配堆内存的时候，要多分配一个 8 byte 的空间，把侵占的 callee-saved register 的值保存到堆内存中，然后再继续存我们原先要保留的上下文。</b></p>
+<p>关键代码简要概括如下：</p>
+<p>嘿嘿，明天回来更新。</p>
+<h3 id="后记">后记</h3><p>方案基本解决了，代码整理下，过几天发出来。</p>
+<p>有的朋友会问，为什么很多网上常见的 Hook 方案，都不要这么复杂的上下文保存流程？</p>
+<p><b style="color:red">其实道理很简单，保存什么上下文取决你的拦截或者 Hook 函数的目的以及使用方式。</b></p>
+<p>举个非常常见的统计函数调用耗时的例子，在这个情形中，一般只用关注 x0，x1 两个参数 来记录是什么类什么函数的调用。这种情况下，你的上下文保存可以极简，甚至只要保存 x0, x1 即可。</p>
+<p>而 <code>TrampolineHook</code> 想要提供的拦截器，是一个<strong>通用</strong>的拦截器，<b style="color:red">我不能保证其内部的实现，因为我需要保留的上下文就必须很完整。</b></p>
+<p>后续 <code>TrampolineHook</code> 除了完善对 <code>x86_64</code> 的支持外，还有两个比较大的技术目标，也会慢慢完善。如果有什么使用中遇到的问题或者 Bug 也欢迎提交代码。</p>
+<p>最后还是用一首五言绝句抒发心中对中国 iOS 90后最强战神的钦佩之情吧。</p>
+<p>一羊灭十虎，<br>三羊沉航母。<br>五羊斗上帝，<br>十羊创世纪。</p>
+
+      
+    </div>
+    <footer class="article-footer">
+      <a data-url="http://satanwoo.github.io/2020/05/18/TrampolineHookStack/" data-id="ckabc7sku001jiei1m50u6mpm" class="article-share-link">Share</a>
+      
+        <a href="http://satanwoo.github.io/2020/05/18/TrampolineHookStack/#disqus_thread" class="article-comment-link">Comments</a>
+      
+      
+  <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/iOS/">iOS</a></li><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/汇编/">汇编</a></li></ul>
+
+    </footer>
+  </div>
+  
+    
+<nav id="article-nav">
+  
+  
+    <a href="/2020/04/26/TrampolineHookOpenSource/" id="article-nav-older" class="article-nav-link-wrap">
+      <strong class="article-nav-caption">Older</strong>
+      <div class="article-nav-title">基于桥的全量方法 Hook 方案（3）- TrampolineHook</div>
+    </a>
+  
+</nav>
+
+  
+</article>
+
+<div id="disqus_thread"></div>
+<script>
+
+/**
+*  RECOMMENDED CONFIGURATION VARIABLES: EDIT AND UNCOMMENT THE SECTION BELOW TO INSERT DYNAMIC VALUES FROM YOUR PLATFORM OR CMS.
+*  LEARN WHY DEFINING THESE VARIABLES IS IMPORTANT: https://disqus.com/admin/universalcode/#configuration-variables*/
+/*
+var disqus_config = function () {
+this.page.url = PAGE_URL;  // Replace PAGE_URL with your page's canonical URL variable
+this.page.identifier = PAGE_IDENTIFIER; // Replace PAGE_IDENTIFIER with your page's unique identifier variable
+};
+*/
+(function() { // DON'T EDIT BELOW THIS LINE
+var d = document, s = d.createElement('script');
+s.src = 'https://satanwoo-2.disqus.com/embed.js';
+s.setAttribute('data-timestamp', +new Date());
+(d.head || d.body).appendChild(s);
+})();
+</script>
+<noscript>Please enable JavaScript to view the <a href="https://disqus.com/?ref_noscript">comments powered by Disqus.</a></noscript>
+                                
+  <section id="comments">
+    <div id="disqus_thread">
+      <noscript>Please enable JavaScript to view the <a href="//disqus.com/?ref_noscript">comments powered by Disqus.</a></noscript>
+    </div>
+  </section>
+</section>
+        
+          <aside id="sidebar">
+  
+    
+  
+    
+  <div class="widget-wrap">
+    <h3 class="widget-title">Tags</h3>
+    <div class="widget">
+      <ul class="tag-list"><li class="tag-list-item"><a class="tag-list-link" href="/tags/Android/">Android</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Assembly/">Assembly</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/C/">C</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/C/">C++</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Growth/">Growth</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/JavaScript/">JavaScript</a><span class="tag-list-count">4</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Machine-Learning/">Machine Learning</a><span class="tag-list-count">4</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Math/">Math</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Performance/">Performance</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/R/">R</a><span class="tag-list-count">2</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Reverse-Engineering/">Reverse Engineering</a><span class="tag-list-count">6</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Swift/">Swift</a><span class="tag-list-count">6</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/XNU/">XNU</a><span class="tag-list-count">2</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/c/">c++</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/iOS/">iOS</a><span class="tag-list-count">47</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/shell/">shell</a><span class="tag-list-count">1</span></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/汇编/">汇编</a><span class="tag-list-count">3</span></li></ul>
+    </div>
+  </div>
+
+  
+    
+  <div class="widget-wrap">
+    <h3 class="widget-title">Tag Cloud</h3>
+    <div class="widget tagcloud">
+      <a href="/tags/Android/" style="font-size: 10px;">Android</a> <a href="/tags/Assembly/" style="font-size: 10px;">Assembly</a> <a href="/tags/C/" style="font-size: 10px;">C</a> <a href="/tags/C/" style="font-size: 10px;">C++</a> <a href="/tags/Growth/" style="font-size: 10px;">Growth</a> <a href="/tags/JavaScript/" style="font-size: 16px;">JavaScript</a> <a href="/tags/Machine-Learning/" style="font-size: 16px;">Machine Learning</a> <a href="/tags/Math/" style="font-size: 10px;">Math</a> <a href="/tags/Performance/" style="font-size: 10px;">Performance</a> <a href="/tags/R/" style="font-size: 12px;">R</a> <a href="/tags/Reverse-Engineering/" style="font-size: 18px;">Reverse Engineering</a> <a href="/tags/Swift/" style="font-size: 18px;">Swift</a> <a href="/tags/XNU/" style="font-size: 12px;">XNU</a> <a href="/tags/c/" style="font-size: 10px;">c++</a> <a href="/tags/iOS/" style="font-size: 20px;">iOS</a> <a href="/tags/shell/" style="font-size: 10px;">shell</a> <a href="/tags/汇编/" style="font-size: 14px;">汇编</a>
+    </div>
+  </div>
+
+  
+    
+  <div class="widget-wrap">
+    <h3 class="widget-title">Archives</h3>
+    <div class="widget">
+      <ul class="archive-list"><li class="archive-list-item"><a class="archive-list-link" href="/archives/2020/05/">May 2020</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2020/04/">April 2020</a><span class="archive-list-count">3</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2020/02/">February 2020</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2019/12/">December 2019</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2019/10/">October 2019</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2019/07/">July 2019</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2019/01/">January 2019</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2018/12/">December 2018</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2018/10/">October 2018</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2018/05/">May 2018</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2018/04/">April 2018</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2018/02/">February 2018</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2018/01/">January 2018</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/11/">November 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/10/">October 2017</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/09/">September 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/08/">August 2017</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/07/">July 2017</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/06/">June 2017</a><span class="archive-list-count">3</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/04/">April 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/01/">January 2017</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/10/">October 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/09/">September 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/07/">July 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/05/">May 2016</a><span class="archive-list-count">1</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/04/">April 2016</a><span class="archive-list-count">2</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/03/">March 2016</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2016/02/">February 2016</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/12/">December 2015</a><span class="archive-list-count">6</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/11/">November 2015</a><span class="archive-list-count">5</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/10/">October 2015</a><span class="archive-list-count">4</span></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2015/09/">September 2015</a><span class="archive-list-count">4</span></li></ul>
+    </div>
+  </div>
+
+  
+    
+  <div class="widget-wrap">
+    <h3 class="widget-title">Recents</h3>
+    <div class="widget">
+      <ul>
+        
+          <li>
+            <a href="/2020/05/18/TrampolineHookStack/">TrampolineHook - 解决栈污染问题支持变参 Hook</a>
+          </li>
+        
+          <li>
+            <a href="/2020/04/26/TrampolineHookOpenSource/">基于桥的全量方法 Hook 方案（3）- TrampolineHook</a>
+          </li>
+        
+          <li>
+            <a href="/2020/04/22/NewBridgeHook/">基于桥的全量方法 Hook 方案（2） - 全新升级</a>
+          </li>
+        
+          <li>
+            <a href="/2020/04/07/Selective-Search/">目标检测之 Selective Search</a>
+          </li>
+        
+          <li>
+            <a href="/2020/02/06/MNN-Visual/">实现 MNN 模型的可视化工具</a>
+          </li>
+        
+      </ul>
+    </div>
+  </div>
+
+  
+</aside>
+        
+      </div>
+      <footer id="footer">
+  
+  <div class="outer">
+    <div id="footer-info" class="inner">
+      &copy; 2020 SatanWoo<br>
+      Powered by <a href="http://hexo.io/" target="_blank">Hexo</a>
+    </div>
+  </div>
+</footer>
+    </div>
+    <nav id="mobile-nav">
+  
+    <a href="/" class="mobile-nav-link">Home</a>
+  
+    <a href="/archives" class="mobile-nav-link">Archives</a>
+  
+    <a href="/sitemap.xml" class="mobile-nav-link">map</a>
+  
+</nav>
+    
+<script>
+  var disqus_shortname = 'satanwoo-2';
+  
+  var disqus_url = 'http://satanwoo.github.io/2020/05/18/TrampolineHookStack/';
+  
+  (function(){
+    var dsq = document.createElement('script');
+    dsq.type = 'text/javascript';
+    dsq.async = true;
+    dsq.src = '//' + disqus_shortname + '.disqus.com/embed.js';
+    (document.getElementsByTagName('head')[0] || document.getElementsByTagName('body')[0]).appendChild(dsq);
+  })();
+</script>
+
+
+
+  <link rel="stylesheet" href="/fancybox/jquery.fancybox.css" type="text/css">
+  <script src="/fancybox/jquery.fancybox.pack.js" type="text/javascript"></script>
+
+
+<script src="/js/script.js" type="text/javascript"></script>
+
+  </div>
+</body>
+</html>
