@@ -84,8 +84,8 @@
     
     <div class="article-entry" itemprop="articleBody">
       
-        <p>在之前的文章<a href="http://satanwoo.github.io/2020/04/26/TrampolineHookOpenSource/">《基于桥的全量方法 Hook 方案（3）- TrampolineHook》</a> 的文末，我说如果对汇编熟悉的同学可能会发现我之前实现的一个漏洞。</p>
-<p><b style="color:red">这个漏洞实际上是关于上下文污染的。</b> 一提到到上下文污染，可能我们绝大多数人想到的都是<b style="color:red">寄存器污染</b>，但是实际上还有一个不容我们忽视的上下文资源：<strong>栈</strong>。</p>
+        <p>在之前的文章<a href="http://satanwoo.github.io/2020/04/26/TrampolineHookOpenSource/">《基于桥的全量方法 Hook 方案（3）- TrampolineHook》</a> 的文末，我说如果对汇编熟悉的同学可能会发现我之前实现的一个错误 - <b style="color:red">关于上下文污染</b></p>
+<p>一提到到上下文污染，可能我们绝大多数人想到的都是<b style="color:red">寄存器污染</b>，但是实际上还有一个不容我们忽视的上下文资源：<strong>栈</strong>，过去可能大家常见的 Hook 代码关注比较少，正好这次在借助 TrampolineHook 修复这个方面的问题，我们来一起探讨下。</p>
 <h3 id="先看一个例子">先看一个例子</h3><p>假设有这样一个类 <code>TestObject</code>和 不定参函数 <code>method</code>，定义如下：</p>
 <pre><code>@interface <span class="type">TestObject</span> : <span class="type">NSObject</span>
 @<span class="keyword">end</span>
@@ -94,7 +94,7 @@
 
 - (void)<span class="keyword">method</span>:(<span class="built_in">int</span> *)<span class="keyword">value</span>,...
 {
-      va_list <span class="built_in">list</span>;
+     va_list <span class="built_in">list</span>;
     va_start(<span class="built_in">list</span>, <span class="keyword">value</span>);
 
     <span class="keyword">while</span> (<span class="keyword">value</span>) {
@@ -133,7 +133,7 @@
 <span class="type">int</span> h = <span class="number">7</span>;
 <span class="type">int</span> i = <span class="number">8</span>;
 [obj <span class="keyword">method</span>:&amp;a, &amp;b, &amp;c, &amp;d, &amp;e, &amp;f, &amp;g, &amp;h, &amp;i, <span class="keyword">nil</span>];
-</code></pre><p>但是如果你将拦截函数中添加打印参数的语句后，<b style="color:red">你会发现出现了必现的崩溃情形，而且是必定崩溃在第二次读取变参的时候。</b></p>
+</code></pre><p>但是如果你将拦截函数中添加打印参数的语句后，如下所示：</p>
 <pre><code><span class="keyword">void</span> wzq_check_variadic(<span class="keyword">id</span> a, <span class="keyword">char</span> * methodName, <span class="keyword">int</span> *v, ...)
 {
     <span class="built_in">NSLog</span>(<span class="string">@"haha checked %@ %s"</span>, a, methodName);
@@ -145,7 +145,7 @@
     }
     va_end(args);
 }
-</code></pre><p>为什么添加了读取参数的代码就导致运行崩溃了？有点意思。</p>
+</code></pre><p><b style="color:red">你会发现出现了必现的崩溃情形，而且是必定崩溃在第二次读取变参列表中的参数的时候。</b><br>为什么添加了读取参数的代码就导致运行崩溃了？有点意思。</p>
 <h3 id="了解变参的传递过程。">了解变参的传递过程。</h3><blockquote>
 <p>为了避免优化的干扰，如下汇编生成的优化选项为 <code>-O0</code></p>
 </blockquote>
@@ -214,23 +214,25 @@
 </li>
 <li><p>x0 (obj), x1 (method), x2(&amp;a) </p>
 </li>
-<li><p>调用 method 函数</p>
-</li>
+</ul>
+<p><b style="color:red">特别注意，变参列表的第一个参数也是通过寄存器来传递。</b></p>
+<ul>
+<li>调用 method 函数</li>
 </ul>
 <p>如果不理解, 可以参考这张图：</p>
 <p><img src="https://upload-images.jianshu.io/upload_images/4292627-35ce3b243cc8e2bf.png?imageMogr2/auto-orient/strip%7CimageView2/2/w/1240" alt=""></p>
 <p>而当进入 <code>method:</code> 函数时，汇编如下：</p>
 <p><img src="https://upload-images.jianshu.io/upload_images/4292627-6420b181488d73f5.png?imageMogr2/auto-orient/strip%7CimageView2/2/w/1240" alt=""></p>
-<p><b style="color:red">重点看两行蓝色汇编断点的地方，暗示一种循环。</b></p>
+<p><b style="color:red">重点看两行蓝色汇编断点的地方，其实是在暗示一种循环，也从底层实现上对应上了我们不断循环获取变参列表的逻辑。</b></p>
 <p>简要来说，就是从变参列表的第一参数（寄存器中的值代表地址），开始读取，循环遍历。这里的循环利用了栈空间在函数调用间的连续性，不断将偏移地址从原来 caller 函数的 sp 回溯，读取处于高地址的 caller 栈空间中的 int 变量地址。</p>
 <p><img src="https://upload-images.jianshu.io/upload_images/4292627-78690d2c7c2ef001.png?imageMogr2/auto-orient/strip%7CimageView2/2/w/1240" alt=""></p>
 <p>看到这，我想大家也知道了<b style="color:red">为什么是必定崩溃在第二次读取变参的时候。</b></p>
 <ul>
 <li><p>x0, x1 不用说，是寄存器参数。和变参不变参函数无关，这也能解释为什么只读取 id obj 和 SEL selector 不会崩溃。</p>
 </li>
-<li><p>x2，即变参函数列表的第一个参数，我这里把他成为变参的<b style="color:red">锚点参数</b>，它也是通过寄存器传递，所以读取的时候没问题。</p>
+<li><p>x2，即变参函数列表的第一个参数，我这里把他称为变参的<b style="color:red">锚点参数</b>，它也是通过寄存器传递，所以读取的时候没问题。</p>
 </li>
-<li><p>变参列表的后续参数都是分配在调用函数（caller）中，而 TrampolineHook 在调用 interceptor 之前利用了栈（操作 SP）来保存上下文，<b style="color:red">破坏了上下文，导致循环从栈地址获取参数的时候崩溃</b></p>
+<li><p>变参列表的后续参数都是分配在调用函数（caller）中，而 TrampolineHook 在调用 interceptor 之前利用了栈（操作 SP）来保存上下文，如下所示，<b style="color:red">因此破坏了栈资源上下文，导致循环从栈地址获取参数的时候崩溃</b></p>
 <pre><code><span class="label">stp</span> <span class="literal">q0</span>,  <span class="literal">q1</span>,   [<span class="literal">sp</span>, #-<span class="number">32</span>]!
 <span class="label">stp</span> <span class="literal">q2</span>,  <span class="literal">q3</span>,   [<span class="literal">sp</span>, #-<span class="number">32</span>]!
 <span class="label">stp</span> <span class="literal">q4</span>,  <span class="literal">q5</span>,   [<span class="literal">sp</span>, #-<span class="number">32</span>]!
@@ -243,7 +245,7 @@
 </ul>
 <h3 id="解决方案">解决方案</h3><p>了解了问题出现的原因，解决办法就很简单了，我们要让调用 inteceptor 时候的上下文和调用原函数一样。</p>
 <ul>
-<li><p>还是构造一堆的动态trampoline，让原函数替换到 trampoline，同时保存原函数的 IMP。</p>
+<li><p>还是构造一堆的动态 trampoline ，让原函数替换到 trampoline，同时保存原函数的 IMP。</p>
 </li>
 <li><p>依然保存原先需要的上下文，比如通用寄存器、浮点寄存器，<strong>但是不能使用栈了。</strong></p>
 </li>
@@ -252,7 +254,7 @@
 <li><p>恢复上下文，调用到原函数。</p>
 </li>
 </ul>
-<p>其实真个步骤和原先基本一样，唯一需要考虑的就是<b style="color:red">一点也不用</b>栈的话我们保存在哪？</p>
+<p>其实整个步骤和原先基本一样，唯一需要考虑的就是<b style="color:red">如何在一点也不用</b>栈的资源的前提下保存寄存器上下文？</p>
 <p><b style="color:red">堆上。</b><br><b style="color:red">堆上。</b><br><b style="color:red">堆上。</b>  </p>
 <p>简单而言，我们把上下文一股脑都保存到堆上就行。需要保存的上下文大致类似于一个结构体：</p>
 <pre><code><span class="keyword">typedef</span> <span class="keyword">struct</span> _THPageVariadicContext {
@@ -263,34 +265,99 @@
 } THPageVariadicContext;
 </code></pre><p><b style="color:red"> 当然，这里的结构体只是形象化表示内存中的数据顺序和含义，真正使用汇编操作内存的时候，没有结构体。</b></p>
 <p>保存上下文解决了我们不污染栈的诉求，但是同时也引出了一个新的问题，堆分配的地址我们保存在哪？跨函数调用后恢复上下文必须要让我们分配出的堆地址得到“持久化”存储啊。</p>
-<blockquote>
-<p>当然，这里的持久化肯定不是存到硬盘上，那太二了。</p>
-</blockquote>
 <ul>
 <li><p>保存到栈上？这肯定不可能，自己打自己脸嘛。</p>
 </li>
-<li><p>保存到寄存器上？如果是 caller-saved 寄存器，那不能保证跨函数调用完后，寄存器里面的内容还是我们原先设定的那样；而如果是 callee-saved 寄存器，确实可以解决跨函数调用后数据还原成我们保存的那样。但是同样的，我们自身也是其他 caller 函数的 callee，我们侵占了一个寄存器，怎么在返回到caller 函数之前复原这个 callee-saved 寄存器呢？</p>
+<li><p>保存到寄存器上？如果是 <code>caller-saved</code> 寄存器，那不能保证跨函数调用完后，寄存器里面的内容还是我们原先设定的那样；而如果是 <code>callee-saved</code> 寄存器，确实可以解决跨函数调用后数据还原成我们保存的那样。但是同样的，我们自身也是其他 <code>caller</code> 函数的 <code>callee</code>，我们侵占了一个寄存器，怎么在返回到 <code>caller</code> 函数之前复原这个 <code>callee-saved</code> 寄存器呢？</p>
 </li>
 </ul>
 <blockquote>
 <p>上面这段话有点绕。</p>
 </blockquote>
-<p><b style="color:red">所以，我们在分配堆内存的时候，要多分配一个 8 byte 的空间，把侵占的 callee-saved register 的值保存到堆内存中，然后再继续存我们原先要保留的上下文。</b></p>
+<p><b style="color:red">所以，我们在分配堆内存的时候，要多分配一个 8 byte 的空间，把侵占的 <code>callee-saved register</code> 的值保存到堆内存中，然后再继续存我们原先要保留的上下文。</b></p>
 <p>关键代码简要概括如下：</p>
-<p>嘿嘿，明天回来更新。</p>
-<h3 id="后记">后记</h3><p>方案基本解决了，代码整理下，过几天发出来。</p>
-<p>有的朋友会问，为什么很多网上常见的 Hook 方案，都不要这么复杂的上下文保存流程？</p>
-<p><b style="color:red">其实道理很简单，保存什么上下文取决你的拦截或者 Hook 函数的目的以及使用方式。</b></p>
-<p>举个非常常见的统计函数调用耗时的例子，在这个情形中，一般只用关注 x0，x1 两个参数 来记录是什么类什么函数的调用。这种情况下，你的上下文保存可以极简，甚至只要保存 x0, x1 即可。</p>
+<ul>
+<li><p>第一步，在拦截到函数调用后，先进入我们的 <code>pre</code> 操作，这里是在堆上对应上下文空间大小的地方。需要注意的是，调用分配内存的函数是使用 <code>malloc</code>，我们并不知道 <code>malloc</code> 究竟会破坏哪些寄存器，因为也需要作一次额外的寄存器上下文保存，不过这个保存时短暂的，分配结束后就恢复。然后将这些上下文都保存到堆上。</p>
+<p>  <strong>attribute</strong>((<strong>naked</strong>))<br>  void THPageVariadicContextPre(void)<br>  {</p>
+<pre><code><span class="comment">// 先保存，避免调用 malloc 破坏寄存器</span>
+saveRegs();
+
+<span class="comment">// 分配堆上内存 extra 16 byte + sizeof(THPageVariadicContext)</span>
+__<span class="function"><span class="keyword">asm</span> <span class="title">volatile</span> <span class="params">(<span class="string">"mov x0, #0xF0"</span>)</span></span>;
+__<span class="function"><span class="keyword">asm</span> <span class="title">volatile</span> <span class="params">(<span class="string">"bl _malloc"</span>)</span></span>;
+
+<span class="comment">// 返回的分配内存地址保存起来 callee-saved</span>
+__<span class="function"><span class="keyword">asm</span> <span class="title">volatile</span> <span class="params">(<span class="string">"str x19, [x0]"</span>)</span></span>;
+__<span class="function"><span class="keyword">asm</span> <span class="title">volatile</span> <span class="params">(<span class="string">"mov x19, x0"</span>)</span></span>;
+
+<span class="comment">// 恢复堆栈，避免影响变参所处在的堆栈</span>
+restoreRegs();
+
+<span class="comment">// 用堆上空间保存数据</span>
+__<span class="function"><span class="keyword">asm</span> <span class="title">volatile</span> <span class="params">(<span class="string">"stp x0, x1,  [x19, #(16 + 0 * 16)]"</span>)</span></span>;
+__<span class="function"><span class="keyword">asm</span> <span class="title">volatile</span> <span class="params">(<span class="string">"stp x2, x3,  [x19, #(16 + 1 * 16)]"</span>)</span></span>;
+__<span class="function"><span class="keyword">asm</span> <span class="title">volatile</span> <span class="params">(<span class="string">"stp x4, x5,  [x19, #(16 + 2 * 16)]"</span>)</span></span>;
+__<span class="function"><span class="keyword">asm</span> <span class="title">volatile</span> <span class="params">(<span class="string">"stp x6, x7,  [x19, #(16 + 3 * 16)]"</span>)</span></span>;
+__<span class="function"><span class="keyword">asm</span> <span class="title">volatile</span> <span class="params">(<span class="string">"stp x8, x13, [x19, #(16 + 4 * 16)]"</span>)</span></span>;
+
+__<span class="function"><span class="keyword">asm</span> <span class="title">volatile</span> <span class="params">(<span class="string">"stp q0, q1,  [x19, #(16 + 5 * 16 + 0 * 32)]"</span>)</span></span>;
+__<span class="function"><span class="keyword">asm</span> <span class="title">volatile</span> <span class="params">(<span class="string">"stp q2, q3,  [x19, #(16 + 5 * 16 + 1 * 32)]"</span>)</span></span>;
+__<span class="function"><span class="keyword">asm</span> <span class="title">volatile</span> <span class="params">(<span class="string">"stp q4, q5,  [x19, #(16 + 5 * 16 + 2 * 32)]"</span>)</span></span>;
+__<span class="function"><span class="keyword">asm</span> <span class="title">volatile</span> <span class="params">(<span class="string">"stp q6, q7,  [x19, #(16 + 5 * 16 + 3 * 32)]"</span>)</span></span>;
+
+__<span class="function"><span class="keyword">asm</span> <span class="title">volatile</span> <span class="params">(<span class="string">"stp lr, x10, [x19, #(16 + 5 * 16 + 4 * 32)]"</span>)</span></span>;
+
+__<span class="function"><span class="keyword">asm</span> <span class="title">volatile</span> <span class="params">(<span class="string">"ret"</span>)</span></span>;
+</code></pre><p>  }</p>
+</li>
+<li><p>调用完拦截函数，我们需要销毁堆空间，由于我们之前使用的是 <code>callee-saved</code> 的寄存器，我们能确保寄存器的值还是调用之前的。所以我们放心的将其中的值取出来，然后销毁对应的占空间，然后恢复寄存器即可。</p>
+<pre><code>__attribute__((__naked__))
+<span class="function"><span class="keyword">void</span> <span class="title">THPageVariadicContextPost</span><span class="params">(<span class="keyword">void</span>)</span>
+</span>{
+    <span class="comment">// x19 肯定是正确的地址，使用x19恢复对应的数据</span>
+    __<span class="function"><span class="keyword">asm</span> <span class="title">volatile</span> <span class="params">(<span class="string">"ldp lr, x10, [x19, #(16 + 5 * 16 + 4 * 32)]"</span>)</span></span>;
+    __<span class="function"><span class="keyword">asm</span> <span class="title">volatile</span> <span class="params">(<span class="string">"ldp q6, q7,  [x19, #(16 + 5 * 16 + 3 * 32)]"</span>)</span></span>;
+    __<span class="function"><span class="keyword">asm</span> <span class="title">volatile</span> <span class="params">(<span class="string">"ldp q4, q5,  [x19, #(16 + 5 * 16 + 2 * 32)]"</span>)</span></span>;
+    __<span class="function"><span class="keyword">asm</span> <span class="title">volatile</span> <span class="params">(<span class="string">"ldp q2, q3,  [x19, #(16 + 5 * 16 + 1 * 32)]"</span>)</span></span>;
+    __<span class="function"><span class="keyword">asm</span> <span class="title">volatile</span> <span class="params">(<span class="string">"ldp q0, q1,  [x19, #(16 + 5 * 16 + 0 * 32)]"</span>)</span></span>;
+
+    __<span class="function"><span class="keyword">asm</span> <span class="title">volatile</span> <span class="params">(<span class="string">"ldp x8, x13, [x19, #(16 + 4 * 16)]"</span>)</span></span>;
+    __<span class="function"><span class="keyword">asm</span> <span class="title">volatile</span> <span class="params">(<span class="string">"ldp x6, x7,  [x19, #(16 + 3 * 16)]"</span>)</span></span>;
+    __<span class="function"><span class="keyword">asm</span> <span class="title">volatile</span> <span class="params">(<span class="string">"ldp x4, x5,  [x19, #(16 + 2 * 16)]"</span>)</span></span>;
+    __<span class="function"><span class="keyword">asm</span> <span class="title">volatile</span> <span class="params">(<span class="string">"ldp x2, x3,  [x19, #(16 + 1 * 16)]"</span>)</span></span>;
+    __<span class="function"><span class="keyword">asm</span> <span class="title">volatile</span> <span class="params">(<span class="string">"ldp x0, x1,  [x19, #(16 + 0 * 16)]"</span>)</span></span>;
+
+    <span class="comment">// 保存一下，避免 free 的影响。</span>
+    saveRegs();
+
+    <span class="comment">// 恢复原先的 x19, 调用free</span>
+    __<span class="function"><span class="keyword">asm</span> <span class="title">volatile</span> <span class="params">(<span class="string">"mov x0, x19"</span>)</span></span>;
+    __<span class="function"><span class="keyword">asm</span> <span class="title">volatile</span> <span class="params">(<span class="string">"ldr x19, [x19]"</span>)</span></span>;
+    __<span class="function"><span class="keyword">asm</span> <span class="title">volatile</span> <span class="params">(<span class="string">"bl _free"</span>)</span></span>;
+
+    <span class="comment">// 恢复堆栈</span>
+    restoreRegs();
+
+    __<span class="function"><span class="keyword">asm</span> <span class="title">volatile</span> <span class="params">(<span class="string">"mov lr, x13"</span>)</span></span>;
+    __<span class="function"><span class="keyword">asm</span> <span class="title">volatile</span> <span class="params">(<span class="string">"br x10"</span>)</span></span>;
+}
+</code></pre></li>
+<li><p>需要注意的是，我们这里用了<code>__attribute__((__naked__))</code>，这个作用是为了让我们的函数不会额外的生成函数 <code>prologue/epilogue</code> 中的压栈消栈操作。</p>
+</li>
+</ul>
+<p>至此，变参 <code>Hook</code> 就完成了，大家可以前往 <code>Github</code> 查看最新的 <code>THVaradicInterceptor</code> 来使用。</p>
+<h3 id="后记">后记</h3><p>有的朋友会问，为什么很多网上常见的 Hook 方案，都不要这么复杂的上下文保存流程？</p>
+<p><b style="color:red">其实道理很简单，保存什么上下文取决你的拦截或者 <code>Hook</code> 函数的目的以及使用方式。</b></p>
+<p>举个非常常见的统计函数调用耗时的例子，在这个情形中，一般只用关注 <code>x0</code>，<code>x1</code> 两个参数 来记录是什么类什么函数的调用。这种情况下，你的上下文保存可以极简，甚至只要保存 <code>x0</code>, <code>x1</code> 即可。</p>
 <p>而 <code>TrampolineHook</code> 想要提供的拦截器，是一个<strong>通用</strong>的拦截器，<b style="color:red">我不能保证其内部的实现，因为我需要保留的上下文就必须很完整。</b></p>
-<p>后续 <code>TrampolineHook</code> 除了完善对 <code>x86_64</code> 的支持外，还有两个比较大的技术目标，也会慢慢完善。如果有什么使用中遇到的问题或者 Bug 也欢迎提交代码。</p>
+<p>后续 <code>TrampolineHook</code> 除了完善对 <code>x86_64</code> 的支持外，还有两个比较大的技术目标，也会慢慢完善。如果有什么使用中遇到的问题或者 <code>Bug</code> 也欢迎提交代码。</p>
 <p>最后还是用一首五言绝句抒发心中对中国 iOS 90后最强战神的钦佩之情吧。</p>
 <p>一羊灭十虎，<br>三羊沉航母。<br>五羊斗上帝，<br>十羊创世纪。</p>
 
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2020/05/18/TrampolineHookStack/" data-id="ckabcc9ki001jl8i1c0ong4of" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2020/05/18/TrampolineHookStack/" data-id="ckaktus11001j1xi1ox71thhz" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2020/05/18/TrampolineHookStack/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -488,7 +555,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2020/04/26/TrampolineHookOpenSource/" data-id="ckabcc9kn001nl8i1ksahdh8o" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2020/04/26/TrampolineHookOpenSource/" data-id="ckaktus1b001n1xi1ayfj7s6f" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2020/04/26/TrampolineHookOpenSource/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -623,7 +690,7 @@ bl _template_page;
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2020/04/22/NewBridgeHook/" data-id="ckabcc9mk002tl8i1nxppeer9" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2020/04/22/NewBridgeHook/" data-id="ckaktus3m002t1xi1bugfsa0u" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2020/04/22/NewBridgeHook/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -737,7 +804,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2020/04/07/Selective-Search/" data-id="ckabcc9lr0025l8i14xt1pwlb" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2020/04/07/Selective-Search/" data-id="ckaktus2m00251xi1koa7gxr9" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2020/04/07/Selective-Search/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -1085,7 +1152,7 @@ get hasMain() {
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2020/02/06/MNN-Visual/" data-id="ckabcc9mz0034l8i1zshpk4vx" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2020/02/06/MNN-Visual/" data-id="ckaktus4600341xi1zqpfvy70" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2020/02/06/MNN-Visual/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -1280,7 +1347,7 @@ _mm256_store_pd(<span class="literal">result</span>, c);
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2019/12/01/SIMD-1/" data-id="ckabcc9lx0028l8i1ihm4x2l1" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2019/12/01/SIMD-1/" data-id="ckaktus2q00281xi1m26gsx84" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2019/12/01/SIMD-1/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -1428,7 +1495,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2019/10/27/MNN1/" data-id="ckabcc9mv0031l8i1rzr1uqk5" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2019/10/27/MNN1/" data-id="ckaktus4100311xi1sxninok8" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2019/10/27/MNN1/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -1633,7 +1700,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2019/07/07/RevisitAutorelease2/" data-id="ckabcc9m4002dl8i1m2z7sqd5" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2019/07/07/RevisitAutorelease2/" data-id="ckaktus2y002d1xi1reuk34fd" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2019/07/07/RevisitAutorelease2/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -1974,7 +2041,7 @@ _pthread_tsd_cleanup_key(<span class="keyword">pthread_t</span> self, <span clas
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2019/07/02/RevisitAutorelease/" data-id="ckabcc9m6002fl8i1q6i466hp" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2019/07/02/RevisitAutorelease/" data-id="ckaktus32002f1xi1xenc6eku" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2019/07/02/RevisitAutorelease/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -2148,7 +2215,7 @@ Data *data = <span class="keyword">new</span> Data();
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2019/01/26/RAII/" data-id="ckabcc9me002ml8i16dmcmsoh" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2019/01/26/RAII/" data-id="ckaktus3b002m1xi1jrqprnm4" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2019/01/26/RAII/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -2254,7 +2321,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2019/01/26/LD-2/" data-id="ckabcc9ni003kl8i1kwqg9f6i" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2019/01/26/LD-2/" data-id="ckaktus4t003k1xi1evypaiym" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2019/01/26/LD-2/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -2352,7 +2419,7 @@ NSLog(@<span class="string">"haha"</span>);
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2019/01/26/shared-ptr/" data-id="ckabcc9it0009l8i1yyg4kouz" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2019/01/26/shared-ptr/" data-id="ckakturwp00091xi1h88oxqjo" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2019/01/26/shared-ptr/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -2744,7 +2811,7 @@ lockp-&gt;unlock();
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2019/01/01/Synchronized/" data-id="ckabcc9kv001sl8i1ajd5mywq" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2019/01/01/Synchronized/" data-id="ckaktus1t001s1xi18jzttrmt" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2019/01/01/Synchronized/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -2984,7 +3051,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2018/12/22/LD-1/" data-id="ckabcc9nl003ml8i1ggxry8ti" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2018/12/22/LD-1/" data-id="ckaktus4y003m1xi1486f73tv" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2018/12/22/LD-1/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -3107,7 +3174,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2018/10/06/JSDebugger-INTRO/" data-id="ckabcc9nz003vl8i1kv9yubrv" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2018/10/06/JSDebugger-INTRO/" data-id="ckaktus5k003v1xi1ylbr02bn" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2018/10/06/JSDebugger-INTRO/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -3243,7 +3310,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2018/05/09/MNIST/" data-id="ckabcc9n10038l8i1bqqexyls" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2018/05/09/MNIST/" data-id="ckaktus4a00381xi1xbm93w76" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2018/05/09/MNIST/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -3455,7 +3522,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2018/04/01/jsengine/" data-id="ckabcc9jb000ml8i1l3um2d5g" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2018/04/01/jsengine/" data-id="ckaktury2000m1xi1t0n65z0g" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2018/04/01/jsengine/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -3701,7 +3768,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2018/02/04/iOS-iVar/" data-id="ckabcc9jo000ul8i1gzrpsqji" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2018/02/04/iOS-iVar/" data-id="ckakturyn000u1xi13qouru8a" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2018/02/04/iOS-iVar/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -4326,7 +4393,7 @@ StartAgain: ;
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2018/01/14/iOS-virtual/" data-id="ckabcc9jk000ql8i1o3ej68hn" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2018/01/14/iOS-virtual/" data-id="ckakturyf000q1xi1nkb8sopz" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2018/01/14/iOS-virtual/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -4537,7 +4604,7 @@ remover.keyPath = identifier.copy<span class="comment">;</span>
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2017/11/27/KVO-Swizzle/" data-id="ckabcc9nq003ol8i1cwcet0nm" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2017/11/27/KVO-Swizzle/" data-id="ckaktus55003o1xi11ci4m6o1" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2017/11/27/KVO-Swizzle/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -4699,7 +4766,7 @@ frame <span class="preprocessor">#<span class="number">14</span>: <span class="n
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2017/11/02/load-twice/" data-id="ckabcc9j7000kl8i1cnvucq17" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2017/11/02/load-twice/" data-id="ckakturxt000k1xi1ejeuj0p5" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2017/11/02/load-twice/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -5100,7 +5167,7 @@ NSDate* bootTime = [NSDate dateWithTimeIntervalSince1970:timestamp];
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2017/10/18/abort/" data-id="ckabcc9k9001bl8i1jte5jwol" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2017/10/18/abort/" data-id="ckaktus0c001b1xi1ncvkcdvn" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2017/10/18/abort/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -5486,7 +5553,7 @@ WKContentExtensionStore
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2017/09/24/mainthreadchecker1/" data-id="ckabcc9j3000gl8i153y5ysjk" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2017/09/24/mainthreadchecker1/" data-id="ckakturxc000g1xi1i1cgpup7" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2017/09/24/mainthreadchecker1/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -5813,7 +5880,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2017/09/11/KVO-CRASH/" data-id="ckabcc9nt003ql8i1caf922wa" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2017/09/11/KVO-CRASH/" data-id="ckaktus5a003q1xi1gp0ufygw" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2017/09/11/KVO-CRASH/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -6109,7 +6176,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2017/08/06/UITableViewController/" data-id="ckabcc9kg001gl8i1zkhn3whg" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2017/08/06/UITableViewController/" data-id="ckaktus0y001g1xi1j5u0z89x" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2017/08/06/UITableViewController/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -6400,7 +6467,7 @@ BOOT_RUN_EXIT(appender_close);
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2017/07/30/xlog/" data-id="ckabcc9il0003l8i15kxgftqz" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2017/07/30/xlog/" data-id="ckakturw200031xi1tcg69y6w" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2017/07/30/xlog/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -6703,7 +6770,7 @@ ldp    x9, x17, [x12]        <span class="comment">// {x9, x17} = *bucket</span>
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2017/06/29/Macho-2/" data-id="ckabcc9mm002xl8i1uulhnqgx" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2017/06/29/Macho-2/" data-id="ckaktus3r002x1xi1nxeosqnt" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2017/06/29/Macho-2/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -6992,7 +7059,7 @@ _magic = [cursor readBigInt32];
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2017/06/13/Macho-1/" data-id="ckabcc9mq002zl8i1xkwn9awx" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2017/06/13/Macho-1/" data-id="ckaktus3v002z1xi178v1acpf" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2017/06/13/Macho-1/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -7254,7 +7321,7 @@ _attribute__((section (<span class="string">"__DATA, MinyiSpecific"</span>))) <s
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2017/06/01/FBTweak/" data-id="ckabcc9ob0043l8i1o5uwcmnx" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2017/06/01/FBTweak/" data-id="ckaktus5x00431xi1y73y90fl" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2017/06/01/FBTweak/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -7394,7 +7461,7 @@ foo(&amp;s, <span class="number">1</span>, <span class="number">2</span>);
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2017/04/23/ARM64IndirectReturn/" data-id="ckabcc9ou004kl8i1kc3w4odg" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2017/04/23/ARM64IndirectReturn/" data-id="ckaktus6n004k1xi1v8wbfczm" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2017/04/23/ARM64IndirectReturn/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -7565,7 +7632,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2017/04/18/CalculateTwoArrayDiff/" data-id="ckabcc9oq004gl8i1usvcptz3" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2017/04/18/CalculateTwoArrayDiff/" data-id="ckaktus6h004g1xi1eh13j6z3" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2017/04/18/CalculateTwoArrayDiff/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -7755,7 +7822,7 @@ dispatch_group_create(<span class="keyword">void</span>)
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2017/01/07/DispatchGroupCrash/" data-id="ckabcc9of0047l8i11s2yn3nj" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2017/01/07/DispatchGroupCrash/" data-id="ckaktus6200471xi1pa329iak" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2017/01/07/DispatchGroupCrash/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -8003,7 +8070,7 @@ func <span class="function"><span class="title">resultFromBatchObjects</span><sp
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2017/01/07/JSONRPCKit/" data-id="ckabcc9nw003tl8i1ysfbok71" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2017/01/07/JSONRPCKit/" data-id="ckaktus5g003t1xi18bibqium" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2017/01/07/JSONRPCKit/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -8287,7 +8354,7 @@ dispatch_sync(dq, ^{
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/10/23/multithread-dangling-pointer/" data-id="ckabcc9j0000el8i13afytq00" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/10/23/multithread-dangling-pointer/" data-id="ckakturx0000e1xi1j4p24ygl" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/10/23/multithread-dangling-pointer/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -8443,7 +8510,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/09/17/uiwindow-iOS/" data-id="ckabcc9ir0007l8i1has82vcj" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/09/17/uiwindow-iOS/" data-id="ckakturwk00071xi1801a6g6n" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/09/17/uiwindow-iOS/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -8603,7 +8670,7 @@ OSSpinUnlock(&amp;_lock)<span class="comment">;</span>
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/07/10/immutable-thread/" data-id="ckabcc9je000ol8i1spa9algm" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/07/10/immutable-thread/" data-id="ckaktury8000o1xi11s61ksdl" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/07/10/immutable-thread/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -8727,7 +8794,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/05/02/Spotify/" data-id="ckabcc9lj0020l8i1fsfmyede" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/05/02/Spotify/" data-id="ckaktus2g00201xi1hghjk5b2" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/05/02/Spotify/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -8855,7 +8922,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/04/26/blank-space-in-html/" data-id="ckabcc9k70019l8i15tt6xp49" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/04/26/blank-space-in-html/" data-id="ckaktus0700191xi1md3tofh1" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/04/26/blank-space-in-html/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -9113,7 +9180,7 @@ Elapsed application CPU <span class="keyword">time</span> (seconds): <span class
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/04/11/dispatch-once/" data-id="ckabcc9jw000zl8i1hgt6w1zi" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/04/11/dispatch-once/" data-id="ckakturz5000z1xi1k0k8l2gp" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/04/11/dispatch-once/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -9330,7 +9397,7 @@ a4.<span class="function"><span class="title">staticInfo</span><span class="para
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/03/22/dispatch-in-swift/" data-id="ckabcc9k00011l8i12p9s5fjd" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/03/22/dispatch-in-swift/" data-id="ckakturzr00111xi1h8gfyvcr" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/03/22/dispatch-in-swift/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -9444,7 +9511,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/03/14/RxSwift/" data-id="ckabcc9m2002bl8i18zd0gezi" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/03/14/RxSwift/" data-id="ckaktus2v002b1xi1mou1wiqc" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/03/14/RxSwift/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -9554,7 +9621,7 @@ val = edx(<span class="literal">true</span>)
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/03/14/SizeUp/" data-id="ckabcc9ln0023l8i1n3p1npz8" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/03/14/SizeUp/" data-id="ckaktus2j00231xi16vvii9ne" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/03/14/SizeUp/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -9716,7 +9783,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/03/14/DXXcodeConsoleUnicodePlugin/" data-id="ckabcc9oj004cl8i1lgns66q5" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/03/14/DXXcodeConsoleUnicodePlugin/" data-id="ckaktus68004c1xi1eurgjxdb" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/03/14/DXXcodeConsoleUnicodePlugin/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -9815,7 +9882,7 @@ fi
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/02/27/check-manifest/" data-id="ckabcc9k50016l8i1ktjegizu" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/02/27/check-manifest/" data-id="ckaktus0400161xi1hm41mans" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/02/27/check-manifest/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -9947,7 +10014,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/02/27/pod-install-plugin/" data-id="ckabcc9iw000cl8i1nobaez0n" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/02/27/pod-install-plugin/" data-id="ckakturwt000c1xi1kzzxkf5k" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/02/27/pod-install-plugin/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -10225,7 +10292,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/02/27/FBKVOController/" data-id="ckabcc9od0045l8i1gkn0doqe" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/02/27/FBKVOController/" data-id="ckaktus6000451xi1xc7pdjrd" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/02/27/FBKVOController/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -10361,7 +10428,7 @@ selectedTitleLabelsContentView<span class="class">.layer</span><span class="clas
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/02/05/DGRunKeeperSwitch/" data-id="ckabcc9on004el8i112arp79j" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/02/05/DGRunKeeperSwitch/" data-id="ckaktus6d004e1xi1jcf6jiaa" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/02/05/DGRunKeeperSwitch/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -10639,7 +10706,7 @@ NSLayoutConstraint *constraint = [NSLayoutConstraint <span class="string">constr
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2016/02/05/PureLayout/" data-id="ckabcc9mh002pl8i1qvc0n9pl" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2016/02/05/PureLayout/" data-id="ckaktus3f002p1xi155oh4few" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2016/02/05/PureLayout/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -10987,7 +11054,7 @@ extension Task {
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/12/30/Refactor-Mega-ViewController/" data-id="ckabcc9mc002kl8i1ovrgnrjs" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/12/30/Refactor-Mega-ViewController/" data-id="ckaktus38002k1xi18brmaoz8" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2015/12/30/Refactor-Mega-ViewController/#disqus_thread" class="article-comment-link">Comments</a>
       
@@ -11160,7 +11227,7 @@ s.setAttribute('data-timestamp', +new Date());
       
     </div>
     <footer class="article-footer">
-      <a data-url="http://satanwoo.github.io/2015/12/20/Learn-R-2/" data-id="ckabcc9n3003al8i14ahwd97e" class="article-share-link">Share</a>
+      <a data-url="http://satanwoo.github.io/2015/12/20/Learn-R-2/" data-id="ckaktus4d003a1xi1k1bi45y2" class="article-share-link">Share</a>
       
         <a href="http://satanwoo.github.io/2015/12/20/Learn-R-2/#disqus_thread" class="article-comment-link">Comments</a>
       
