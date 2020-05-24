@@ -4,7 +4,7 @@
   
   <link href="/atom.xml" rel="self"/>
   <link href="http://satanwoo.github.io/"/>
-  <updated>2020-05-24T08:55:53.217Z</updated>
+  <updated>2020-05-24T11:27:58.096Z</updated>
   <id>http://satanwoo.github.io/</id>
   
   <author>
@@ -19,7 +19,7 @@
     <link href="http://satanwoo.github.io/2020/05/18/TrampolineHookStack/"/>
     <id>http://satanwoo.github.io/2020/05/18/TrampolineHookStack/</id>
     <published>2020-05-17T17:27:45.000Z</published>
-    <updated>2020-05-24T08:55:53.217Z</updated>
+    <updated>2020-05-24T11:27:58.096Z</updated>
     <content type="html"><![CDATA[<p>在之前的文章<a href="http://satanwoo.github.io/2020/04/26/TrampolineHookOpenSource/">《基于桥的全量方法 Hook 方案（3）- TrampolineHook》</a> 的文末，我说如果对汇编熟悉的同学可能会发现我之前实现的一个错误 - <b style="color:red">关于上下文污染</b></p>
 <p>一提到到上下文污染，可能我们绝大多数人想到的都是<b style="color:red">寄存器污染</b>，但是实际上还有一个不容我们忽视的上下文资源：<strong>栈</strong>，过去可能大家常见的 Hook 代码关注比较少，正好这次在借助 TrampolineHook 修复这个方面的问题，我们来一起探讨下。</p>
 <h3 id="先看一个例子">先看一个例子</h3><p>假设有这样一个类 <code>TestObject</code>和 不定参函数 <code>method</code>，定义如下：</p>
@@ -287,8 +287,6 @@ __<span class="function"><span class="keyword">asm</span> <span class="title">vo
 <p>举个非常常见的统计函数调用耗时的例子，在这个情形中，一般只用关注 <code>x0</code>，<code>x1</code> 两个参数 来记录是什么类什么函数的调用。这种情况下，你的上下文保存可以极简，甚至只要保存 <code>x0</code>, <code>x1</code> 即可。</p>
 <p>而 <code>TrampolineHook</code> 想要提供的拦截器，是一个<strong>通用</strong>的拦截器，<b style="color:red">我不能保证其内部的实现，因为我需要保留的上下文就必须很完整。</b></p>
 <p>后续 <code>TrampolineHook</code> 除了完善对 <code>x86_64</code> 的支持外，还有两个比较大的技术目标，也会慢慢完善。如果有什么使用中遇到的问题或者 <code>Bug</code> 也欢迎提交代码。</p>
-<p>最后还是用一首五言绝句抒发心中对中国 iOS 90后最强战神的钦佩之情吧。</p>
-<p>一羊灭十虎，<br>三羊沉航母。<br>五羊斗上帝，<br>十羊创世纪。</p>
 ]]></content>
     <summary type="html">
     <![CDATA[<p>在之前的文章<a href="http://satanwoo.github.io/2020/04/26/TrampolineHookOpenSource/">《基于桥的全量方法 Hook 方案（3）- TrampolineHook》</a> 的文末，我说如果对汇编熟悉的同学]]>
