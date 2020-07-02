@@ -131,7 +131,7 @@ for (Model *m in self.models) {
 <li>（2）看到了一个比较陌生的符号<code>__stack_chk_fail</code>，暂且不管。但是紧跟着就是<code>brk</code>。而<code>brk</code>简单来讲，就是触发崩溃或者异常。</li>
 </ul>
 <p>整体轮廓搞定后，我们再来看看<code>stack_chk_fail</code>到底是啥。从<code>stack</code>中我们不难推断，这肯定是和栈相关的检查工作。那为什么会有这样的检查工作？主要还是害怕栈越界造成的危害。用下图来大致讲解吧。</p>
-<p><img src="https://bbsmax.ikafan.com/static/L3Byb3h5L2h0dHAvaW1hZ2VzMjAxNS5jbmJsb2dzLmNvbS9ibG9nLzc0MDk4OS8yMDE1MTEvNzQwOTg5LTIwMTUxMTA5MjIzMjAxNzU5LTQ2MTU2MDEwMy5wbmc=.jpg" alt=""></p>
+<p><img src="https://images2015.cnblogs.com/blog/740989/201511/740989-20151109223201759-461560103.png" alt=""></p>
 <blockquote>
 <p>这里抄了张<code>armv7</code>的图，大致意思没差别。</p>
 </blockquote>
