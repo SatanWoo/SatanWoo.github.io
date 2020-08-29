@@ -3,17 +3,31 @@
 <head>
   <meta charset="utf-8">
   
-  <title>Archives: 2016 | SatanWoo</title>
+  <title>Pybind11 理解 | SatanWoo</title>
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
-  <meta name="description">
-<meta property="og:type" content="website">
-<meta property="og:title" content="SatanWoo">
-<meta property="og:url" content="http://satanwoo.github.io/archives/2016/index.html">
+  <meta name="description" content="Pybind11 源码分析MNN 社区上提供了通过 Python 使用 MNN 的方式，具体可以见：
+https://github.com/alibaba/MNN/tree/master/pymnn/src
+我们通过 Pybind11 来提供比较优雅的桥接方式。由于 Pybind 11 是一层抽象 C++ 到 Python 桥接的库，上层封装了很多难以理解的细节和流程，本文就带大家抽丝剥茧一下。">
+<meta property="og:type" content="article">
+<meta property="og:title" content="Pybind11 理解">
+<meta property="og:url" content="http://satanwoo.github.io/2020/08/29/Pybind11/index.html">
 <meta property="og:site_name" content="SatanWoo">
-<meta property="og:description">
+<meta property="og:description" content="Pybind11 源码分析MNN 社区上提供了通过 Python 使用 MNN 的方式，具体可以见：
+https://github.com/alibaba/MNN/tree/master/pymnn/src
+我们通过 Pybind11 来提供比较优雅的桥接方式。由于 Pybind 11 是一层抽象 C++ 到 Python 桥接的库，上层封装了很多难以理解的细节和流程，本文就带大家抽丝剥茧一下。">
+<meta property="og:image" content="https://i.loli.net/2020/08/29/6UwCRG35BAa1FJg.png">
+<meta property="og:image" content="https://i.loli.net/2020/08/29/LAt85S1sGN2lbwa.png">
+<meta property="og:image" content="https://i.loli.net/2020/08/29/Ra9f4AQZFyUBGLK.png">
+<meta property="og:image" content="https://i.loli.net/2020/08/29/esALNBJvlYZTrI9.png">
+<meta property="og:image" content="https://i.loli.net/2020/08/29/7aI8ueLdsU4TSQF.png">
+<meta property="og:image" content="https://i.loli.net/2020/08/29/EUHGocJPgsIrtK3.png">
+<meta property="og:image" content="https://i.loli.net/2020/08/29/boCLRWI8y4QTlxE.png">
+<meta property="og:updated_time" content="2020-08-29T08:30:46.128Z">
 <meta name="twitter:card" content="summary">
-<meta name="twitter:title" content="SatanWoo">
-<meta name="twitter:description">
+<meta name="twitter:title" content="Pybind11 理解">
+<meta name="twitter:description" content="Pybind11 源码分析MNN 社区上提供了通过 Python 使用 MNN 的方式，具体可以见：
+https://github.com/alibaba/MNN/tree/master/pymnn/src
+我们通过 Pybind11 来提供比较优雅的桥接方式。由于 Pybind 11 是一层抽象 C++ 到 Python 桥接的库，上层封装了很多难以理解的细节和流程，本文就带大家抽丝剥茧一下。">
   
     <link rel="alternative" href="/atom.xml" title="SatanWoo" type="application/atom+xml">
   
@@ -60,305 +74,168 @@
   </div>
 </header>
       <div class="outer">
-        <section id="main">
-  
-  
-    
-    
-      
-      
-      <section class="archives-wrap">
-        <div class="archive-year-wrap">
-          <a href="/archives/2016" class="archive-year">2016</a>
-        </div>
-        <div class="archives">
-    
-    <article class="archive-article archive-type-post">
-  <div class="archive-article-inner">
-    <header class="archive-article-header">
-      <a href="/2016/10/23/multithread-dangling-pointer/" class="archive-article-date">
-  <time datetime="2016-10-22T18:43:25.000Z" itemprop="datePublished">Oct 23</time>
+        <section id="main"><article id="post-Pybind11" class="article article-type-post" itemscope itemprop="blogPost">
+  <div class="article-meta">
+    <a href="/2020/08/29/Pybind11/" class="article-date">
+  <time datetime="2020-08-29T08:11:40.000Z" itemprop="datePublished">2020-08-29</time>
 </a>
-      
+    
+  </div>
+  <div class="article-inner">
+    
+    
+      <header class="article-header">
+        
   
-    <h1 itemprop="name">
-      <a class="archive-article-title" href="/2016/10/23/multithread-dangling-pointer/">浅谈一种解决多线程野指针的新思路</a>
+    <h1 class="article-title" itemprop="name">
+      Pybind11 理解
     </h1>
   
 
-    </header>
-  </div>
-</article>
-  
+      </header>
     
-    
-    <article class="archive-article archive-type-post">
-  <div class="archive-article-inner">
-    <header class="archive-article-header">
-      <a href="/2016/09/17/uiwindow-iOS/" class="archive-article-date">
-  <time datetime="2016-09-17T14:51:46.000Z" itemprop="datePublished">Sep 17</time>
-</a>
+    <div class="article-entry" itemprop="articleBody">
       
-  
-    <h1 itemprop="name">
-      <a class="archive-article-title" href="/2016/09/17/uiwindow-iOS/">浅谈iOS的多Window处理</a>
-    </h1>
-  
+        <h2 id="Pybind11_源码分析">Pybind11 源码分析</h2><p>MNN 社区上提供了通过 Python 使用 MNN 的方式，具体可以见：</p>
+<p><a href="https://github.com/alibaba/MNN/tree/master/pymnn/src" target="_blank" rel="external">https://github.com/alibaba/MNN/tree/master/pymnn/src</a></p>
+<p>我们通过 Pybind11 来提供比较优雅的桥接方式。由于 Pybind 11 是一层抽象 C++ 到 Python 桥接的库，上层封装了很多难以理解的细节和流程，本文就带大家抽丝剥茧一下。</p>
+<p>关于 Python 桥接，如果你不是很了解，那么在阅读本文之前，请记住如下两句话：</p>
+<ul>
+<li><p>代码必须要以传统的 module 添加类的方式来进行，相关代码是：</p>
+<ul>
+<li>PyInitModule    </li>
+<li>PyModule_AddObject(xxx)</li>
+</ul>
+</li>
+<li><p><strong>Python 没办法直接编写 C++ Extension，都是通过再包一层 C 方法 （Python 自身的 C 接口）的方式来进行。</strong></p>
+</li>
+</ul>
+<p><b style="color:red">换句话说，不管什么，都需要以一个 module 为载体，且需要name</b></p>
+<h4 id="创建模块方法">创建模块方法</h4><p>因此我们的入口就在 <code>PYBIND11_MODULE(name, variable)</code></p>
+<p>全部的宏就是：</p>
+<p><code>#define PYBIND11_MODULE(name, variable)                                        \
+    【1】static void PYBIND11_CONCAT(pybind11_init_, name)(pybind11::module &amp;);     \
+    【2】PYBIND11_PLUGIN_IMPL(name) {                                               \
+    【3】PYBIND11_CHECK_PYTHON_VERSION                                          \
+        auto m = pybind11::module(PYBIND11_TOSTRING(name));                    \
+        try {                                                                  \
+            PYBIND11_CONCAT(pybind11_init_, name)(m);                          \
+            return m.ptr();                                                    \
+        } PYBIND11_CATCH_INIT_EXCEPTIONS                                       \
+    }                                                                          \
+    void PYBIND11_CONCAT(pybind11_init_, name)(pybind11::module &amp;variable)</code></p>
+<p>比较晦涩，我们以 <code>mnn</code> 来举例，帮宏全部展开来探索下。</p>
+<ul>
+<li><p>首先声明一个函数 <code>static void pybind11_init_mnn(pybind11::module &amp;);</code>，在宏的最后会有实现。</p>
+</li>
+<li><p><code>PYBIND11_PLUGIN_IMPL(mnn)</code>这一步是<b style="color:red">必要的一步</b>，所有 Python 的扩展模块都需要声明对应的初始化方法，用于注册被调用。</p>
+<p>   <code>import mnn</code> 就会调用 <code>init_mnn</code> 这样的方法。</p>
+<p>   <img src="https://i.loli.net/2020/08/29/6UwCRG35BAa1FJg.png" alt="截屏2020-07-27 下午5.33.02.png"></p>
+</li>
+<li><p><code>initmnn</code> 里面定义了 <code>pybind11_init_wrapper</code> 这是真正的初始化实现。(注意 static 声明)</p>
+</li>
+<li><p><code>pybind11_init_wrapper</code> 里面真正的实现分为几步：</p>
+<ul>
+<li><p>构造一个 <code>module</code> 对象（class module），<code>auto m = pybind11::module(PYBIND11_TOSTRING(name));</code></p>
+</li>
+<li><p>调用之前声明的 <code>pybind11_init_mnn</code> 函数，传入module对象，仿造 Python C Extension 的方式来添加方法、定义、变量等。 <code>pybind11_init_mnn(m)</code></p>
+</li>
+<li><p>实现 <code>pybind11_init_mnn {xxx}</code></p>
+</li>
+</ul>
+</li>
+</ul>
+<ul>
+<li><p>所以一切核心的关键就是在 <code>class module</code>，抛开繁杂的东西：</p>
+<ul>
+<li><p>第一步，创建一个 CPython 中的 module object，见：</p>
+<p>  <img src="https://i.loli.net/2020/08/29/LAt85S1sGN2lbwa.png" alt="截屏2020-07-27 下午6.14.57.png"></p>
+<blockquote>
+<p>所以，本质上无论 Pybind11 在干什么，都是利用 CPython 底层的技术在那里操作。</p>
+</blockquote>
+</li>
+<li><p>把对应的方法加入到这个 CPython Module 中，如下：</p>
+<p> <img src="https://i.loli.net/2020/08/29/Ra9f4AQZFyUBGLK.png" alt="截屏2020-07-27 下午6.17.23.png"></p>
+<p><img src="https://i.loli.net/2020/08/29/esALNBJvlYZTrI9.png" alt="截屏2020-07-27 下午6.17.30.png"></p>
+</li>
+</ul>
+</li>
+</ul>
+<h4 id="创建类">创建类</h4><p>创建类的方法相对难一点，但是也不难理解，我们还是找到根源 <code>class class_</code>（其实一切只要理解 Pybind11 是用 C++ 去模拟 CPython 的流程就行了）</p>
+<p>找到对应的构造函数，首先从函数签名上我们就能窥探一些东西：</p>
+<p><img src="https://i.loli.net/2020/08/29/7aI8ueLdsU4TSQF.png" alt="截屏2020-07-27 下午6.38.07.png"></p>
+<ul>
+<li><code>scope</code> 对应类所属的模块。</li>
+<li><code>name</code> 就是类名。</li>
+<li><code>Extra</code> 就是 C++ 模版机制对应的真正类。</li>
+</ul>
+<p>看起来上面和对应的 Python 类型初始化没关系，来看看是不是 <code>generic_type::initialize</code> 造成的。</p>
+<p><img src="https://i.loli.net/2020/08/29/EUHGocJPgsIrtK3.png" alt="截屏2020-07-27 下午6.44.13.png"></p>
+<ul>
+<li><code>make_new_python_type</code> 这名字一看就很符合，哈哈，点进去一看，果然是类型初始化流程。</li>
+</ul>
+<p><img src="https://i.loli.net/2020/08/29/boCLRWI8y4QTlxE.png" alt="截屏2020-07-27 下午6.46.15.png"></p>
+<h3 id="结论：">结论：</h3><p>简要概括下添加方法的实现。</p>
+<ul>
+<li><p>生成模版化的初始化模块方法，即 Wrapper 方法。</p>
+</li>
+<li><p>提供一个仿造 <code>Python Module</code> 对象（便于 <code>C++</code> 编写 / 使用智能指针管理引用计数），在对应的自定义函数里面添加对应 <code>Module</code> 的实现。</p>
+</li>
+</ul>
 
-    </header>
-  </div>
-</article>
-  
-    
-    
-    <article class="archive-article archive-type-post">
-  <div class="archive-article-inner">
-    <header class="archive-article-header">
-      <a href="/2016/07/10/immutable-thread/" class="archive-article-date">
-  <time datetime="2016-07-10T09:03:47.000Z" itemprop="datePublished">Jul 10</time>
-</a>
       
-  
-    <h1 itemprop="name">
-      <a class="archive-article-title" href="/2016/07/10/immutable-thread/">从Immutable来谈谈对于线程安全的理解误区</a>
-    </h1>
-  
-
-    </header>
-  </div>
-</article>
-  
-    
-    
-    <article class="archive-article archive-type-post">
-  <div class="archive-article-inner">
-    <header class="archive-article-header">
-      <a href="/2016/05/02/Spotify/" class="archive-article-date">
-  <time datetime="2016-05-02T08:34:03.000Z" itemprop="datePublished">May 2</time>
-</a>
+    </div>
+    <footer class="article-footer">
+      <a data-url="http://satanwoo.github.io/2020/08/29/Pybind11/" data-id="ckefenv3g002p86i1o2hehtht" class="article-share-link">Share</a>
       
-  
-    <h1 itemprop="name">
-      <a class="archive-article-title" href="/2016/05/02/Spotify/">为什么Spotify的付费用户转化率惊人的高？</a>
-    </h1>
-  
-
-    </header>
-  </div>
-</article>
-  
-    
-    
-    <article class="archive-article archive-type-post">
-  <div class="archive-article-inner">
-    <header class="archive-article-header">
-      <a href="/2016/04/26/blank-space-in-html/" class="archive-article-date">
-  <time datetime="2016-04-26T15:21:22.000Z" itemprop="datePublished">Apr 26</time>
-</a>
+        <a href="http://satanwoo.github.io/2020/08/29/Pybind11/#disqus_thread" class="article-comment-link">Comments</a>
       
-  
-    <h1 itemprop="name">
-      <a class="archive-article-title" href="/2016/04/26/blank-space-in-html/">HTML中的“空白符”，你真的懂了吗？</a>
-    </h1>
-  
-
-    </header>
-  </div>
-</article>
-  
-    
-    
-    <article class="archive-article archive-type-post">
-  <div class="archive-article-inner">
-    <header class="archive-article-header">
-      <a href="/2016/04/11/dispatch-once/" class="archive-article-date">
-  <time datetime="2016-04-10T16:41:09.000Z" itemprop="datePublished">Apr 11</time>
-</a>
       
-  
-    <h1 itemprop="name">
-      <a class="archive-article-title" href="/2016/04/11/dispatch-once/">滥用单例之dispatch_once死锁</a>
-    </h1>
-  
+  <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Python/">Python</a></li></ul>
 
-    </header>
+    </footer>
   </div>
-</article>
   
     
-    
-    <article class="archive-article archive-type-post">
-  <div class="archive-article-inner">
-    <header class="archive-article-header">
-      <a href="/2016/03/22/dispatch-in-swift/" class="archive-article-date">
-  <time datetime="2016-03-22T09:14:34.000Z" itemprop="datePublished">Mar 22</time>
-</a>
-      
+<nav id="article-nav">
   
-    <h1 itemprop="name">
-      <a class="archive-article-title" href="/2016/03/22/dispatch-in-swift/">Swift 中的静态Dispatch VS 动态Dispatch</a>
-    </h1>
   
+    <a href="/2020/05/18/TrampolineHookStack/" id="article-nav-older" class="article-nav-link-wrap">
+      <strong class="article-nav-caption">Older</strong>
+      <div class="article-nav-title">TrampolineHook - 解决栈污染问题支持变参 Hook</div>
+    </a>
+  
+</nav>
 
-    </header>
-  </div>
+  
 </article>
-  
-    
-    
-    <article class="archive-article archive-type-post">
-  <div class="archive-article-inner">
-    <header class="archive-article-header">
-      <a href="/2016/03/14/RxSwift/" class="archive-article-date">
-  <time datetime="2016-03-13T16:21:50.000Z" itemprop="datePublished">Mar 14</time>
-</a>
-      
-  
-    <h1 itemprop="name">
-      <a class="archive-article-title" href="/2016/03/14/RxSwift/">RxSwift的第一印象</a>
-    </h1>
-  
 
-    </header>
-  </div>
-</article>
-  
-    
-    
-    <article class="archive-article archive-type-post">
-  <div class="archive-article-inner">
-    <header class="archive-article-header">
-      <a href="/2016/03/14/SizeUp/" class="archive-article-date">
-  <time datetime="2016-03-13T16:20:57.000Z" itemprop="datePublished">Mar 14</time>
-</a>
-      
-  
-    <h1 itemprop="name">
-      <a class="archive-article-title" href="/2016/03/14/SizeUp/">逆向工程SizeUp</a>
-    </h1>
-  
+<div id="disqus_thread"></div>
+<script>
 
-    </header>
-  </div>
-</article>
-  
-    
-    
-    <article class="archive-article archive-type-post">
-  <div class="archive-article-inner">
-    <header class="archive-article-header">
-      <a href="/2016/03/14/DXXcodeConsoleUnicodePlugin/" class="archive-article-date">
-  <time datetime="2016-03-13T16:18:52.000Z" itemprop="datePublished">Mar 14</time>
-</a>
-      
-  
-    <h1 itemprop="name">
-      <a class="archive-article-title" href="/2016/03/14/DXXcodeConsoleUnicodePlugin/">DXXcodeConsoleUnicodePlugin源码解析</a>
-    </h1>
-  
-
-    </header>
-  </div>
-</article>
-  
-    
-    
-    <article class="archive-article archive-type-post">
-  <div class="archive-article-inner">
-    <header class="archive-article-header">
-      <a href="/2016/02/27/check-manifest/" class="archive-article-date">
-  <time datetime="2016-02-27T10:23:21.000Z" itemprop="datePublished">Feb 27</time>
-</a>
-      
-  
-    <h1 itemprop="name">
-      <a class="archive-article-title" href="/2016/02/27/check-manifest/">Check Pods Manifest.lock</a>
-    </h1>
-  
-
-    </header>
-  </div>
-</article>
-  
-    
-    
-    <article class="archive-article archive-type-post">
-  <div class="archive-article-inner">
-    <header class="archive-article-header">
-      <a href="/2016/02/27/pod-install-plugin/" class="archive-article-date">
-  <time datetime="2016-02-27T10:23:09.000Z" itemprop="datePublished">Feb 27</time>
-</a>
-      
-  
-    <h1 itemprop="name">
-      <a class="archive-article-title" href="/2016/02/27/pod-install-plugin/">开发一个简单的Pod Install 插件</a>
-    </h1>
-  
-
-    </header>
-  </div>
-</article>
-  
-    
-    
-    <article class="archive-article archive-type-post">
-  <div class="archive-article-inner">
-    <header class="archive-article-header">
-      <a href="/2016/02/27/FBKVOController/" class="archive-article-date">
-  <time datetime="2016-02-27T10:21:55.000Z" itemprop="datePublished">Feb 27</time>
-</a>
-      
-  
-    <h1 itemprop="name">
-      <a class="archive-article-title" href="/2016/02/27/FBKVOController/">FBKVOController 源码解析</a>
-    </h1>
-  
-
-    </header>
-  </div>
-</article>
-  
-    
-    
-    <article class="archive-article archive-type-post">
-  <div class="archive-article-inner">
-    <header class="archive-article-header">
-      <a href="/2016/02/05/DGRunKeeperSwitch/" class="archive-article-date">
-  <time datetime="2016-02-05T14:35:57.000Z" itemprop="datePublished">Feb 5</time>
-</a>
-      
-  
-    <h1 itemprop="name">
-      <a class="archive-article-title" href="/2016/02/05/DGRunKeeperSwitch/">DGRunKeeperSwitch 源码解析</a>
-    </h1>
-  
-
-    </header>
-  </div>
-</article>
-  
-    
-    
-    <article class="archive-article archive-type-post">
-  <div class="archive-article-inner">
-    <header class="archive-article-header">
-      <a href="/2016/02/05/PureLayout/" class="archive-article-date">
-  <time datetime="2016-02-05T14:33:20.000Z" itemprop="datePublished">Feb 5</time>
-</a>
-      
-  
-    <h1 itemprop="name">
-      <a class="archive-article-title" href="/2016/02/05/PureLayout/">PureLayout 源码解析</a>
-    </h1>
-  
-
-    </header>
-  </div>
-</article>
-  
-  
-    </div></section>
-  
+/**
+*  RECOMMENDED CONFIGURATION VARIABLES: EDIT AND UNCOMMENT THE SECTION BELOW TO INSERT DYNAMIC VALUES FROM YOUR PLATFORM OR CMS.
+*  LEARN WHY DEFINING THESE VARIABLES IS IMPORTANT: https://disqus.com/admin/universalcode/#configuration-variables*/
+/*
+var disqus_config = function () {
+this.page.url = PAGE_URL;  // Replace PAGE_URL with your page's canonical URL variable
+this.page.identifier = PAGE_IDENTIFIER; // Replace PAGE_IDENTIFIER with your page's unique identifier variable
+};
+*/
+(function() { // DON'T EDIT BELOW THIS LINE
+var d = document, s = d.createElement('script');
+s.src = 'https://satanwoo-2.disqus.com/embed.js';
+s.setAttribute('data-timestamp', +new Date());
+(d.head || d.body).appendChild(s);
+})();
+</script>
+<noscript>Please enable JavaScript to view the <a href="https://disqus.com/?ref_noscript">comments powered by Disqus.</a></noscript>
+                                
+  <section id="comments">
+    <div id="disqus_thread">
+      <noscript>Please enable JavaScript to view the <a href="//disqus.com/?ref_noscript">comments powered by Disqus.</a></noscript>
+    </div>
+  </section>
 </section>
         
           <aside id="sidebar">
@@ -449,11 +326,13 @@
 <script>
   var disqus_shortname = 'satanwoo-2';
   
+  var disqus_url = 'http://satanwoo.github.io/2020/08/29/Pybind11/';
+  
   (function(){
     var dsq = document.createElement('script');
     dsq.type = 'text/javascript';
     dsq.async = true;
-    dsq.src = '//' + disqus_shortname + '.disqus.com/count.js';
+    dsq.src = '//' + disqus_shortname + '.disqus.com/embed.js';
     (document.getElementsByTagName('head')[0] || document.getElementsByTagName('body')[0]).appendChild(dsq);
   })();
 </script>
